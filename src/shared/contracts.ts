@@ -28,6 +28,9 @@ export const Suggestion = z.object({
   // True when the edit touches numbers, names or negation. Such edits are
   // shown with a warning and are never applied in bulk.
   meaningChange: z.boolean(),
+  // One-line meaning of the suggested wording. Set for "expression"
+  // suggestions, which can become practice; null for everything else.
+  meaning: z.string().nullable(),
 });
 export type Suggestion = z.infer<typeof Suggestion>;
 
@@ -39,10 +42,21 @@ export const ProofreadRequest = z.object({
 });
 export type ProofreadRequest = z.infer<typeof ProofreadRequest>;
 
+export const QuotaKind = z.enum(["proofread", "evaluate", "asrSeconds"]);
+export type QuotaKind = z.infer<typeof QuotaKind>;
+
+export const QuotaState = z.object({
+  used: z.number().nonnegative(),
+  limit: z.number().nonnegative(),
+});
+export type QuotaState = z.infer<typeof QuotaState>;
+
 export const ProofreadResponse = z.object({
   checkRunId: z.string(),
   textHash: z.string(),
   suggestions: z.array(Suggestion),
+  // Proofread quota after this check, so the editor can show checks left.
+  quota: QuotaState,
 });
 export type ProofreadResponse = z.infer<typeof ProofreadResponse>;
 
@@ -57,13 +71,11 @@ export const SuggestionDecisionRequest = z.object({
 });
 export type SuggestionDecisionRequest = z.infer<typeof SuggestionDecisionRequest>;
 
-export const QuotaKind = z.enum(["proofread", "evaluate", "asrSeconds"]);
-export type QuotaKind = z.infer<typeof QuotaKind>;
-
-export const QuotaState = z.object({
-  used: z.number().nonnegative(),
-  limit: z.number().nonnegative(),
+export const SuggestionDecisionResponse = z.object({
+  id: z.string(),
+  status: SuggestionDecision,
 });
+export type SuggestionDecisionResponse = z.infer<typeof SuggestionDecisionResponse>;
 
 export const MeResponse = z.object({
   learner: z.object({ id: z.string(), displayName: z.string() }),
@@ -74,6 +86,136 @@ export const MeResponse = z.object({
 });
 export type MeResponse = z.infer<typeof MeResponse>;
 
+// ---------------------------------------------------------------------------
+// Practice
+//
+// An accepted suggestion is help, not knowledge. Practice asks the learner to
+// produce the expression in a new situation, first with the expression shown,
+// later with it hidden so they have to recall it themselves.
+
+export const Familiarity = z.enum(["new", "known_unused", "used"]);
+export type Familiarity = z.infer<typeof Familiarity>;
+
+export const PracticeKind = z.enum(["written", "voice"]);
+export type PracticeKind = z.infer<typeof PracticeKind>;
+
+// "shown": the expression is part of the task. "hidden": only the situation
+// is given and the learner has to recall the expression.
+export const CueLevel = z.enum(["shown", "hidden"]);
+export type CueLevel = z.infer<typeof CueLevel>;
+
+// "unavailable" means the answer could not be checked (model or network
+// failure). It is never counted against the learner.
+export const Verdict = z.enum(["used_well", "almost", "not_yet", "unavailable"]);
+export type Verdict = z.infer<typeof Verdict>;
+
+export const Expression = z.object({
+  id: z.string(),
+  text: z.string(),
+  meaning: z.string(),
+  familiarity: Familiarity,
+});
+export type Expression = z.infer<typeof Expression>;
+
+// POST /api/expressions — turn an accepted "expression" suggestion into
+// something to practise. Idempotent per suggestion.
+export const CreateExpressionRequest = z.object({
+  suggestionId: z.string(),
+  familiarity: Familiarity,
+});
+export type CreateExpressionRequest = z.infer<typeof CreateExpressionRequest>;
+
+export const CreateExpressionResponse = z.object({ expression: Expression });
+export type CreateExpressionResponse = z.infer<typeof CreateExpressionResponse>;
+
+// POST /api/practice/tasks
+export const CreateTaskRequest = z.object({
+  requestId: z.uuid(),
+  expressionId: z.string(),
+  kind: PracticeKind,
+});
+export type CreateTaskRequest = z.infer<typeof CreateTaskRequest>;
+
+export const PracticeTask = z.object({
+  id: z.string(),
+  expressionId: z.string(),
+  kind: PracticeKind,
+  cue: CueLevel,
+  // Null when the cue is hidden.
+  expression: z.string().nullable(),
+  meaning: z.string(),
+  situation: z.string(),
+  // Shown only on request for hidden tasks; using it is recorded.
+  hint: z.string(),
+  // Server-issued id for the learner's answer to this task.
+  attemptId: z.string(),
+});
+export type PracticeTask = z.infer<typeof PracticeTask>;
+
+// POST /api/speech/transcribe — multipart form with fields `attemptId` and
+// `audio` (RIFF/WAVE, mono, 16-bit PCM, 16 or 24 kHz, at most 60 seconds).
+// Empty text means nothing was heard.
+export const TranscribeResponse = z.object({
+  attemptId: z.string(),
+  text: z.string(),
+  durationSeconds: z.number().nonnegative(),
+});
+export type TranscribeResponse = z.infer<typeof TranscribeResponse>;
+
+// POST /api/practice/attempts/{attemptId}. For voice tasks `answer` is the
+// transcript as confirmed by the learner; the server compares it with the
+// raw transcript it stored and records substantial edits.
+export const SubmitAttemptRequest = z.object({
+  answer: z.string().trim().min(1).max(1000),
+  hintUsed: z.boolean(),
+});
+export type SubmitAttemptRequest = z.infer<typeof SubmitAttemptRequest>;
+
+export const Evaluation = z.object({
+  attemptId: z.string(),
+  verdict: Verdict,
+  // Short feedback for the learner.
+  message: z.string(),
+  // A corrected version of the learner's sentence, when one helps.
+  correction: z.string().nullable(),
+  targetUsed: z.boolean(),
+  transcriptEdited: z.boolean(),
+  // Human label such as "Tomorrow" or "In 3 days"; null if nothing scheduled.
+  nextPracticeLabel: z.string().nullable(),
+  // Id for another try at the same task; null when no retry is offered.
+  retryAttemptId: z.string().nullable(),
+});
+export type Evaluation = z.infer<typeof Evaluation>;
+
+// GET /api/expressions
+export const HistoryEntryKind = z.enum(["assisted_use", "written_attempt", "spoken_attempt"]);
+export type HistoryEntryKind = z.infer<typeof HistoryEntryKind>;
+
+export const HistoryEntry = z.object({
+  kind: HistoryEntryKind,
+  verdict: Verdict.nullable(),
+  cue: CueLevel.nullable(),
+  hintUsed: z.boolean(),
+  transcriptEdited: z.boolean(),
+  // Formatted on the server, e.g. "Today", "Yesterday", "3 Nov".
+  dayLabel: z.string(),
+});
+export type HistoryEntry = z.infer<typeof HistoryEntry>;
+
+export const ExpressionHistory = z.object({
+  expression: Expression,
+  entries: z.array(HistoryEntry),
+  nextPracticeLabel: z.string().nullable(),
+  // True when the next practice is due now.
+  due: z.boolean(),
+});
+export type ExpressionHistory = z.infer<typeof ExpressionHistory>;
+
+export const ExpressionsResponse = z.object({ expressions: z.array(ExpressionHistory) });
+export type ExpressionsResponse = z.infer<typeof ExpressionsResponse>;
+
+// ---------------------------------------------------------------------------
+
 export const ApiErrorCode = z.enum([
   "unauthorized",
   "not_found",
@@ -83,6 +225,7 @@ export const ApiErrorCode = z.enum([
   "budget_exhausted",
   "ai_disabled",
   "model_unavailable",
+  "internal",
 ]);
 export type ApiErrorCode = z.infer<typeof ApiErrorCode>;
 

@@ -49,3 +49,6 @@ next-env.d.ts
 CLAUDE.md
 CLAUDE.local.md
 !.env.example
+
+# local tooling
+/.claude/
