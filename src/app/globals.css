@@ -1,26 +1,225 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+/*
+ * Design tokens. Every colour used in the UI comes from this block, so a text
+ * role is checked for contrast in one place (tests/design-tokens.test.ts).
+ *
+ * Roles
+ *   paper / surface / card   page background, inner panels, main cards
+ *   ink / ink-muted          body text, secondary text (both meet WCAG AA on all surfaces)
+ *   line / line-strong       decorative dividers / field edges (line-strong meets 3:1)
+ *   accent                   action and selection only
+ *   success, caution, error, info, neutral
+ *                            state colours; each has a text colour and a -soft fill
+ *   *-mark                   underline colours for highlights (decorative, 3:1 on card)
+ */
+@theme {
+  --color-*: initial;
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-paper: #f4efe7;
+  --color-paper-deep: #efe7db;
+  --color-glow: rgb(255 255 255 / 0.7);
+  --color-surface: #fffaf3;
+  --color-card: #fffdf9;
+
+  --color-ink: #203139;
+  --color-ink-muted: #51656e;
+  --color-line: #d6cec1;
+  --color-line-strong: #7d8a8f;
+
+  --color-accent: #0d7a72;
+  --color-accent-strong: #0a665f;
+  --color-accent-soft: #d6efe8;
+  --color-on-accent: #ffffff;
+
+  --color-success: #0b5a43;
+  --color-success-soft: #e3f5ec;
+  --color-caution: #7a4708;
+  --color-caution-soft: #fbefd9;
+  --color-caution-mark: #b9690f;
+  --color-error: #a03a26;
+  --color-error-soft: #fbe9e4;
+  --color-error-mark: #b8402a;
+  --color-info: #2b5a8a;
+  --color-info-soft: #e4eef8;
+  --color-info-mark: #3b78b5;
+  --color-neutral: #3f525a;
+  --color-neutral-soft: #e8e6e1;
+
+  --font-sans: "Avenir Next", "Segoe UI", "Helvetica Neue", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* Four radii plus the pill (rounded-full). */
+  --radius-*: initial;
+  --radius-chip: 0.5rem;
+  --radius-field: 1rem;
+  --radius-tile: 1.25rem;
+  --radius-card: 1.75rem;
+
+  /* Two shadows: resting surfaces and raised things (primary button, sheet). */
+  --shadow-*: initial;
+  --shadow-card: 0 18px 40px -22px rgb(32 49 57 / 0.28), inset 0 1px 0 rgb(255 255 255 / 0.8);
+  --shadow-lift: 0 14px 28px -14px rgb(13 122 114 / 0.45);
+
+  --animate-slide: slide 1.4s ease-in-out infinite;
+  --animate-dot: dot 1.4s ease-in-out infinite;
+  --animate-record: record 1.6s ease-in-out infinite;
+
+  @keyframes slide {
+    0% {
+      transform: translateX(-100%);
+    }
+    100% {
+      transform: translateX(350%);
+    }
+  }
+  @keyframes dot {
+    0%,
+    80%,
+    100% {
+      opacity: 0.25;
+    }
+    40% {
+      opacity: 1;
+    }
+  }
+  @keyframes record {
+    0%,
+    100% {
+      box-shadow: 0 0 0 0 rgb(160 58 38 / 0.35);
+    }
+    50% {
+      box-shadow: 0 0 0 10px rgb(160 58 38 / 0);
+    }
+  }
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --color-paper: #14191b;
+    --color-paper-deep: #101517;
+    --color-glow: rgb(255 255 255 / 0.04);
+    --color-surface: #1a2124;
+    --color-card: #1f282b;
+
+    --color-ink: #e9efef;
+    --color-ink-muted: #9fb1b7;
+    --color-line: #35444a;
+    --color-line-strong: #7f9298;
+
+    --color-accent: #3fb8aa;
+    --color-accent-strong: #5fcdc0;
+    --color-accent-soft: #17413d;
+    --color-on-accent: #04201d;
+
+    --color-success: #7fd9b0;
+    --color-success-soft: #133528;
+    --color-caution: #f0b862;
+    --color-caution-soft: #3b2a10;
+    --color-caution-mark: #d9962e;
+    --color-error: #f2907c;
+    --color-error-soft: #412019;
+    --color-error-mark: #e2705a;
+    --color-info: #8fbcf0;
+    --color-info-soft: #182c42;
+    --color-info-mark: #6aa5e6;
+    --color-neutral: #bccacf;
+    --color-neutral-soft: #2a3438;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@layer base {
+  html {
+    color-scheme: light dark;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background:
+      radial-gradient(circle at 0% 0%, var(--color-glow), transparent 45%),
+      linear-gradient(180deg, var(--color-paper), var(--color-paper-deep));
+    background-attachment: fixed;
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  button,
+  [role="tab"],
+  summary {
+    cursor: pointer;
+  }
+
+  button:disabled {
+    cursor: not-allowed;
+  }
+
+  ::selection {
+    background: var(--color-accent-soft);
+    color: var(--color-ink);
+  }
+}
+
+@layer components {
+  /*
+   * Highlights drawn on the backdrop behind the editor textarea. The backdrop
+   * text is transparent; only these decorations show. Each category differs by
+   * line style as well as colour, so the three are distinguishable without hue.
+   */
+  .hl {
+    color: inherit;
+    border-radius: 2px;
+    text-decoration-line: underline;
+    text-decoration-thickness: 2px;
+    text-underline-offset: 3px;
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
+  }
+  .hl-error {
+    --hl: var(--color-error-mark);
+    text-decoration-style: wavy;
+  }
+  .hl-style {
+    --hl: var(--color-caution-mark);
+    text-decoration-style: dotted;
+  }
+  .hl-expression {
+    --hl: var(--color-info-mark);
+    text-decoration-style: solid;
+  }
+  .hl-error,
+  .hl-style,
+  .hl-expression {
+    text-decoration-color: var(--hl);
+    background-color: color-mix(in srgb, var(--hl) 10%, transparent);
+  }
+  .hl[data-active="true"] {
+    background-color: color-mix(in srgb, var(--hl) 32%, transparent);
+    outline: 2px solid var(--hl);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@utility eyebrow {
+  font-size: 0.75rem;
+  line-height: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-ink-muted);
 }
