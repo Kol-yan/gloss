@@ -86,6 +86,7 @@ describe("errorResponse", () => {
     expect(body.error.code).toBe("internal");
     expect(JSON.stringify(body)).not.toContain("sk-123");
     expect(log).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(log.mock.calls)).not.toContain("sk-123");
 
     expect(errorResponse("boom").status).toBe(500);
     expect(log).toHaveBeenCalledTimes(2);

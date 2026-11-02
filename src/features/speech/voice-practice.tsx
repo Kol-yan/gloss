@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { Evaluation, PracticeTask, SubmitAnswer } from "@/features/practice/types";
+import { retryAttemptFor, type Evaluation, type PracticeTask, type SubmitAnswer } from "@/features/practice/types";
 import { startRecording, type RecordingSession } from "./recorder";
 import { MAX_RECORDING_MS, MIN_RECORDING_MS, type Transcribe, type VoiceView } from "./types";
 import { recordingToWav } from "./wav";
@@ -157,12 +157,15 @@ export function VoicePractice({ task, transcribe, submit, onContinue }: VoicePra
       onConfirm={(transcript) => void check(transcript, attemptId)}
       onRecordAgain={() => {
         // After a judged try the server offers a fresh attempt id.
-        if (view.kind === "feedback" && view.evaluation.retryAttemptId) setAttemptId(view.evaluation.retryAttemptId);
+        if (view.kind === "feedback") {
+          const nextId = retryAttemptFor(view.evaluation);
+          if (nextId) setAttemptId(nextId);
+        }
         void start();
       }}
       onTypeInstead={() => setView({ kind: "confirm", transcript: lastTranscriptRef.current })}
       onCheckAgain={() => {
-        if (view.kind === "feedback") void check(view.transcript, view.evaluation.retryAttemptId ?? attemptId);
+        if (view.kind === "feedback") void check(view.transcript, retryAttemptFor(view.evaluation) ?? attemptId);
       }}
       onContinue={() => onContinue(view.kind === "feedback" && view.evaluation.verdict !== "unavailable" ? view.evaluation : null)}
       onSkip={() => {

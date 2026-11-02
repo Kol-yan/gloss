@@ -4,7 +4,7 @@ import { ApiError, PracticeTask } from "@/shared/contracts";
 vi.mock("next/headers", async () => (await import("./helpers/app")).nextHeadersMock);
 
 import { POST as taskRoute } from "@/app/api/practice/tasks/route";
-import { reserve } from "@/server/budget";
+import { reserve, settle } from "@/server/budget";
 import { newId } from "@/server/ids";
 import {
   chatReply,
@@ -261,6 +261,132 @@ describe("POST /api/practice/tasks", () => {
       expect(task.cue).toBe("shown");
       expect(fetchMock).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it("retries a request id whose reservation was abandoned two minutes ago", async () => {
+    const { learner, expressionId } = setup();
+    const id = requestId();
+    const reserveAt = (ms: number) =>
+      db()
+        .prepare(
+          `INSERT INTO usage_reservations
+             (id, learner_id, kind, request_id, units, max_cost_micros, status, created_at)
+           VALUES (?, ?, 'evaluate', ?, 1, 5000, 'reserved', ?)`,
+        )
+        .run(newId(), learner.id, id, new Date(Date.now() - ms).toISOString());
+
+    // A call that started 30 seconds ago may still be running.
+    reserveAt(30_000);
+    expect((await create({ requestId: id, expressionId, kind: "written" })).status).toBe(409);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    // One that started three minutes ago was left by a dead process.
+    db().prepare("DELETE FROM usage_reservations WHERE request_id = ?").run(id);
+    reserveAt(3 * 60_000);
+    fetchMock.mockResolvedValueOnce(situation(CLEAN));
+    const response = await create({ requestId: id, expressionId, kind: "written" });
+    expect(response.status).toBe(200);
+    expect(PracticeTask.parse(await response.json()).situation).toBe(CLEAN);
+    // The dead call's reservation stays counted (unknown); the retry has its own.
+    expect(reservationsFor(id).map((r) => (r as { status: string }).status).sort()).toEqual(["settled", "unknown"]);
+  });
+
+  it("claims only one replacement and fences the abandoned worker", async () => {
+    const { learner, expressionId } = setup();
+    const id = requestId();
+    const body = { requestId: id, expressionId, kind: "written" };
+    let finishOriginal!: (response: Response) => void;
+    let finishReplacement!: (response: Response) => void;
+    fetchMock
+      .mockImplementationOnce(() => new Promise<Response>((resolve) => { finishOriginal = resolve; }))
+      .mockImplementationOnce(() => new Promise<Response>((resolve) => { finishReplacement = resolve; }));
+
+    const original = create(body);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const abandonedAt = new Date(Date.now() - 3 * 60_000).toISOString();
+    db().prepare(
+      "UPDATE practice_task_requests SET started_at = ? WHERE learner_id = ? AND request_id = ?",
+    ).run(abandonedAt, learner.id, id);
+    db().prepare(
+      "UPDATE usage_reservations SET created_at = ? WHERE learner_id = ? AND request_id LIKE ?",
+    ).run(abandonedAt, learner.id, `${id}%`);
+
+    const replacement = create(body);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(reservationsFor(id)).toEqual([
+      expect.objectContaining({ status: "unknown", actual_cost_micros: null }),
+      expect.objectContaining({ status: "reserved" }),
+    ]);
+    expect((await create(body)).status).toBe(409);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    finishReplacement(situation(CLEAN));
+    const accepted = await replacement;
+    expect(accepted.status).toBe(200);
+    const task = PracticeTask.parse(await accepted.json());
+    finishOriginal(situation("An abandoned result must not replace the current task."));
+    expect((await original).status).toBe(409);
+
+    const replay = await create(body);
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toEqual(task);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(db().prepare(
+      "SELECT COUNT(*) AS n FROM practice_tasks WHERE learner_id = ? AND request_id = ?",
+    ).get(learner.id, id)).toEqual({ n: 1 });
+    expect(db().prepare(
+      "SELECT status FROM practice_task_requests WHERE learner_id = ? AND request_id = ?",
+    ).get(learner.id, id)).toEqual({ status: "completed" });
+  });
+
+  it.each([
+    ["unusable output", () => chatReply("not json at all"), 502, 2100],
+    ["provider refusal", () => new Response("down", { status: 500 }), 503, 0],
+  ] as const)("retries the same request after settled %s", async (_name, failed, status, cost) => {
+    const { expressionId } = setup();
+    const id = requestId();
+    const body = { requestId: id, expressionId, kind: "written" };
+    fetchMock.mockResolvedValueOnce(failed()).mockResolvedValueOnce(situation(CLEAN));
+
+    expect((await create(body)).status).toBe(status);
+    expect(reservationsFor(id)).toEqual([
+      expect.objectContaining({ status: "settled", actual_cost_micros: cost }),
+    ]);
+    const retried = await create(body);
+    expect(retried.status).toBe(200);
+    const task = PracticeTask.parse(await retried.json());
+    expect(reservationsFor(id)).toEqual([
+      expect.objectContaining({ status: "settled", actual_cost_micros: cost }),
+      expect.objectContaining({ status: "settled", actual_cost_micros: 2100 }),
+    ]);
+    expect(await (await create(body)).json()).toEqual(task);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a failed request bound to its original expression and kind", async () => {
+    const { learner, expressionId } = setup();
+    const other = seedExpression(learner.id, { text: "a different expression" });
+    const id = requestId();
+    fetchMock.mockResolvedValueOnce(chatReply("not json at all"));
+    expect((await create({ requestId: id, expressionId, kind: "written" })).status).toBe(502);
+
+    expect((await create({ requestId: id, expressionId, kind: "voice" })).status).toBe(409);
+    expect((await create({ requestId: id, expressionId: other.expressionId, kind: "written" })).status).toBe(409);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("recovers a settled request left without a task before durable claims existed", async () => {
+    const { learner, expressionId } = setup();
+    const id = requestId();
+    const prior = reserve({ learnerId: learner.id, kind: "evaluate", requestId: id, units: 1, maxCostMicros: 5000 });
+    settle(prior.id, 2100);
+    fetchMock.mockResolvedValueOnce(situation(CLEAN));
+
+    const response = await create({ requestId: id, expressionId, kind: "written" });
+    expect(response.status).toBe(200);
+    expect(reservationsFor(id)).toHaveLength(2);
+    expect(reservationsFor(id)[0]).toMatchObject({ id: prior.id, status: "settled", actual_cost_micros: 2100 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("answers 502 and settles the reservation when the output is unusable", async () => {

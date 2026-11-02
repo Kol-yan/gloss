@@ -10,13 +10,14 @@ import { getDb, immediate, learnerScope, type Row } from "../db";
 import type { ServerDeps } from "../deps";
 import { ConflictError, NotFoundError } from "../errors";
 import { newId } from "../ids";
+import { staleBefore } from "../stale";
 import {
   ModelHttpError,
-  ModelNotConfiguredError,
   ModelOutputError,
   ModelTimeoutError,
 } from "../models/errors";
 import { estimateMaxCostMicros } from "../models/meta";
+import { resolveProviderAccess, textModel } from "../models/access";
 import { runReservedChat } from "../models/reserved-chat";
 import { EVALUATE_ATTEMPT_ROLE } from "../models/roles";
 import {
@@ -53,7 +54,16 @@ export async function submitAttempt(
   const config = deps.config ?? getConfig();
   const db = deps.db ?? getDb();
   const now = deps.now ?? new Date();
+  const access = resolveProviderAccess(learner.id, deps.providerAccess, db);
   const scope = learnerScope(learner.id, db);
+
+  // An evaluation that never finished (the process died) must not lock the
+  // attempt for ever: after two minutes it counts as failed and can be re-run.
+  db.prepare(
+    `UPDATE attempts SET status = 'failed'
+     WHERE id = ? AND learner_id = ? AND status = 'evaluating'
+       AND (evaluating_since IS NULL OR evaluating_since < ?)`,
+  ).run(attemptId, learner.id, staleBefore(now));
 
   const attempt = scope.selectOne("attempts", { where: "id = :id", params: { id: attemptId } });
   if (!attempt) throw new NotFoundError();
@@ -80,8 +90,7 @@ export async function submitAttempt(
   }
   assertSubmittable(attempt, task);
 
-  if (!config.meta.apiKey) throw new ModelNotConfiguredError();
-  const model = config.meta.textModel;
+  const model = textModel(access, config);
   const targetText = String(expression.text);
   const transcriptEdited =
     task.kind === "voice" &&
@@ -120,9 +129,18 @@ export async function submitAttempt(
     );
     tx.prepare(
       `UPDATE attempts
-       SET status = 'evaluating', answer = ?, answer_hash = ?, hint_used = ?, transcript_edited = ?
+       SET status = 'evaluating', evaluating_since = ?, answer = ?, answer_hash = ?,
+           hint_used = ?, transcript_edited = ?
        WHERE id = ? AND learner_id = ?`,
-    ).run(answer, answerHash, input.hintUsed ? 1 : 0, transcriptEdited ? 1 : 0, attemptId, learner.id);
+    ).run(
+      now.toISOString(),
+      answer,
+      answerHash,
+      input.hintUsed ? 1 : 0,
+      transcriptEdited ? 1 : 0,
+      attemptId,
+      learner.id,
+    );
     return reserved;
   }, db);
 
@@ -133,11 +151,13 @@ export async function submitAttempt(
       now,
       config,
       reservation,
+      providerAccess: access,
       chat: {
         model,
         messages,
         jsonSchema: EVALUATION_JSON_SCHEMA,
         maxTokens: EVALUATE_ATTEMPT_ROLE.maxTokens,
+        reasoningEffort: EVALUATE_ATTEMPT_ROLE.reasoningEffort,
         temperature: EVALUATE_ATTEMPT_ROLE.temperature,
       },
       parse: parseEvaluation,
@@ -155,13 +175,14 @@ export async function submitAttempt(
       // The learner's answer is kept; nothing is counted for or against them.
       return {
         attemptId,
+        target: targetText,
         verdict: "unavailable",
         message: UNAVAILABLE_MESSAGE,
         correction: null,
         targetUsed: false,
         transcriptEdited,
         nextPracticeLabel: null,
-        retryAttemptId: null,
+        retryAttemptId: attemptId,
       };
     }
     throw error;
@@ -240,6 +261,7 @@ export async function submitAttempt(
 
     return {
       attemptId,
+      target: targetText,
       verdict,
       message,
       correction,
@@ -283,6 +305,7 @@ function storedEvaluation(
   const next = expression.next_practice_at === null ? null : new Date(String(expression.next_practice_at));
   return {
     attemptId: String(attempt.id),
+    target: String(expression.text),
     verdict: stored.verdict as Verdict,
     message: String(stored.message),
     correction: stored.correction === null ? null : String(stored.correction),

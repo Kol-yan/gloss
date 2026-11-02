@@ -15,9 +15,10 @@ import { textCostMicros, textPrice } from "./prices";
 export const MIN_MAX_TOKENS = 2048;
 export const DEFAULT_TIMEOUT_MS = 20_000;
 
-// Estimated input tokens per character is deliberately pessimistic (3 chars
-// per token), plus a fixed allowance for message framing and the schema.
-const CHARS_PER_TOKEN = 3;
+// A UTF-16 code unit needs at most three UTF-8 bytes. Reserving one token per
+// byte is conservative even for dense Unicode text; English averages are not
+// a cost bound. Callers include their schema in inputChars.
+const MAX_BYTES_PER_CODE_UNIT = 3;
 const INPUT_OVERHEAD_TOKENS = 600;
 
 export interface ChatMessage {
@@ -31,6 +32,7 @@ export interface MetaChatInput {
   // Keep the schema flat: the provider rejects recursive schemas.
   jsonSchema: { name: string; schema: Record<string, unknown> };
   maxTokens: number;
+  reasoningEffort?: "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
   temperature?: number;
   signal?: AbortSignal;
 }
@@ -54,7 +56,7 @@ export function estimateMaxCostMicros(
   inputChars: number,
   maxTokens: number,
 ): number {
-  const inputTokens = Math.ceil(inputChars / CHARS_PER_TOKEN + INPUT_OVERHEAD_TOKENS);
+  const inputTokens = Math.ceil(inputChars * MAX_BYTES_PER_CODE_UNIT + INPUT_OVERHEAD_TOKENS);
   return textCostMicros(model, inputTokens, maxTokens);
 }
 
@@ -74,6 +76,7 @@ export async function metaChat(
     model: input.model,
     messages: input.messages,
     max_tokens: input.maxTokens,
+    ...(input.reasoningEffort === undefined ? {} : { reasoning_effort: input.reasoningEffort }),
     ...(input.temperature === undefined ? {} : { temperature: input.temperature }),
     response_format: {
       type: "json_schema",

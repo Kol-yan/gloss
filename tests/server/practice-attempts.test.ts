@@ -190,9 +190,45 @@ describe("POST /api/practice/attempts/[attemptId]", () => {
 
     it("answers 409 while an evaluation is already running", async () => {
       const { attemptId } = setup();
-      db().prepare("UPDATE attempts SET status = 'evaluating' WHERE id = ?").run(attemptId);
+      db()
+        .prepare("UPDATE attempts SET status = 'evaluating', evaluating_since = ? WHERE id = ?")
+        .run(new Date().toISOString(), attemptId);
       expect((await submit(attemptId, answer())).status).toBe(409);
       expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("treats an evaluation older than two minutes as failed and lets it be re-run", async () => {
+      const { learner, attemptId, expressionId } = setup();
+      const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
+      db()
+        .prepare("UPDATE attempts SET status = 'evaluating', evaluating_since = ?, answer = 'old' WHERE id = ?")
+        .run(ago(3 * 60_000), attemptId);
+      db()
+        .prepare(
+          `INSERT INTO usage_reservations
+             (id, learner_id, kind, request_id, units, max_cost_micros, status, created_at)
+           VALUES ('old-res', ?, 'evaluate', ?, 1, 5000, 'reserved', ?)`,
+        )
+        .run(learner.id, `${attemptId}:dead`, ago(3 * 60_000));
+
+      fetchMock.mockResolvedValueOnce(chatReply(facts()));
+      const response = await submit(attemptId, answer());
+      expect(response.status).toBe(200);
+      expect(Evaluation.parse(await response.json()).verdict).toBe("used_well");
+      expect(attemptRow(attemptId).status).toBe("evaluated");
+      expect(practiceEvents(expressionId)).toHaveLength(1);
+      // The dead call's reservation is kept, as unknown.
+      expect(db().prepare("SELECT status FROM usage_reservations WHERE id = 'old-res'").get()).toEqual({ status: "unknown" });
+    });
+
+    it("still answers 409 for an evaluation that started within two minutes", async () => {
+      const { attemptId } = setup();
+      db()
+        .prepare("UPDATE attempts SET status = 'evaluating', evaluating_since = ? WHERE id = ?")
+        .run(new Date(Date.now() - 60_000).toISOString(), attemptId);
+      expect((await submit(attemptId, answer())).status).toBe(409);
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(attemptRow(attemptId).status).toBe("evaluating");
     });
 
     it("locks the attempt while the model call is in flight", async () => {
@@ -201,6 +237,7 @@ describe("POST /api/practice/attempts/[attemptId]", () => {
       let secondStatus = 0;
       fetchMock.mockImplementationOnce(async () => {
         statusDuringCall = attemptRow(attemptId).status;
+        expect(attemptRow(attemptId).evaluating_since).toEqual(expect.any(String));
         secondStatus = (await submit(attemptId, answer())).status;
         return chatReply(facts());
       });
@@ -238,7 +275,8 @@ describe("POST /api/practice/attempts/[attemptId]", () => {
           correction: null,
           targetUsed: false,
           nextPracticeLabel: null,
-          retryAttemptId: null,
+          retryAttemptId: attemptId,
+          target: EXPRESSION,
         });
         expect(evaluation.message.length).toBeGreaterThan(10);
         expect(attemptRow(attemptId)).toMatchObject({ status: "failed", answer: "My own words, unlikely to happen." });

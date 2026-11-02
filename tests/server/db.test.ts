@@ -37,6 +37,7 @@ describe("openDatabase", () => {
         "expressions",
         "invites",
         "learners",
+        "practice_task_requests",
         "practice_tasks",
         "schema_migrations",
         "sessions",
@@ -51,7 +52,10 @@ describe("openDatabase", () => {
   it("applies migrations once and is idempotent on reopen", () => {
     temp = createTempDb();
     const applied = temp.db.prepare("SELECT name FROM schema_migrations").all();
-    expect(applied.map((row) => row.name)).toEqual(["0001_init.sql", "0002_practice.sql"]);
+    expect(applied.map((row) => row.name)).toEqual([
+      "0001_init.sql", "0002_practice.sql", "0003_stale_work.sql",
+      "0004_task_generation_claims.sql", "0005_byok_funding.sql",
+    ]);
     const again = openDatabase(temp.path);
     expect(migrate(again)).toEqual([]);
     again.close();

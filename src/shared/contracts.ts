@@ -79,6 +79,7 @@ export type SuggestionDecisionResponse = z.infer<typeof SuggestionDecisionRespon
 
 export const MeResponse = z.object({
   learner: z.object({ id: z.string(), displayName: z.string() }),
+  accessMode: z.enum(["hosted", "byok"]),
   // False when the kill switch is off or today's budget is spent. Local
   // checking keeps working either way.
   aiEnabled: z.boolean(),
@@ -173,6 +174,8 @@ export type SubmitAttemptRequest = z.infer<typeof SubmitAttemptRequest>;
 
 export const Evaluation = z.object({
   attemptId: z.string(),
+  // Revealed after evaluation, including when the task hid its cue.
+  target: z.string(),
   verdict: Verdict,
   // Short feedback for the learner.
   message: z.string(),
@@ -222,6 +225,7 @@ export const ApiErrorCode = z.enum([
   "invalid_request",
   "conflict",
   "quota_exceeded",
+  "rate_limited",
   "budget_exhausted",
   "ai_disabled",
   "model_unavailable",

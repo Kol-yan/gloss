@@ -2,6 +2,7 @@ import { ProofreadRequest, ProofreadResponse } from "@/shared/contracts";
 import { requireLearner } from "@/server/auth/request";
 import { errorResponse, jsonError, jsonOk } from "@/server/http";
 import { proofread } from "@/server/proofread/service";
+import { providerAccessFromRequest } from "@/server/models/access";
 
 // 6000 characters is at most ~24 KB as UTF-8; anything far beyond that is not
 // a real request.
@@ -20,7 +21,9 @@ export async function POST(request: Request) {
       return jsonError("invalid_request");
     }
 
-    return jsonOk(ProofreadResponse.parse(await proofread(learner, input)));
+    return jsonOk(ProofreadResponse.parse(await proofread(learner, input, {
+      providerAccess: providerAccessFromRequest(request, learner),
+    })));
   } catch (error) {
     return errorResponse(error);
   }

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError, CreateExpressionResponse, ExpressionsResponse } from "@/shared/contracts";
 
 vi.mock("next/headers", async () => (await import("./helpers/app")).nextHeadersMock);
@@ -8,6 +8,7 @@ import { newId } from "@/server/ids";
 import { db, installApp, login, postJson, seedExpression, session } from "./helpers/app";
 
 installApp();
+afterEach(() => vi.useRealTimers());
 
 const create = (body: unknown) => postJson(createRoute, body);
 const get = () => listRoute();
@@ -133,6 +134,9 @@ describe("GET /api/expressions", () => {
   });
 
   it("lists the learner's expressions newest first with history and labels", async () => {
+    // Calendar labels must not depend on how close the runner is to midnight.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-02T12:00:00.000Z"));
     const { learner } = login();
     const older = seedExpression(learner.id, {
       text: "older phrase",

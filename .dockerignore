@@ -1,0 +1,21 @@
+# Keep the build context small and free of secrets and local state.
+node_modules
+.next
+.git
+.claude
+.codex
+AGENTS.override.md
+CLAUDE.md
+CLAUDE.local.md
+.env*
+data
+*.db
+*.db-*
+tests
+coverage
+*.tsbuildinfo
+npm-debug.log*
+.DS_Store
+Dockerfile
+.dockerignore
+compose.yaml

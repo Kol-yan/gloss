@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useRef, useState } from "react";
+import { Suspense, useCallback, useRef, useState, useSyncExternalStore } from "react";
 import { InviteRequired } from "@/components/invite-required";
 import {
   createExpression,
@@ -13,11 +13,12 @@ import {
   recordDecision,
 } from "@/features/api/client";
 import { useLoad } from "@/features/api/use-load";
+import { useAccess } from "@/features/api/use-access";
 import type { Familiarity, PracticeOffer } from "@/features/practice/types";
 import { hashText } from "@/lib/text";
 import type { Suggestion } from "@/shared/contracts";
 import { EditorScreen } from "./editor-screen";
-import { checkLocal } from "./local-checker";
+import { checkLocal, getLocalCheckerStatus, getServerLocalCheckerStatus, subscribeLocalChecker } from "./local-checker";
 import type { CheckWithAi, ProofreadOutcome } from "./types";
 
 // `/join/{token}` sends people here with ?invite=invalid when the link did not work.
@@ -53,6 +54,8 @@ async function safeHash(text: string): Promise<string> {
 // Connects the editor to the account: quota, cloud checks, decisions and practice.
 export function EditorSession() {
   const router = useRouter();
+  const access = useAccess();
+  const localCheckStatus = useSyncExternalStore(subscribeLocalChecker, getLocalCheckerStatus, getServerLocalCheckerStatus);
   const { result: me, reload } = useLoad(getMe);
   const [sessionLost, setSessionLost] = useState(false);
   // Decisions are fire-and-forget, but "start practice" must wait for the matching "accepted".
@@ -93,7 +96,7 @@ export function EditorSession() {
     [router],
   );
 
-  const unauthorized = sessionLost || (me?.ok === false && isUnauthorized(me));
+  const unauthorized = sessionLost || (access.checked && !access.session) || (me?.ok === false && isUnauthorized(me));
   const quota = me?.ok ? me.data.quotas.proofread : undefined;
 
   return (
@@ -114,9 +117,10 @@ export function EditorSession() {
         <div className="min-h-0 flex-1">
           <EditorScreen
             checksLeft={quota ? Math.max(0, quota.limit - quota.used) : null}
-            aiAvailable={me?.ok ? me.data.aiEnabled : true}
+            aiAvailable={me?.ok ? me.data.aiEnabled && (me.data.accessMode !== "byok" || access.hasKey) : false}
             checkWithAi={checkWithAi}
             checkLocal={checkLocal}
+            localCheckStatus={localCheckStatus}
             onDecision={onDecision}
             onStartPractice={onStartPractice}
           />

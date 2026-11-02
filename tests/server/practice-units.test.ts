@@ -72,6 +72,64 @@ describe("parseWav", () => {
     expect(reasons(noData)).toBe("too_short");
   });
 
+  it("rejects trailing bytes, a second data chunk and a second fmt chunk", () => {
+    const reason = (bytes: Uint8Array) => {
+      try {
+        parseWav(bytes);
+        return "accepted";
+      } catch (error) {
+        return (error as InvalidWavError).reason;
+      }
+    };
+    const base = makeWav({ seconds: 1 });
+    const extend = (extra: Uint8Array) => {
+      const out = new Uint8Array(base.length + extra.length);
+      out.set(base);
+      out.set(extra, base.length);
+      return out;
+    };
+    // One padding byte is tolerated; two are not.
+    expect(reason(extend(new Uint8Array(1)))).toBe("accepted");
+    expect(reason(extend(new Uint8Array(2)))).toBe("trailing_bytes");
+    expect(reason(extend(new Uint8Array(16_000)))).toBe("trailing_bytes");
+    const second = new Uint8Array(8 + 2000);
+    second.set([0x64, 0x61, 0x74, 0x61]);
+    new DataView(second.buffer).setUint32(4, 2000, true);
+    expect(reason(extend(second))).toBe("multiple_data");
+    // A LIST chunk after the data is trailing metadata, also refused.
+    expect(reason(extend(new Uint8Array([0x4c, 0x49, 0x53, 0x54, 4, 0, 0, 0, 1, 2, 3, 4])))).toBe("trailing_bytes");
+
+    // fmt twice before the data chunk.
+    const fmt = base.slice(12, 36);
+    const doubled = new Uint8Array(base.length + fmt.length);
+    doubled.set(base.slice(0, 36));
+    doubled.set(fmt, 36);
+    doubled.set(base.slice(36), 36 + fmt.length);
+    expect(reason(doubled)).toBe("multiple_fmt");
+  });
+
+  it("builds a canonical file from the validated samples only", () => {
+    const upload = makeWav({ seconds: 1.5, sampleRate: 24_000 });
+    // Distinct sample bytes, a placeholder size and one padding byte.
+    for (let i = 44; i < upload.length; i++) upload[i] = i % 251;
+    new DataView(upload.buffer).setUint32(40, 0xffffffff, true);
+    const padded = new Uint8Array(upload.length + 1);
+    padded.set(upload);
+
+    const info = parseWav(padded);
+    expect(info.seconds).toBe(1.5);
+    expect(info.canonical.length).toBe(44 + 36_000 * 2);
+    expect(Array.from(info.canonical.subarray(44, 60))).toEqual(Array.from(upload.subarray(44, 60)));
+    // The canonical file is itself a valid upload with the same duration.
+    const again = parseWav(info.canonical);
+    expect(again.seconds).toBe(1.5);
+    expect(again.canonical).toEqual(info.canonical);
+
+    // An odd byte count loses the half sample.
+    const odd = makeWav({ dataBytes: 32_001 });
+    expect(parseWav(odd).canonical.length).toBe(44 + 32_000);
+  });
+
   it("skips extra chunks before data and tolerates a placeholder data size", () => {
     const plain = makeWav({ seconds: 1 });
     // Insert a LIST chunk between fmt and data.

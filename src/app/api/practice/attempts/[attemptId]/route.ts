@@ -2,6 +2,7 @@ import { Evaluation, SubmitAttemptRequest } from "@/shared/contracts";
 import { requireLearner } from "@/server/auth/request";
 import { errorResponse, jsonError, jsonOk } from "@/server/http";
 import { submitAttempt } from "@/server/practice/attempts";
+import { providerAccessFromRequest } from "@/server/models/access";
 
 export async function POST(request: Request, context: { params: Promise<{ attemptId: string }> }) {
   try {
@@ -15,7 +16,9 @@ export async function POST(request: Request, context: { params: Promise<{ attemp
       return jsonError("invalid_request");
     }
 
-    return jsonOk(Evaluation.parse(await submitAttempt(learner, attemptId, input)));
+    return jsonOk(Evaluation.parse(await submitAttempt(learner, attemptId, input, {
+      providerAccess: providerAccessFromRequest(request, learner),
+    })));
   } catch (error) {
     return errorResponse(error);
   }

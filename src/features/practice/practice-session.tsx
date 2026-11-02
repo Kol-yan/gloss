@@ -8,6 +8,7 @@ import { InviteRequired } from "@/components/invite-required";
 import { LoadError, LoadingState } from "@/components/load-states";
 import {
   createTask,
+  getMe,
   isAiOff,
   isQuota,
   isUnauthorized,
@@ -17,6 +18,8 @@ import {
   type ApiFailure,
 } from "@/features/api/client";
 import { VoicePractice } from "@/features/speech/voice-practice";
+import { useAccess } from "@/features/api/use-access";
+import { useLoad } from "@/features/api/use-load";
 import type { Transcribe } from "@/features/speech/types";
 import type { PracticeKind } from "@/shared/contracts";
 import { WrittenPractice } from "./written-practice";
@@ -29,7 +32,7 @@ type Stage =
   | { name: "done" };
 
 // The answer could not be judged. It is never counted, and the message says so.
-function unavailableEvaluation(attemptId: string, failure: ApiFailure): Evaluation {
+function unavailableEvaluation(attemptId: string, failure: ApiFailure, target: string): Evaluation {
   const retryable = !isQuota(failure) && !isAiOff(failure);
   const message = isQuota(failure)
     ? "You've used today's practice checks. They come back tomorrow."
@@ -38,6 +41,7 @@ function unavailableEvaluation(attemptId: string, failure: ApiFailure): Evaluati
       : "We couldn't check this answer. It wasn't counted either way.";
   return {
     attemptId,
+    target,
     verdict: "unavailable",
     message,
     correction: null,
@@ -48,8 +52,20 @@ function unavailableEvaluation(attemptId: string, failure: ApiFailure): Evaluati
   };
 }
 
-// One expression, practised in order: a written task, then a spoken one.
 export function PracticeSession({ expressionId }: { expressionId: string }) {
+  const { result, reload } = useLoad(getMe);
+  if (!result) return <LoadingState label="Opening your practice" />;
+  if (!result.ok) {
+    if (isUnauthorized(result)) return <InviteRequired onRetry={reload} />;
+    return <LoadError title="We couldn't open your practice" onRetry={reload}>Check your connection and try again.</LoadError>;
+  }
+  // A change of learner discards any answer or transcript from the previous session.
+  return <PracticeForLearner key={result.data.learner.id} expressionId={expressionId} />;
+}
+
+// One expression, practised in order: a written task, then a spoken one.
+function PracticeForLearner({ expressionId }: { expressionId: string }) {
+  const access = useAccess();
   const [stage, setStage] = useState<Stage>({ name: "loading", kind: "written" });
   const [sessionLost, setSessionLost] = useState(false);
   const [nextLabel, setNextLabel] = useState<string | null>(null);
@@ -86,7 +102,7 @@ export function PracticeSession({ expressionId }: { expressionId: string }) {
     const result = await submitAttempt(attemptId, { answer, hintUsed });
     if (result.ok) return result.data;
     if (isUnauthorized(result)) setSessionLost(true);
-    return unavailableEvaluation(attemptId, result);
+    return unavailableEvaluation(attemptId, result, stage.name === "task" ? stage.task.expression ?? "" : "");
   };
 
   const transcribeAudio: Transcribe = async (wav, attemptId, signal) => {
@@ -102,7 +118,15 @@ export function PracticeSession({ expressionId }: { expressionId: string }) {
     else setStage({ name: "done" });
   };
 
-  if (sessionLost) return <InviteRequired onRetry={() => window.location.reload()} />;
+  if (sessionLost || (access.checked && !access.session)) {
+    return <InviteRequired onRetry={() => {
+      void getMe().then((result) => {
+        if (!result.ok) return;
+        setSessionLost(false);
+        loadTask("written");
+      });
+    }} />;
+  }
 
   if (stage.name === "loading") return <LoadingState label="Preparing your task" />;
 

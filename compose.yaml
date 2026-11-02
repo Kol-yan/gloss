@@ -1,0 +1,28 @@
+# Run with the standalone `docker-compose` (v2): docker-compose up -d --build
+# Public traffic is expected to arrive from a reverse proxy or tunnel on the
+# host at 127.0.0.1:3200. Put your settings in .env.production (see SELF_HOSTING.md).
+services:
+  gloss:
+    build: .
+    ports:
+      - "127.0.0.1:3200:3000"
+    env_file: .env.production
+    environment:
+      # Fixed here so a copied .env file cannot point the database away from the volume.
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: 0.0.0.0
+      GLOSSY_DATABASE_PATH: /app/data/glossy.db
+    volumes:
+      # The host directory must be writable by uid 1000 (the image's `node` user).
+      - ./data:/app/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 1g
+    init: true
+    restart: unless-stopped

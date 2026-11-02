@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { FeedbackPanel } from "./feedback-panel";
 import { PracticeShell, TaskCard } from "./practice-shell";
-import { canRetry, type Evaluation, type PracticeTask, type SubmitAnswer } from "./types";
+import { canRetry, retryAttemptFor, type Evaluation, type PracticeTask, type SubmitAnswer } from "./types";
 
 type Phase = "answer" | "checking" | "feedback";
 
@@ -63,7 +63,7 @@ export function WrittenPractice({ task, submit, onContinue, initial }: WrittenPr
     const unavailable = evaluation.verdict === "unavailable";
     const rechecking = phase === "checking";
     const retry = canRetry(evaluation);
-    const nextId = evaluation.retryAttemptId ?? attemptId;
+    const nextId = retryAttemptFor(evaluation) ?? attemptId;
     return (
       <PracticeShell
         rail={
@@ -92,7 +92,7 @@ export function WrittenPractice({ task, submit, onContinue, initial }: WrittenPr
         }
       >
         <TaskCard task={task} withSituation={task.cue === "hidden"} label="Writing" />
-        <FeedbackPanel feedback={evaluation} answer={answer.trim()} />
+        <FeedbackPanel feedback={evaluation} answer={answer.trim()} revealTarget={task.cue === "hidden"} />
       </PracticeShell>
     );
   }

@@ -3,7 +3,7 @@ import { AppHeader } from "@/components/app-header";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: { default: "Glossy", template: "%s · Glossy" },
+  title: { default: "gloss", template: "%s · gloss" },
   description: "Check your English writing, then practice the words you want to use.",
 };
 

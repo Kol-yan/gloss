@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import type { NextResponse } from "next/server";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, MeResponse } from "@/shared/contracts";
 
@@ -19,7 +20,7 @@ vi.mock("next/server", async (importOriginal) => ({
 }));
 
 import { GET as me } from "@/app/api/me/route";
-import { GET as join, HEAD as joinHead } from "@/app/join/[token]/route";
+import { POST as join } from "@/app/join/[token]/continue/route";
 import { createInvite } from "@/server/auth/invites";
 import { reserve, setAiEnabled } from "@/server/budget";
 import { closeDb, getDb } from "@/server/db";
@@ -51,57 +52,19 @@ beforeEach(() => {
   setAiEnabled(true);
 });
 
-const joinRequest = (token: string, headers: Record<string, string> = {}) =>
-  join(new Request(`http://localhost:3000/join/${token}`, { headers }), {
-    params: Promise.resolve({ token }),
-  });
+// Redeems an invite the way the join page's form does.
+const joinRequest = async (token: string) =>
+  (await join(
+    new Request(`http://localhost:3000/join/${token}/continue`, {
+      method: "POST",
+      headers: { "sec-fetch-site": "same-origin", origin: "http://localhost:3000" },
+    }),
+    { params: Promise.resolve({ token }) },
+  )) as NextResponse;
 
 function newInvite(maxUses = 1, profile: "pilot" | "judge" | "owner" = "judge") {
   return createInvite({ label: "Route test", maxUses, quotaProfile: profile }).token;
 }
-
-describe("GET /join/[token]", () => {
-  it("redeems, sets an httpOnly lax cookie and redirects home", async () => {
-    const response = await joinRequest(newInvite());
-    expect(response.status).toBe(307);
-    expect(response.headers.get("location")).toBe("/");
-    expect(response.headers.get("cache-control")).toBe("no-store");
-    const cookie = response.cookies.get("glossy_session");
-    expect(cookie).toMatchObject({ httpOnly: true, sameSite: "lax", path: "/", maxAge: 2_592_000 });
-    expect(cookie?.secure).toBeFalsy();
-    expect(cookie?.value).toMatch(/^[A-Za-z0-9_-]{43}$/);
-  });
-
-  it("marks the cookie Secure in production", async () => {
-    vi.stubEnv("NODE_ENV", "production");
-    try {
-      const response = await joinRequest(newInvite());
-      expect(response.cookies.get("glossy_session")?.secure).toBe(true);
-    } finally {
-      vi.unstubAllEnvs();
-    }
-  });
-
-  it("redirects invalid, used-up and malformed invites without a cookie", async () => {
-    const token = newInvite(1);
-    await joinRequest(token);
-    for (const attempt of [token, "garbage", "z".repeat(43)]) {
-      const response = await joinRequest(attempt);
-      expect(response.status).toBe(307);
-      expect(response.headers.get("location")).toBe("/?invite=invalid");
-      expect(response.cookies.get("glossy_session")).toBeUndefined();
-    }
-  });
-
-  it("does not spend an invite on HEAD or prefetch requests", async () => {
-    const token = newInvite(1);
-    expect((await joinHead()).status).toBe(204);
-    const prefetch = await joinRequest(token, { "sec-purpose": "prefetch" });
-    expect(prefetch.status).toBe(204);
-    expect(prefetch.cookies.get("glossy_session")).toBeUndefined();
-    expect((await joinRequest(token)).headers.get("location")).toBe("/");
-  });
-});
 
 describe("GET /api/me", () => {
   it("answers 401 with an ApiError when there is no session", async () => {

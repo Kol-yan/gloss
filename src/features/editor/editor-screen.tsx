@@ -11,6 +11,7 @@ import { canUndo, createDoc, editorReducer } from "./editor-reducer";
 import { SuggestionRail, type RailNotice } from "./suggestion-rail";
 import type { CheckLocal, CheckStatus, CheckWithAi, ProofreadOutcome } from "./types";
 import { WritingSurface, type WritingSurfaceHandle } from "./writing-surface";
+import type { LocalCheckStatus } from "./local-checker";
 
 type OfferState = { phase: "ask" | "saving" | "error" | "started"; offer: PracticeOffer };
 
@@ -27,6 +28,7 @@ export type EditorScreenProps = {
   checkWithAi?: CheckWithAi;
   // In-browser rule checker. Runs shortly after the learner stops typing.
   checkLocal?: CheckLocal;
+  localCheckStatus?: LocalCheckStatus;
   // Adds the expression to the learner's practice list. Resolves true when it was saved.
   // Without it the card simply confirms (used by the gallery).
   onStartPractice?: (offer: PracticeOffer, familiarity: Familiarity) => Promise<boolean>;
@@ -43,6 +45,7 @@ export function EditorScreen({
   initialCheckStatus = "idle",
   checkWithAi,
   checkLocal,
+  localCheckStatus,
   onStartPractice,
   onDecision,
 }: EditorScreenProps) {
@@ -282,6 +285,7 @@ export function EditorScreen({
             suggestionCount={doc.suggestions.length}
             onCheck={runCheck}
             onOpenSheet={openSheet}
+            localCheckStatus={localCheckStatus}
           />
         </div>
 

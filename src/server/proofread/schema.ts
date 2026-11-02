@@ -6,8 +6,8 @@ export const MAX_EDITS = 8;
 export const MAX_EXPRESSION_EDITS = 2;
 export const MAX_REASON_LENGTH = 120;
 export const MAX_MEANING_LENGTH = 100;
-// Output budget for one proofreading call. The policy minimum is 2048.
-export const PROOFREAD_MAX_TOKENS = 2048;
+// Reasoning and visible JSON share this output budget.
+export const PROOFREAD_MAX_TOKENS = 4096;
 
 // Flat JSON schema sent to the provider (strict mode: every property is
 // required and no extra properties are allowed). Limits that strict mode may

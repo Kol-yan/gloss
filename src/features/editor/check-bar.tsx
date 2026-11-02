@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { AlertIcon, SparkIcon } from "@/components/ui/icons";
 import { MAX_TEXT_LENGTH } from "@/shared/contracts";
 import type { CheckStatus } from "./types";
+import type { LocalCheckStatus } from "./local-checker";
 
 const MESSAGES: Partial<Record<CheckStatus, ReactNode>> = {
   pending: "Checking your text…",
@@ -29,6 +30,7 @@ export function CheckBar({
   suggestionCount,
   onCheck,
   onOpenSheet,
+  localCheckStatus,
 }: {
   status: CheckStatus;
   // null when the number is unknown; the slot is then hidden.
@@ -38,6 +40,7 @@ export function CheckBar({
   suggestionCount: number;
   onCheck: () => void;
   onOpenSheet: () => void;
+  localCheckStatus?: LocalCheckStatus;
 }) {
   // An empty editor explains itself; the "unavailable" note only matters once there is text to check.
   const message = status === "unavailable" && textIsEmpty ? undefined : MESSAGES[status];
@@ -51,6 +54,9 @@ export function CheckBar({
 
   return (
     <div className="relative shrink-0 border-t border-line bg-paper/95 px-4 py-2.5">
+      {localCheckStatus === "starting" ? (
+        <p role="status" className="mb-2 text-sm leading-snug text-ink-muted">Starting on-device checks…</p>
+      ) : null}
       {pending ? (
         <div
           role="progressbar"

@@ -21,6 +21,8 @@ import { createInvite, redeemInvite } from "@/server/auth/invites";
 import { getBudgetStatus, reserve, setAiEnabled } from "@/server/budget";
 import { closeDb, getDb } from "@/server/db";
 
+const db_ = () => getDb();
+
 const fetchMock = vi.fn();
 let dir: string;
 const savedEnv: Record<string, string | undefined> = {};
@@ -321,6 +323,31 @@ describe("POST /api/proofread", () => {
     const retry = await post({ requestId: id, text: "Some text." });
     expect(retry.status).toBe(409);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("marks a check run that has been pending for two minutes as failed", async () => {
+    const { learner } = login();
+    const insertRun = (id: string, ageMs: number) => {
+      db_().prepare(
+        `INSERT INTO check_runs
+           (id, learner_id, request_id, text_hash, text_length, provider, model, status, created_at)
+         VALUES (?, ?, ?, 'h', 5, 'meta', 'm', 'pending', ?)`,
+      ).run(`run-${id}`, learner.id, id, new Date(Date.now() - ageMs).toISOString());
+    };
+    const stale = requestId();
+    const fresh = requestId();
+    insertRun(stale, 3 * 60_000);
+    insertRun(fresh, 30_000);
+
+    expect((await post({ requestId: stale, text: "Some text." })).status).toBe(409);
+    expect((await post({ requestId: fresh, text: "Some text." })).status).toBe(409);
+    expect(runFor(stale)).toMatchObject({ status: "failed" });
+    expect(runFor(fresh)).toMatchObject({ status: "pending" });
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    // A new request id is unaffected.
+    fetchMock.mockResolvedValueOnce(modelReply([]));
+    expect((await post({ requestId: requestId(), text: "Some text." })).status).toBe(200);
   });
 
   it("does not replay another learner's result for the same request id", async () => {

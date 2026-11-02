@@ -2,6 +2,7 @@
 
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/empty-state";
+import { ProviderKeyForm } from "@/components/provider-access";
 
 // Shown when the server does not recognise the browser's session (HTTP 401).
 export function InviteRequired({ notice, onRetry }: { notice?: string; onRetry: () => void }) {
@@ -13,16 +14,21 @@ export function InviteRequired({ notice, onRetry }: { notice?: string; onRetry: 
         </p>
       ) : null}
       <EmptyState
-        eyebrow="Invite only"
-        title="You need an invite link"
+        eyebrow="Welcome"
+        title="Choose how to try gloss"
         action={
-          <Button variant="primary" onClick={onRetry}>
+          <Button variant="secondary" onClick={onRetry}>
             I opened my link, check again
           </Button>
         }
       >
-        Glossy is open to invited people for now. Open the link you were sent, then come back to this page.
+        Have an invite? Open its link for access within an allowance. You can also use your own OpenRouter key below.
       </EmptyState>
+      <div className="mx-auto mb-8 w-full max-w-md px-4">
+        <div className="rounded-tile border border-line bg-surface p-4">
+          <ProviderKeyForm onReady={onRetry} />
+        </div>
+      </div>
     </div>
   );
 }

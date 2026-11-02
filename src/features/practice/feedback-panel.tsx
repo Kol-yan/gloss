@@ -24,10 +24,12 @@ export function FeedbackPanel({
   feedback,
   answer,
   answerLabel = "Your answer",
+  revealTarget = false,
 }: {
   feedback: Feedback;
   answer: string;
   answerLabel?: string;
+  revealTarget?: boolean;
 }) {
   return (
     <section
@@ -38,6 +40,12 @@ export function FeedbackPanel({
       <div>
         <VerdictBadge verdict={feedback.verdict} />
       </div>
+      {revealTarget && feedback.target ? (
+        <div>
+          <p className="eyebrow">Expression to practice</p>
+          <p className="mt-0.5 text-lg font-semibold leading-snug [overflow-wrap:anywhere]">{feedback.target}</p>
+        </div>
+      ) : null}
       <div>
         <p className="eyebrow">{answerLabel}</p>
         <p className="mt-0.5 border-l-2 border-line-strong pl-3 text-base leading-snug [overflow-wrap:anywhere]">{answer}</p>

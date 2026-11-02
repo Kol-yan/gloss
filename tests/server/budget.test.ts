@@ -234,6 +234,30 @@ describe("reserve", () => {
   });
 });
 
+describe("abandoned reservations", () => {
+  it("become unknown after two minutes and keep counting at max cost", () => {
+    const learner = insertLearner(temp.db);
+    const stuck = reserve(input(learner, "stuck", { maxCostMicros: 300_000 }), deps());
+    const fresh = reserve(input(learner, "fresh", { maxCostMicros: 100_000 }), deps({ now: new Date(T0.getTime() + 60_000) }));
+    const status = (id: string) =>
+      (temp.db.prepare("SELECT status FROM usage_reservations WHERE id = ?").get(id) as { status: string }).status;
+
+    // The next reservation, 2 minutes and 1 ms later, sweeps the old one only.
+    reserve(input(learner, "later", { maxCostMicros: 1 }), deps({ now: new Date(T0.getTime() + 120_001) }));
+    expect(status(stuck.id)).toBe("unknown");
+    expect(status(fresh.id)).toBe("reserved");
+    expect(getBudgetStatus(deps({ now: new Date(T0.getTime() + 120_001) })).spentMicros).toBe(400_001);
+
+    // Exactly two minutes is not yet stale.
+    const other = reserve(input(learner, "edge", { maxCostMicros: 5 }), deps({ now: new Date(T0.getTime() + 125_000) }));
+    reserve(input(learner, "after-edge", { maxCostMicros: 1 }), deps({ now: new Date(T0.getTime() + 125_000) }));
+    expect(status(other.id)).toBe("reserved");
+
+    // A call that is somehow still running can still settle its reservation.
+    expect(settle(stuck.id, 10_000, deps()).status).toBe("settled");
+  });
+});
+
 describe("kill switch", () => {
   it("blocks reservations when AI_ENABLED is false", () => {
     const learner = insertLearner(temp.db);

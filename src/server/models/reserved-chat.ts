@@ -9,8 +9,10 @@ import {
   UnknownModelError,
   type TokenUsage,
 } from "./errors";
-import { metaChat, type MetaChatInput } from "./meta";
+import { type MetaChatInput } from "./meta";
 import { textCostMicros } from "./prices";
+import { resolveProviderAccess, type ProviderAccess } from "./access";
+import { chatWithAccess } from "./dispatch";
 
 export interface ReservedChatArgs<T> {
   db: DatabaseSync;
@@ -19,6 +21,7 @@ export interface ReservedChatArgs<T> {
   // Already made by the caller, before this call.
   reservation: Reservation;
   chat: MetaChatInput;
+  providerAccess?: ProviderAccess;
   // Returns null when the content is not usable.
   parse: (content: string) => T | null;
 }
@@ -44,7 +47,8 @@ export async function runReservedChat<T>(args: ReservedChatArgs<T>): Promise<{
 
   let result;
   try {
-    result = await metaChat(chat, { config });
+    const access = resolveProviderAccess(reservation.learnerId, args.providerAccess, db);
+    result = await chatWithAccess(chat, access, config);
   } catch (error) {
     if (error instanceof ModelOutputError) close(billed(error.usage));
     else if (

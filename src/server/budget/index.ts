@@ -18,9 +18,12 @@ import {
   AiDisabledError,
   BudgetExhaustedError,
   QuotaExceededError,
+  RateLimitedError,
   UnauthorizedError,
 } from "../errors";
 import { newId } from "../ids";
+import { staleBefore } from "../stale";
+import type { FundingSource } from "../models/access";
 
 export interface BudgetDeps extends ServerDeps {
   // Overrides the environment configuration (tests).
@@ -32,6 +35,7 @@ export type ReservationStatus = "reserved" | "settled" | "unknown";
 export interface Reservation {
   id: string;
   learnerId: string;
+  fundingSource: FundingSource;
   kind: QuotaKind;
   requestId: string;
   units: number;
@@ -75,6 +79,8 @@ export function reserve(input: ReserveInput, deps: BudgetDeps = {}): ReserveResu
   const now = deps.now ?? new Date();
 
   return immediate((db) => {
+    sweepStaleReservations(db, now);
+
     const existing = db
       .prepare(
         "SELECT * FROM usage_reservations WHERE learner_id = ? AND kind = ? AND request_id = ?",
@@ -85,7 +91,7 @@ export function reserve(input: ReserveInput, deps: BudgetDeps = {}): ReserveResu
     if (!aiSwitchOn(db, config)) throw new AiDisabledError();
 
     const learner = db
-      .prepare("SELECT quota_profile FROM learners WHERE id = ? AND deleted_at IS NULL")
+      .prepare("SELECT quota_profile, funding_source FROM learners WHERE id = ? AND deleted_at IS NULL")
       .get(input.learnerId);
     if (!learner) throw new UnauthorizedError();
 
@@ -94,13 +100,16 @@ export function reserve(input: ReserveInput, deps: BudgetDeps = {}): ReserveResu
     const used = unitsUsed(db, input.learnerId, input.kind, start, end);
     if (used + input.units > limit) throw new QuotaExceededError(input.kind, used, limit);
 
-    if (spentMicros(db, start, end) + input.maxCostMicros > config.dailyBudgetMicros) {
+    if (learner.funding_source !== "hosted" && learner.funding_source !== "byok") throw new AiDisabledError();
+    if (learner.funding_source === "byok") enforceVisitorRate(db, input.learnerId, now);
+    if (learner.funding_source === "hosted" && spentMicros(db, start, end) + input.maxCostMicros > config.dailyBudgetMicros) {
       throw new BudgetExhaustedError();
     }
 
     const reservation: Reservation = {
       id: newId(),
       learnerId: input.learnerId,
+      fundingSource: learner.funding_source,
       kind: input.kind,
       requestId: input.requestId,
       units: input.units,
@@ -112,8 +121,8 @@ export function reserve(input: ReserveInput, deps: BudgetDeps = {}): ReserveResu
     };
     db.prepare(
       `INSERT INTO usage_reservations
-         (id, learner_id, kind, request_id, units, max_cost_micros, status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'reserved', ?)`,
+         (id, learner_id, kind, request_id, units, max_cost_micros, status, created_at, funding_source)
+       VALUES (?, ?, ?, ?, ?, ?, 'reserved', ?, ?)`,
     ).run(
       reservation.id,
       reservation.learnerId,
@@ -122,9 +131,31 @@ export function reserve(input: ReserveInput, deps: BudgetDeps = {}): ReserveResu
       reservation.units,
       reservation.maxCostMicros,
       reservation.createdAt,
+      reservation.fundingSource,
     );
     return { ...reservation, replay: false };
   }, deps.db ?? getDb());
+}
+
+// Visitors pay their own provider, but still share this server's capacity.
+function enforceVisitorRate(db: DatabaseSync, learnerId: string, now: Date): void {
+  const minute = new Date(now.getTime() - 60_000).toISOString();
+  const counts = db.prepare(
+    `SELECT SUM(CASE WHEN created_at > ? THEN 1 ELSE 0 END) AS recent,
+            SUM(CASE WHEN status = 'reserved' THEN 1 ELSE 0 END) AS active
+     FROM usage_reservations WHERE learner_id = ?`,
+  ).get(minute, learnerId);
+  if (Number(counts?.recent ?? 0) >= 6 || Number(counts?.active ?? 0) >= 2) throw new RateLimitedError();
+}
+
+// A reservation still 'reserved' after two minutes belongs to a call whose
+// process died: nobody knows what the provider did, so it becomes 'unknown'.
+// Its max cost keeps counting either way; only the label changes. A call that
+// is somehow still running can still settle it.
+function sweepStaleReservations(db: DatabaseSync, now: Date): void {
+  db.prepare(
+    "UPDATE usage_reservations SET status = 'unknown' WHERE status = 'reserved' AND created_at < ?",
+  ).run(staleBefore(now));
 }
 
 // Records the real cost from the provider's reported usage. Fractional
@@ -269,7 +300,7 @@ function spentMicros(db: DatabaseSync, start: string, end: string): number {
       `SELECT COALESCE(SUM(CASE WHEN status = 'settled'
                                 THEN COALESCE(actual_cost_micros, max_cost_micros)
                                 ELSE max_cost_micros END), 0) AS spent
-       FROM usage_reservations WHERE created_at >= ? AND created_at < ?`,
+       FROM usage_reservations WHERE funding_source = 'hosted' AND created_at >= ? AND created_at < ?`,
     )
     .get(start, end);
   return Number(row?.spent ?? 0);
@@ -285,6 +316,7 @@ function toReservation(row: Record<string, SQLOutputValue>): Reservation {
   return {
     id: String(row.id),
     learnerId: String(row.learner_id),
+    fundingSource: row.funding_source === "byok" ? "byok" : "hosted",
     kind: row.kind as QuotaKind,
     requestId: String(row.request_id),
     units: Number(row.units),

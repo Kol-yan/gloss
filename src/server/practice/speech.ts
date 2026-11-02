@@ -12,11 +12,11 @@ import { ConflictError, InvalidRequestError, NotFoundError } from "../errors";
 import { newId } from "../ids";
 import {
   ModelHttpError,
-  ModelNotConfiguredError,
   ModelOutputError,
   UnknownModelError,
 } from "../models/errors";
-import { metaTranscribe } from "../models/meta-asr";
+import { resolveProviderAccess, speechModel } from "../models/access";
+import { transcribeWithAccess } from "../models/dispatch";
 import { asrCostMicros } from "../models/prices";
 import { InvalidWavError, parseWav } from "./wav";
 
@@ -54,8 +54,8 @@ export async function transcribeAttempt(
     throw error;
   }
 
-  if (!config.meta.apiKey) throw new ModelNotConfiguredError();
-  const model = config.meta.asrModel;
+  const access = resolveProviderAccess(learner.id, deps.providerAccess, db);
+  const model = speechModel(access, config);
   const units = Math.ceil(info.seconds);
   // Throws for a model without a price: no cost bound, no call.
   const maxCostMicros = asrCostMicros(model, units);
@@ -78,7 +78,8 @@ export async function transcribeAttempt(
 
   let result;
   try {
-    result = await metaTranscribe({ model, audio }, { config });
+    // Only the canonical file leaves the server, never the raw upload.
+    result = await transcribeWithAccess({ model, audio: info.canonical }, access, config);
   } catch (error) {
     // Same rules as the text role: provider refusal costs nothing, unusable
     // output was billed, anything else leaves the outcome unknown.
@@ -95,13 +96,18 @@ export async function transcribeAttempt(
     throw error;
   }
 
-  // The provider bills whole seconds; round the reported duration up so the
-  // recorded cost never undercounts.
-  const billedSeconds =
-    result.durationMs === null ? units : Math.min(units, Math.ceil(result.durationMs / 1000));
+  // Settle at the full reservation. The provider's reported duration may never
+  // lower the charge below the seconds that were reserved, and it cannot raise
+  // it above them; a longer report than reserved means the sent audio did not
+  // match what was measured, which should not happen with a canonical file.
+  if (result.durationMs !== null && Math.ceil(result.durationMs / 1000) > units) {
+    console.warn(
+      `[glossy] speech-to-text reported ${result.durationMs} ms for ${units} reserved seconds`,
+    );
+  }
   immediate((tx) => {
     store(tx, learner.id, attemptId, result.text, info.seconds);
-    settle(reservation.id, asrCostMicros(model, billedSeconds), { db: tx, now });
+    settle(reservation.id, maxCostMicros, { db: tx, now });
   }, db);
 
   return { attemptId, text: result.text, durationSeconds: info.seconds };

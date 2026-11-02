@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { AccountControls } from "./provider-access";
 
 const NAV = [
   { href: "/", label: "Editor" },
@@ -14,9 +15,9 @@ export function AppHeader() {
 
   return (
     <header className="shrink-0 border-b border-line bg-paper/90 backdrop-blur">
-      <div className="mx-auto flex h-13 w-full max-w-6xl items-center justify-between gap-2 px-4">
-        <Link href="/" className="text-lg font-bold tracking-tight text-ink" aria-label="Glossy, go to the editor">
-          Glossy
+      <div className="mx-auto flex min-h-13 w-full max-w-6xl flex-wrap items-center justify-between gap-1 px-4">
+        <Link href="/" className="text-lg font-bold tracking-tight text-ink" aria-label="gloss, go to the editor">
+          gloss
         </Link>
         <nav aria-label="Main">
           <ul className="flex items-center gap-0.5 text-sm font-semibold">
@@ -41,6 +42,7 @@ export function AppHeader() {
             })}
           </ul>
         </nav>
+        <AccountControls />
       </div>
     </header>
   );

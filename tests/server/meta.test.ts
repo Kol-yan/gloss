@@ -68,6 +68,16 @@ describe("metaChat request", () => {
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).not.toHaveProperty("temperature");
   });
 
+  it("sends reasoning effort at the top level without reducing the output budget", async () => {
+    fetchMock.mockResolvedValueOnce(ok("{}", { usage: { prompt_tokens: 10, completion_tokens: 1100,
+      completion_tokens_details: { reasoning_tokens: 900 } } }));
+    const result = await metaChat({ ...input, maxTokens: 4096, reasoningEffort: "minimal" }, { config });
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({
+      max_tokens: 4096, reasoning_effort: "minimal",
+    });
+    expect(result.usage?.outputTokens).toBe(1100);
+  });
+
   it("refuses to call without a key, with an unpriced model or with a small max_tokens", async () => {
     await expect(metaChat(input, { config: loadConfig({}) })).rejects.toThrow(ModelNotConfiguredError);
     await expect(metaChat({ ...input, model: "mystery-1" }, { config })).rejects.toThrow(UnknownModelError);

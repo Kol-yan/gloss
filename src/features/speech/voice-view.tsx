@@ -35,7 +35,7 @@ const ERROR_COPY: Record<VoiceErrorReason, { title: string; body: string }> = {
   },
   unsupported: {
     title: "This browser can't record audio",
-    body: "Type your answer instead, or open Glossy in another browser.",
+    body: "Type your answer instead, or open gloss in another browser.",
   },
   nothing_recorded: {
     title: "We didn't catch that",
@@ -344,7 +344,7 @@ function VoiceTaskInner({
         onShowHint={view.kind === "feedback" ? undefined : handlers.onShowHint}
       />
       {view.kind === "feedback" ? (
-        <FeedbackPanel feedback={view.evaluation} answer={view.transcript} answerLabel="We heard" />
+        <FeedbackPanel feedback={view.evaluation} answer={view.transcript} answerLabel="We heard" revealTarget={task.cue === "hidden"} />
       ) : (
         <VoiceCard
           view={view}

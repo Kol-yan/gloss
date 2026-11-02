@@ -98,6 +98,7 @@ export function redeemInvite(token: unknown, deps: ServerDeps = {}): Redemption 
       // "<label> <n>": n is the redemption number of this invite.
       displayName: `${String(invite.label)} ${Number(invite.uses)}`,
       quotaProfile,
+      fundingSource: "hosted",
     };
     db.prepare(
       "INSERT INTO learners (id, display_name, quota_profile, created_at) VALUES (?, ?, ?, ?)",

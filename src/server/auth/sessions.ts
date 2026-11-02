@@ -3,6 +3,7 @@ import type { ServerDeps } from "../deps";
 import { getDb } from "../db";
 import { UnauthorizedError } from "../errors";
 import { hashToken, looksLikeToken } from "./tokens";
+import type { FundingSource } from "../models/access";
 
 export const SESSION_COOKIE = "glossy_session";
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -12,6 +13,7 @@ export interface Learner {
   id: string;
   displayName: string;
   quotaProfile: QuotaProfileName;
+  fundingSource?: FundingSource;
 }
 
 // Resolves a raw session token to its learner, or null when the token is
@@ -23,7 +25,7 @@ export function findLearnerBySessionToken(
   if (!looksLikeToken(token)) return null;
   const row = (deps.db ?? getDb())
     .prepare(
-      `SELECT l.id, l.display_name, l.quota_profile
+      `SELECT l.id, l.display_name, l.quota_profile, l.funding_source
        FROM sessions s JOIN learners l ON l.id = s.learner_id
        WHERE s.token_hash = ? AND s.expires_at > ? AND l.deleted_at IS NULL`,
     )
@@ -33,6 +35,7 @@ export function findLearnerBySessionToken(
     id: String(row.id),
     displayName: String(row.display_name),
     quotaProfile: QuotaProfileNameSchema.parse(row.quota_profile),
+    fundingSource: row.funding_source === "byok" ? "byok" : "hosted",
   };
 }
 

@@ -2,8 +2,8 @@
 // (settle). A model without an entry here is never called: with no price
 // there is no bound, and without a bound the budget cannot be protected.
 //
-// Source: public price listings for the Meta models, October 2026, as given by
-// the operator. Re-check them before changing a model in the environment.
+// Source: https://dev.meta.ai/docs/pricing-rate-limits (checked November 2026).
+// Re-check before changing a model. Reasoning is included in output tokens.
 import { UnknownModelError } from "./errors";
 
 export interface TextPrice {
@@ -21,6 +21,8 @@ export interface AsrPrice {
 export const MODEL_PRICES: Record<string, TextPrice | AsrPrice> = {
   "muse-spark-1.3": { kind: "text", inputUsdPerMTok: 1.25, outputUsdPerMTok: 4.25 },
   "muse-voice-transcribe-1.0": { kind: "asr", usdPerMinute: 0.003 },
+  "meta/muse-spark-1.3": { kind: "text", inputUsdPerMTok: 1.25, outputUsdPerMTok: 4.25 },
+  "meta/muse-voice-transcribe-1.0": { kind: "asr", usdPerMinute: 0.003 },
 };
 
 export function textPrice(model: string): TextPrice {

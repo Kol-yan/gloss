@@ -29,6 +29,13 @@ export class QuotaExceededError extends Error {
   }
 }
 
+export class RateLimitedError extends Error {
+  constructor() {
+    super("Request rate limit reached");
+    this.name = "RateLimitedError";
+  }
+}
+
 // The instance-wide daily spend ceiling would be crossed.
 export class BudgetExhaustedError extends Error {
   constructor() {

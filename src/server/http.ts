@@ -10,6 +10,7 @@ import {
   InvalidRequestError,
   NotFoundError,
   QuotaExceededError,
+  RateLimitedError,
   UnauthorizedError,
 } from "./errors";
 import {
@@ -26,6 +27,7 @@ const DEFAULT_STATUS: Record<ApiErrorCode, number> = {
   invalid_request: 400,
   conflict: 409,
   quota_exceeded: 429,
+  rate_limited: 429,
   budget_exhausted: 503,
   ai_disabled: 503,
   model_unavailable: 502,
@@ -38,6 +40,7 @@ const MESSAGES: Record<ApiErrorCode, string> = {
   invalid_request: "That request was not valid.",
   conflict: "That changed in the meantime. Please try again.",
   quota_exceeded: "You have used today's allowance for this feature. It resets at midnight UTC.",
+  rate_limited: "Please wait a moment before trying again.",
   budget_exhausted: "Cloud checking is paused for today. Local checking still works.",
   ai_disabled: "Cloud checking is switched off right now. Local checking still works.",
   model_unavailable: "The cloud checker is not available right now. Please try again.",
@@ -67,6 +70,7 @@ export function jsonError(
 export function errorResponse(error: unknown): Response {
   if (error instanceof UnauthorizedError) return jsonError("unauthorized");
   if (error instanceof QuotaExceededError) return jsonError("quota_exceeded");
+  if (error instanceof RateLimitedError) return jsonError("rate_limited");
   if (error instanceof BudgetExhaustedError) return jsonError("budget_exhausted");
   if (error instanceof AiDisabledError) return jsonError("ai_disabled");
   if (error instanceof InvalidInviteError || error instanceof NotFoundError) {
@@ -84,7 +88,11 @@ export function errorResponse(error: unknown): Response {
   if (error instanceof ModelTimeoutError || error instanceof ModelHttpError) {
     return jsonError("model_unavailable", 503);
   }
-  if (error instanceof ModelOutputError) return jsonError("model_unavailable", 502);
+  if (error instanceof ModelOutputError) {
+    const reasons = new Set(["truncated", "empty_content", "envelope_not_json", "invalid_output"]);
+    console.warn("[gloss] model output rejected:", reasons.has(error.reason) ? error.reason : "invalid_output");
+    return jsonError("model_unavailable", 502);
+  }
 
   // Next signals prerender bail-outs and redirects by throwing; those must
   // reach the framework, not become a 500.
@@ -93,17 +101,12 @@ export function errorResponse(error: unknown): Response {
   return jsonError("internal");
 }
 
-// Server-side log line for an unexpected error: name, a capped message and a
-// few stack frames. Our own errors never embed learner text, and the message
-// is capped as a second guard.
+// Unexpected exceptions may contain learner text or credentials from a lower
+// layer. Never log their message, stack or arbitrary object fields.
 function logUnexpected(error: unknown): void {
   if (!(error instanceof Error)) {
-    console.error("[glossy] unexpected non-error thrown:", typeof error);
+    console.error("[gloss] unexpected non-error thrown:", typeof error);
     return;
   }
-  const frames = (error.stack ?? "")
-    .split("\n")
-    .filter((line) => line.trimStart().startsWith("at "))
-    .slice(0, 6);
-  console.error(`[glossy] ${error.name}: ${error.message.slice(0, 200)}\n${frames.join("\n")}`);
+  console.error("[gloss] unexpected server error");
 }

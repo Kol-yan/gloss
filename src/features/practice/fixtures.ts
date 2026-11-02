@@ -34,6 +34,7 @@ export const SAMPLE_ANSWER = "Could we push back the start date until next Thurs
 
 const base: Omit<Evaluation, "verdict" | "message" | "correction"> = {
   attemptId: "sample-attempt-1",
+  target: "push back",
   targetUsed: true,
   transcriptEdited: false,
   nextPracticeLabel: "Tomorrow",
@@ -68,6 +69,7 @@ export const SAMPLE_EVALUATIONS: Record<Verdict, Evaluation> = {
     correction: null,
     targetUsed: false,
     nextPracticeLabel: null,
+    retryAttemptId: base.attemptId,
   },
 };
 

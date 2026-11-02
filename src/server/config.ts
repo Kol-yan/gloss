@@ -41,6 +41,7 @@ const EnvSchema = z.object({
   ),
   OPENROUTER_API_KEY: optionalText,
   OPENROUTER_PROOFREAD_MODEL: optionalText,
+  BYOK_TRUST_PROXY_HEADERS: z.preprocess(blankAsUndefined, z.stringbool().default(false)),
   AI_ENABLED: z.preprocess(blankAsUndefined, z.stringbool().default(true)),
   DAILY_BUDGET_USD: z.preprocess(
     blankAsUndefined,
@@ -59,6 +60,8 @@ const EnvSchema = z.object({
 export interface AppConfig {
   meta: { apiKey?: string; baseUrl: string; textModel: string; asrModel: string };
   openRouter: { apiKey?: string; proofreadModel?: string };
+  // Only enable behind a proxy that overwrites the client-IP header.
+  byokTrustProxyHeaders: boolean;
   // Env-level kill switch. The runtime switch lives in the settings table.
   aiEnabled: boolean;
   dailyBudgetUsd: number;
@@ -94,6 +97,7 @@ export function loadConfig(env: Record<string, string | undefined>): AppConfig {
       asrModel: v.META_ASR_MODEL,
     },
     openRouter: { apiKey: v.OPENROUTER_API_KEY, proofreadModel: v.OPENROUTER_PROOFREAD_MODEL },
+    byokTrustProxyHeaders: v.BYOK_TRUST_PROXY_HEADERS,
     aiEnabled: v.AI_ENABLED,
     dailyBudgetUsd: v.DAILY_BUDGET_USD,
     dailyBudgetMicros: Math.round(v.DAILY_BUDGET_USD * 1_000_000),

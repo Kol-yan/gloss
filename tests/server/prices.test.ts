@@ -28,16 +28,16 @@ describe("prices", () => {
 });
 
 describe("estimateMaxCostMicros", () => {
-  it("assumes 3 chars per token plus 600 tokens of overhead, and counts the full output budget", () => {
-    // input: 3000 / 3 + 600 = 1600 tokens * 1.25 = 2000; output: 2048 * 4.25 = 8704
-    expect(estimateMaxCostMicros("muse-spark-1.3", 3000, 2048)).toBe(10_704);
+  it("reserves a Unicode-safe input bound and the full reasoning/output budget", () => {
+    expect(estimateMaxCostMicros("muse-spark-1.3", 3000, 4096)).toBe(29_408);
   });
 
-  it("rounds a fractional input estimate up", () => {
-    // 1000 chars -> ceil(333.33 + 600) = 934 tokens
-    expect(estimateMaxCostMicros("muse-spark-1.3", 1000, 2048)).toBe(
-      textCostMicros("muse-spark-1.3", 934, 2048),
-    );
+  it("covers input bytes for ASCII, dense Unicode and surrogate pairs", () => {
+    for (const text of ["a".repeat(1000), "\u4e2d".repeat(1000), "\ud83d\ude00".repeat(500)]) {
+      expect(estimateMaxCostMicros("muse-spark-1.3", text.length, 4096)).toBeGreaterThanOrEqual(
+        textCostMicros("muse-spark-1.3", Buffer.byteLength(text) + 600, 4096),
+      );
+    }
   });
 
   it("refuses an unknown model", () => {

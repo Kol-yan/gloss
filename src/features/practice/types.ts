@@ -18,7 +18,7 @@ export const VERDICT_LABEL: Record<Verdict, string> = {
 };
 
 // What the feedback panel needs from an evaluation.
-export type Feedback = Pick<Evaluation, "verdict" | "message" | "correction">;
+export type Feedback = Pick<Evaluation, "verdict" | "message" | "correction" | "target">;
 
 // Judges one answer. Never rejects: a failed call comes back as an
 // evaluation with verdict "unavailable", which is never counted.
@@ -42,4 +42,9 @@ export function offerFromSuggestion(suggestion: Suggestion): PracticeOffer | nul
 // True when this evaluation lets the learner try the same task again.
 export function canRetry(evaluation: Evaluation): boolean {
   return evaluation.retryAttemptId !== null;
+}
+
+// A failed check reuses the exact answer and attempt. A judged answer gets a new try.
+export function retryAttemptFor(evaluation: Evaluation): string | null {
+  return evaluation.verdict === "unavailable" ? evaluation.attemptId : evaluation.retryAttemptId;
 }

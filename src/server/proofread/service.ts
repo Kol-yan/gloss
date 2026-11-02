@@ -16,14 +16,16 @@ import { getDb, immediate, learnerScope, type Row } from "../db";
 import type { ServerDeps } from "../deps";
 import { ConflictError, InvalidRequestError } from "../errors";
 import { newId } from "../ids";
+import { staleBefore } from "../stale";
 import {
   ModelHttpError,
-  ModelNotConfiguredError,
   ModelOutputError,
   ModelTimeoutError,
   type TokenUsage,
 } from "../models/errors";
-import { estimateMaxCostMicros, metaChat, type MetaChatResult } from "../models/meta";
+import { estimateMaxCostMicros, type MetaChatResult } from "../models/meta";
+import { resolveProviderAccess, textModel } from "../models/access";
+import { chatWithAccess } from "../models/dispatch";
 import { textCostMicros } from "../models/prices";
 import { buildProofreadMessages } from "./prompt";
 import { resolveEdits } from "./edits";
@@ -33,8 +35,6 @@ export interface ProofreadDeps extends ServerDeps {
   config?: AppConfig;
 }
 
-const PROVIDER = "meta";
-
 export async function proofread(
   learner: Learner,
   input: ProofreadRequest,
@@ -43,6 +43,7 @@ export async function proofread(
   const config = deps.config ?? getConfig();
   const db = deps.db ?? getDb();
   const now = deps.now ?? new Date();
+  const access = resolveProviderAccess(learner.id, deps.providerAccess, db);
 
   const text = normalizeText(input.text);
   const sentences = splitSentences(text);
@@ -58,6 +59,14 @@ export async function proofread(
     params: { requestId: input.requestId },
   });
   if (existing) {
+    // A run still 'pending' after two minutes was abandoned by a dead process:
+    // record it as failed. Its reservation is swept to 'unknown' by the next
+    // reservation, so the cost stays counted.
+    if (existing.status === "pending" && String(existing.created_at) < staleBefore(now)) {
+      db.prepare(
+        "UPDATE check_runs SET status = 'failed' WHERE id = ? AND learner_id = ? AND status = 'pending'",
+      ).run(String(existing.id), learner.id);
+    }
     if (existing.text_hash !== textHash || existing.status !== "ok") throw new ConflictError();
     const checkRunId = String(existing.id);
     return {
@@ -68,8 +77,7 @@ export async function proofread(
     };
   }
 
-  if (!config.meta.apiKey) throw new ModelNotConfiguredError();
-  const model = config.meta.textModel;
+  const model = textModel(access, config);
   const messages = buildProofreadMessages(sentences);
   const inputChars =
     messages.reduce((total, message) => total + message.content.length, 0) +
@@ -103,7 +111,7 @@ export async function proofread(
       input.requestId,
       textHash,
       text.length,
-      PROVIDER,
+      access.provider,
       model,
       now.toISOString(),
     );
@@ -118,15 +126,17 @@ export async function proofread(
     // Deliberately not tied to the request's abort signal: if the browser
     // disconnects, the call still finishes and its result is stored, so a
     // retry with the same request id gets it without a second charge.
-    result = await metaChat(
+    result = await chatWithAccess(
       {
         model,
         messages,
         jsonSchema: PROOFREAD_JSON_SCHEMA,
         maxTokens: PROOFREAD_MAX_TOKENS,
+        reasoningEffort: "minimal",
         temperature: 0,
       },
-      { config },
+      access,
+      config,
     );
   } catch (error) {
     closeFailedRun(bookkeeping, error, Math.round(performance.now() - started));
