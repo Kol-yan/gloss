@@ -2,16 +2,17 @@
 
 import { useState, type KeyboardEvent, type ReactNode } from "react";
 import { EditorScreen } from "@/features/editor/editor-screen";
-import { SAMPLE_SUGGESTIONS, SAMPLE_TEXT, getSampleOffer, sampleCheckWithAi } from "@/features/editor/fixtures";
+import { SAMPLE_SUGGESTIONS, SAMPLE_TEXT, sampleCheckWithAi } from "@/features/editor/fixtures";
 import type { CheckStatus } from "@/features/editor/types";
 import { ExpressionsScreen } from "@/features/expressions/expressions-screen";
 import { SAMPLE_HISTORY } from "@/features/expressions/fixtures";
 import {
   SAMPLE_ANSWER,
-  SAMPLE_FEEDBACK,
+  SAMPLE_EVALUATIONS,
+  SAMPLE_HIDDEN_TASK,
   SAMPLE_VOICE_TASK,
   SAMPLE_WRITTEN_TASK,
-  sampleEvaluate,
+  sampleSubmit,
 } from "@/features/practice/fixtures";
 import { TryYourselfCard } from "@/features/practice/try-yourself-card";
 import type { Familiarity, PracticeOffer, Verdict } from "@/features/practice/types";
@@ -93,18 +94,24 @@ function EditorDemo({ phone }: { phone: boolean }) {
           key={status}
           initialText={SAMPLE_TEXT}
           initialSuggestions={SAMPLE_SUGGESTIONS}
-          initialChecksLeft={status === "quota" ? 0 : 7}
+          checksLeft={status === "quota" ? 0 : 7}
           initialCheckStatus={status}
           checkWithAi={status === "unavailable" ? undefined : sampleCheckWithAi}
-          getPracticeOffer={getSampleOffer}
+          onStartPractice={async () => {
+            await new Promise((resolve) => setTimeout(resolve, 600));
+            return true;
+          }}
         />
       </Stage>
     </>
   );
 }
 
-const WRITTEN_STATES: ReadonlyArray<{ id: "answering" | Verdict; label: string }> = [
+type WrittenState = "answering" | "hidden" | Verdict;
+
+const WRITTEN_STATES: ReadonlyArray<{ id: WrittenState; label: string }> = [
   { id: "answering", label: "Answering" },
+  { id: "hidden", label: "Answering (expression hidden)" },
   { id: "used_well", label: "Used well" },
   { id: "almost", label: "Almost" },
   { id: "not_yet", label: "Not yet" },
@@ -112,22 +119,18 @@ const WRITTEN_STATES: ReadonlyArray<{ id: "answering" | Verdict; label: string }
 ];
 
 function WrittenDemo({ phone }: { phone: boolean }) {
-  const [state, setState] = useState<"answering" | Verdict>("almost");
+  const [state, setState] = useState<WrittenState>("almost");
+  const verdict = state === "answering" || state === "hidden" ? null : state;
   return (
     <>
       <Chips label="State" options={WRITTEN_STATES} value={state} onChange={setState} />
       <Stage phone={phone}>
         <WrittenPractice
           key={state}
-          task={SAMPLE_WRITTEN_TASK}
-          evaluate={sampleEvaluate}
-          initial={
-            state === "answering"
-              ? undefined
-              : { answer: SAMPLE_ANSWER, feedback: SAMPLE_FEEDBACK[state] }
-          }
+          task={state === "hidden" ? SAMPLE_HIDDEN_TASK : SAMPLE_WRITTEN_TASK}
+          submit={sampleSubmit}
+          initial={verdict ? { answer: SAMPLE_ANSWER, evaluation: SAMPLE_EVALUATIONS[verdict] } : undefined}
           onContinue={() => setState("answering")}
-          onSkip={() => setState("answering")}
         />
       </Stage>
     </>
@@ -156,6 +159,7 @@ function SpeechDemo({ phone }: { phone: boolean }) {
     onRecordAgain: () => setLast("Record again"),
     onTypeInstead: () => setLast("Type instead"),
     onCheckAgain: () => setLast("Try again (check)"),
+    onShowHint: () => setLast("Need a hint?"),
     onContinue: () => setLast("Continue"),
     onSkip: () => setLast("Skip"),
   };
@@ -170,14 +174,13 @@ function SpeechDemo({ phone }: { phone: boolean }) {
       </p>
       <Stage phone={phone}>
         {selected ? (
-          <VoiceTaskView task={SAMPLE_VOICE_TASK} view={selected.view} {...handlers} />
+          <VoiceTaskView task={SAMPLE_VOICE_TASK} view={selected.view} hintShown={false} {...handlers} />
         ) : (
           <VoicePractice
             task={SAMPLE_VOICE_TASK}
             transcribe={sampleTranscribe}
-            evaluate={sampleEvaluate}
+            submit={sampleSubmit}
             onContinue={() => setId("idle")}
-            onSkip={() => setId("idle")}
           />
         )}
       </Stage>

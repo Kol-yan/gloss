@@ -1,5 +1,5 @@
 import { CheckIcon, CrossIcon, DashIcon, TildeIcon } from "@/components/ui/icons";
-import { VERDICT_LABEL, type PracticeFeedback, type Verdict } from "./types";
+import { VERDICT_LABEL, type Feedback, type Verdict } from "./types";
 
 // Verdicts differ by glyph and wording as well as colour. "Couldn't check" is
 // neutral: when the model fails, that is never presented as the learner's miss.
@@ -25,7 +25,7 @@ export function FeedbackPanel({
   answer,
   answerLabel = "Your answer",
 }: {
-  feedback: PracticeFeedback;
+  feedback: Feedback;
   answer: string;
   answerLabel?: string;
 }) {

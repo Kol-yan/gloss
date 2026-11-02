@@ -1,32 +1,30 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { PracticeFeedback, PracticeTask } from "@/features/practice/types";
+import type { Evaluation, PracticeTask, SubmitAnswer } from "@/features/practice/types";
 import { startRecording, type RecordingSession } from "./recorder";
 import { MAX_RECORDING_MS, MIN_RECORDING_MS, type Transcribe, type VoiceView } from "./types";
+import { recordingToWav } from "./wav";
 import { VoiceTaskView } from "./voice-view";
 
 export type VoicePracticeProps = {
   task: PracticeTask;
-  // Speech-to-text. Without it the task cannot turn audio into text and says so.
-  transcribe?: Transcribe;
-  // Judges the confirmed transcript. Any failure should come back as verdict "unavailable".
-  evaluate?: (transcript: string) => Promise<PracticeFeedback>;
-  onContinue: () => void;
-  onSkip: () => void;
+  transcribe: Transcribe;
+  submit: SubmitAnswer;
+  // `null` when the learner skipped the task or the answer was never judged.
+  onContinue: (evaluation: Evaluation | null) => void;
 };
 
-const COULD_NOT_CHECK: PracticeFeedback = {
-  verdict: "unavailable",
-  message: "We couldn't check this answer. It wasn't counted either way.",
-};
-
-export function VoicePractice({ task, transcribe, evaluate, onContinue, onSkip }: VoicePracticeProps) {
+export function VoicePractice({ task, transcribe, submit, onContinue }: VoicePracticeProps) {
   const [view, setView] = useState<VoiceView>({ kind: "idle" });
+  const [hintShown, setHintShown] = useState(false);
+  // Every try has its own attempt id; the server hands out the next one.
+  const [attemptId, setAttemptId] = useState(task.attemptId);
   const sessionRef = useRef<RecordingSession | null>(null);
   const startedAtRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
   const lastTranscriptRef = useRef("");
+  // Bumped whenever a running step stops mattering (cancel, new start, unmount).
   const runRef = useRef(0);
 
   const isBusy = view.kind === "starting" || view.kind === "recording" || view.kind === "processing";
@@ -60,26 +58,41 @@ export function VoicePractice({ task, transcribe, evaluate, onContinue, onSkip }
       return;
     }
 
-    const controller = new AbortController();
-    abortRef.current = controller;
-    let text: string | null = null;
+    let wav: Blob;
     try {
-      const result = transcribe ? await transcribe(recording.blob, controller.signal) : { ok: false as const };
-      text = result.ok ? result.text.trim() : null;
+      wav = await recordingToWav(recording.blob);
     } catch {
-      text = null;
+      if (run === runRef.current) {
+        setView({ kind: "error", reason: "transcribe_failed", lastTranscript: lastTranscriptRef.current });
+      }
+      return;
     }
     if (run !== runRef.current) return;
 
-    if (text === null) {
-      setView({ kind: "error", reason: "transcribe_failed", lastTranscript: lastTranscriptRef.current });
-    } else if (text === "") {
+    const controller = new AbortController();
+    abortRef.current = controller;
+    let result: Awaited<ReturnType<Transcribe>>;
+    try {
+      result = await transcribe(wav, attemptId, controller.signal);
+    } catch {
+      result = { ok: false, reason: "failed" };
+    }
+    if (run !== runRef.current) return;
+
+    if (!result.ok) {
+      const reason =
+        result.reason === "limit_reached" ? "limit_reached" : result.reason === "service_off" ? "service_off" : "transcribe_failed";
+      setView({ kind: "error", reason, lastTranscript: lastTranscriptRef.current });
+      return;
+    }
+    const text = result.text.trim();
+    if (text === "") {
       setView({ kind: "error", reason: "nothing_recorded", lastTranscript: lastTranscriptRef.current });
     } else {
       lastTranscriptRef.current = text;
       setView({ kind: "confirm", transcript: text });
     }
-  }, [transcribe]);
+  }, [transcribe, attemptId]);
 
   const start = useCallback(async () => {
     const run = ++runRef.current;
@@ -122,38 +135,38 @@ export function VoicePractice({ task, transcribe, evaluate, onContinue, onSkip }
     setView({ kind: "idle" });
   };
 
-  const check = async (transcript: string) => {
+  const check = async (transcript: string, id: string) => {
     const run = ++runRef.current;
     lastTranscriptRef.current = transcript;
+    setAttemptId(id);
     setView({ kind: "checking", transcript });
-    let feedback: PracticeFeedback;
-    try {
-      feedback = evaluate ? await evaluate(transcript) : COULD_NOT_CHECK;
-    } catch {
-      feedback = COULD_NOT_CHECK;
-    }
+    const evaluation = await submit({ attemptId: id, answer: transcript, hintUsed: hintShown });
     if (run !== runRef.current) return;
-    setView({ kind: "feedback", transcript, feedback });
+    setView({ kind: "feedback", transcript, evaluation });
   };
 
   return (
     <VoiceTaskView
       task={task}
       view={view}
+      hintShown={hintShown}
+      onShowHint={() => setHintShown(true)}
       onStart={start}
       onStop={stop}
       onCancel={cancel}
-      onConfirm={check}
+      onConfirm={(transcript) => void check(transcript, attemptId)}
       onRecordAgain={() => {
+        // After a judged try the server offers a fresh attempt id.
+        if (view.kind === "feedback" && view.evaluation.retryAttemptId) setAttemptId(view.evaluation.retryAttemptId);
         void start();
       }}
       onTypeInstead={() => setView({ kind: "confirm", transcript: lastTranscriptRef.current })}
       onCheckAgain={() => {
-        if (view.kind === "feedback") void check(view.transcript);
+        if (view.kind === "feedback") void check(view.transcript, view.evaluation.retryAttemptId ?? attemptId);
       }}
-      onContinue={onContinue}
+      onContinue={() => onContinue(view.kind === "feedback" && view.evaluation.verdict !== "unavailable" ? view.evaluation : null)}
       onSkip={() => {
-        if (!isBusy) onSkip();
+        if (!isBusy) onContinue(null);
       }}
     />
   );

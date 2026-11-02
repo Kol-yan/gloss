@@ -1,14 +1,28 @@
-// View-model types for practice. They describe what the screens need; the
-// server contracts for tasks and evaluation do not exist yet and should be
-// mapped onto these (or these onto the contracts) when the API is wired.
+// Practice types come from the shared contracts so the browser and the server
+// agree on one shape. Only UI constants and small mappers live here.
+import type { Evaluation, Familiarity, PracticeTask, Suggestion, Verdict } from "@/shared/contracts";
 
-export type Familiarity = "new" | "known_unused" | "used";
+export type { Evaluation, Familiarity, PracticeTask, Verdict };
 
 export const FAMILIARITY_OPTIONS: ReadonlyArray<{ value: Familiarity; label: string }> = [
   { value: "new", label: "New to me" },
   { value: "known_unused", label: "I know it but don't use it" },
   { value: "used", label: "I use it" },
 ];
+
+export const VERDICT_LABEL: Record<Verdict, string> = {
+  used_well: "Used well",
+  almost: "Almost",
+  not_yet: "Not yet",
+  unavailable: "Couldn't check",
+};
+
+// What the feedback panel needs from an evaluation.
+export type Feedback = Pick<Evaluation, "verdict" | "message" | "correction">;
+
+// Judges one answer. Never rejects: a failed call comes back as an
+// evaluation with verdict "unavailable", which is never counted.
+export type SubmitAnswer = (input: { attemptId: string; answer: string; hintUsed: boolean }) => Promise<Evaluation>;
 
 // Offered after the learner accepts a suggestion worth learning.
 export type PracticeOffer = {
@@ -18,30 +32,14 @@ export type PracticeOffer = {
   meaning: string;
 };
 
-// "unavailable" means the model could not judge the answer. It is never a
-// verdict on the learner and is never counted.
-export type Verdict = "used_well" | "almost" | "not_yet" | "unavailable";
+// Only AI "expression" suggestions that carry a meaning can become practice.
+export function offerFromSuggestion(suggestion: Suggestion): PracticeOffer | null {
+  if (suggestion.source !== "ai" || suggestion.category !== "expression") return null;
+  if (!suggestion.meaning || suggestion.replacement.trim() === "") return null;
+  return { suggestionId: suggestion.id, expression: suggestion.replacement.trim(), meaning: suggestion.meaning };
+}
 
-export const VERDICT_LABEL: Record<Verdict, string> = {
-  used_well: "Used well",
-  almost: "Almost",
-  not_yet: "Not yet",
-  unavailable: "Couldn't check",
-};
-
-export type PracticeFeedback = {
-  verdict: Verdict;
-  // One sentence of feedback.
-  message: string;
-  // One corrected line, when the answer needs it.
-  correction?: string;
-};
-
-export type PracticeTask = {
-  id: string;
-  kind: "written" | "voice";
-  expression: string;
-  meaning: string;
-  // A short situation the learner answers in their own words.
-  situation: string;
-};
+// True when this evaluation lets the learner try the same task again.
+export function canRetry(evaluation: Evaluation): boolean {
+  return evaluation.retryAttemptId !== null;
+}

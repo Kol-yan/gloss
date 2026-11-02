@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { AlertIcon, MicIcon, StopIcon } from "@/components/ui/icons";
 import { FeedbackPanel } from "@/features/practice/feedback-panel";
 import { PracticeShell, TaskCard } from "@/features/practice/practice-shell";
-import type { PracticeTask } from "@/features/practice/types";
+import { canRetry, type PracticeTask } from "@/features/practice/types";
 import { MAX_RECORDING_MS, type VoiceErrorReason, type VoiceView } from "./types";
 
 export type VoiceHandlers = {
@@ -17,8 +17,9 @@ export type VoiceHandlers = {
   onRecordAgain: () => void;
   // Opens the transcript box empty (or with the last transcript) so the learner can type the answer.
   onTypeInstead: () => void;
-  // Re-runs the check on the same transcript after a model failure.
+  // Re-runs the check on the same transcript after a failed check.
   onCheckAgain: () => void;
+  onShowHint: () => void;
   onContinue: () => void;
   onSkip: () => void;
 };
@@ -37,12 +38,20 @@ const ERROR_COPY: Record<VoiceErrorReason, { title: string; body: string }> = {
     body: "Type your answer instead, or open Glossy in another browser.",
   },
   nothing_recorded: {
-    title: "We couldn't hear anything",
-    body: "Check that your microphone is on and speak a little closer. Try again, or type your answer instead.",
+    title: "We didn't catch that",
+    body: "Check that your microphone is on and speak a little closer. Record again, or type your answer instead.",
   },
   transcribe_failed: {
     title: "We couldn't turn that into text",
     body: "That was on our side, not yours. Try again, or type your answer instead.",
+  },
+  limit_reached: {
+    title: "You've used today's speaking time",
+    body: "It comes back tomorrow. You can type your answer instead.",
+  },
+  service_off: {
+    title: "Speech isn't available today",
+    body: "You can type your answer instead.",
   },
 };
 
@@ -209,13 +218,18 @@ function VoiceCard({
 
 // Presentational: every state of the voice task is a pure function of `view`,
 // which is what the dev gallery renders. VoicePractice supplies the real behaviour.
-export function VoiceTaskView(props: { task: PracticeTask; view: VoiceView } & VoiceHandlers) {
+export function VoiceTaskView(props: { task: PracticeTask; view: VoiceView; hintShown: boolean } & VoiceHandlers) {
   // The draft lives in the keyed inner component so each new transcript starts fresh.
   const key = props.view.kind === "confirm" ? `confirm:${props.view.transcript}` : props.view.kind;
   return <VoiceTaskInner key={key} {...props} />;
 }
 
-function VoiceTaskInner({ task, view, ...handlers }: { task: PracticeTask; view: VoiceView } & VoiceHandlers) {
+function VoiceTaskInner({
+  task,
+  view,
+  hintShown,
+  ...handlers
+}: { task: PracticeTask; view: VoiceView; hintShown: boolean } & VoiceHandlers) {
   const [draft, setDraft] = useState(view.kind === "confirm" ? view.transcript : "");
 
   let rail: ReactNode;
@@ -264,22 +278,33 @@ function VoiceTaskInner({ task, view, ...handlers }: { task: PracticeTask; view:
         </>
       );
       break;
-    case "error":
-      rail = (
+    case "error": {
+      const typeOnly = view.reason === "limit_reached" || view.reason === "service_off";
+      rail = typeOnly ? (
+        <>
+          <span />
+          <Button variant="primary" onClick={handlers.onTypeInstead}>
+            Type instead
+          </Button>
+        </>
+      ) : (
         <>
           <Button variant="secondary" onClick={handlers.onTypeInstead}>
             Type instead
           </Button>
           <Button variant="primary" onClick={handlers.onStart}>
-            Try again
+            {view.reason === "nothing_recorded" ? "Record again" : "Try again"}
           </Button>
         </>
       );
       break;
+    }
     case "feedback": {
-      const verdict = view.feedback.verdict;
+      const { evaluation } = view;
+      const unavailable = evaluation.verdict === "unavailable";
+      const retry = canRetry(evaluation);
       rail =
-        verdict === "unavailable" ? (
+        unavailable && retry ? (
           <>
             <Button variant="quiet" onClick={handlers.onContinue}>
               Continue
@@ -288,18 +313,18 @@ function VoiceTaskInner({ task, view, ...handlers }: { task: PracticeTask; view:
               Try again
             </Button>
           </>
-        ) : verdict === "used_well" ? (
+        ) : !unavailable && evaluation.verdict !== "used_well" && retry ? (
           <>
-            <span />
+            <Button variant="quiet" onClick={handlers.onRecordAgain}>
+              Try again
+            </Button>
             <Button variant="primary" onClick={handlers.onContinue}>
               Continue
             </Button>
           </>
         ) : (
           <>
-            <Button variant="quiet" onClick={handlers.onRecordAgain}>
-              Try again
-            </Button>
+            <span />
             <Button variant="primary" onClick={handlers.onContinue}>
               Continue
             </Button>
@@ -311,9 +336,15 @@ function VoiceTaskInner({ task, view, ...handlers }: { task: PracticeTask; view:
 
   return (
     <PracticeShell rail={rail}>
-      <TaskCard task={task} withSituation={view.kind !== "feedback"} label="Speaking" />
+      <TaskCard
+        task={task}
+        withSituation={view.kind !== "feedback" || task.cue === "hidden"}
+        label="Speaking"
+        hintShown={hintShown}
+        onShowHint={view.kind === "feedback" ? undefined : handlers.onShowHint}
+      />
       {view.kind === "feedback" ? (
-        <FeedbackPanel feedback={view.feedback} answer={view.transcript} answerLabel="We heard" />
+        <FeedbackPanel feedback={view.evaluation} answer={view.transcript} answerLabel="We heard" />
       ) : (
         <VoiceCard
           view={view}

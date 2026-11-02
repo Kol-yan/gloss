@@ -22,6 +22,7 @@ function suggest(text: string, fragment: string, replacement: string, overrides:
     replacement,
     reason: "test",
     meaningChange: false,
+    meaning: null,
     ...overrides,
   };
 }
@@ -140,6 +141,14 @@ describe("editorReducer", () => {
     expect(next.suggestions.find((s) => s.original === "recieve")?.source).toBe("local");
   });
 
+  it("treats a wider cloud suggestion with the same effect as a duplicate", () => {
+    const text = "An apple and a orange.";
+    const doc = createDoc(text, [suggest(text, "a", "an", { id: "l", start: 13, end: 14 })]);
+    const wide = suggest(text, "a orange", "an orange", { id: "ai-wide", source: "ai" });
+    const next = editorReducer(doc, { type: "receive", source: "ai", forText: text, suggestions: [wide] });
+    expect(next.suggestions.map((s) => s.id)).toEqual(["l"]);
+  });
+
   it("rebases results that were computed for older text", () => {
     const doc = createDoc("Hello. " + TEXT);
     const stale = suggest(TEXT, "recieve", "receive", { id: "late", source: "ai" });
@@ -157,6 +166,43 @@ describe("editorReducer", () => {
       suggestions: [suggest(TEXT, "recieve", "receive", { source: "ai" })],
     });
     expect(next.suggestions).toHaveLength(0);
+  });
+});
+
+describe("stale cloud suggestions", () => {
+  const ai = (text: string, fragment: string, replacement: string, id: string) =>
+    suggest(text, fragment, replacement, { id, source: "ai" });
+
+  it("reports cloud suggestions that disappear after an edit, once per batch", () => {
+    const doc = createDoc(TEXT, [ai(TEXT, "recieve", "receive", "a1"), ai(TEXT, "unfortunatelly", "unfortunately", "a2")]);
+    const next = editorReducer(doc, { type: "edit", text: TEXT.replace("recieve", "recieved") });
+    expect(next.stale.items.map((s) => s.id)).toEqual(["a1"]);
+    expect(next.stale.text).toBe(TEXT);
+    // A following edit that removes nothing clears the batch.
+    const after = editorReducer(next, { type: "edit", text: next.text + " Ok." });
+    expect(after.stale.items).toHaveLength(0);
+  });
+
+  it("does not report local suggestions or the one the learner decided on", () => {
+    const doc = createDoc(TEXT, [suggest(TEXT, "recieve", "receive"), ai(TEXT, "unfortunatelly", "unfortunately", "a2")]);
+    expect(editorReducer(doc, { type: "edit", text: TEXT.replace("recieve", "x") }).stale.items).toHaveLength(0);
+    expect(editorReducer(doc, { type: "dismiss", id: "a2" }).stale.items).toHaveLength(0);
+    expect(editorReducer(doc, { type: "apply", id: "a2" }).stale.items).toHaveLength(0);
+  });
+
+  it("reports cloud suggestions removed because another fix overlapped them", () => {
+    const text = "I recieve it";
+    const doc = createDoc(text, [
+      ai(text, "recieve", "receive", "a"),
+      ai(text, "I recieve", "I received", "b"),
+    ]);
+    expect(editorReducer(doc, { type: "apply", id: "a" }).stale.items.map((s) => s.id)).toEqual(["b"]);
+  });
+
+  it("reports older cloud suggestions replaced by a new check", () => {
+    const doc = createDoc(TEXT, [ai(TEXT, "recieve", "receive", "old")]);
+    const next = editorReducer(doc, { type: "receive", source: "ai", forText: TEXT, suggestions: [] });
+    expect(next.stale.items.map((s) => s.id)).toEqual(["old"]);
   });
 });
 

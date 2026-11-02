@@ -2,7 +2,6 @@
 // model output and must never be imported by a real page.
 import { touchesMeaning } from "@/lib/text";
 import type { Suggestion, SuggestionCategory, SuggestionSource } from "@/shared/contracts";
-import type { PracticeOffer } from "@/features/practice/types";
 import type { ProofreadOutcome } from "./types";
 
 export const SAMPLE_TEXT = [
@@ -21,6 +20,7 @@ type Template = {
   fragment: string;
   replacement: string;
   reason: string;
+  meaning?: string;
 };
 
 const TEMPLATES: Template[] = [
@@ -63,6 +63,7 @@ const TEMPLATES: Template[] = [
     fragment: "move the meeting",
     replacement: "push the meeting back",
     reason: "\"Push back\" is a natural way to say you want a later date.",
+    meaning: "To move something to a later time.",
   },
   {
     id: "sample-ai-3",
@@ -92,24 +93,13 @@ export function buildSampleSuggestions(text: string, sources: SuggestionSource[]
       replacement: t.replacement,
       reason: t.reason,
       meaningChange: touchesMeaning(t.fragment, t.replacement),
+      meaning: t.meaning ?? null,
     });
   }
   return result;
 }
 
 export const SAMPLE_SUGGESTIONS = buildSampleSuggestions(SAMPLE_TEXT);
-
-const OFFERS: Record<string, PracticeOffer> = {
-  "sample-ai-2": {
-    suggestionId: "sample-ai-2",
-    expression: "push back",
-    meaning: "To move something to a later time.",
-  },
-};
-
-export function getSampleOffer(suggestion: Suggestion): PracticeOffer | null {
-  return OFFERS[suggestion.id] ?? null;
-}
 
 // Stands in for the cloud check in the gallery.
 export async function sampleCheckWithAi(text: string): Promise<ProofreadOutcome> {

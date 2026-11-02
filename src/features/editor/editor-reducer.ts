@@ -13,12 +13,21 @@ export type UndoEntry = {
   applied: Suggestion;
 };
 
+// Cloud suggestions that vanished without the learner deciding on them (their
+// words were edited, overlapped by another fix, or replaced by a newer check).
+// `text` is the text they were removed from. A new batch object means new
+// removals, so the editor can report each batch exactly once.
+export type StaleBatch = { items: Suggestion[]; text: string };
+
+export const NO_STALE: StaleBatch = { items: [], text: "" };
+
 export type EditorDoc = {
   text: string;
   suggestions: Suggestion[];
   // Keys of suggestions the learner dismissed; a later check does not bring them back.
   dismissed: string[];
   undo: UndoEntry[];
+  stale: StaleBatch;
 };
 
 export type EditorAction =
@@ -31,7 +40,13 @@ export type EditorAction =
 const MAX_UNDO = 50;
 
 export function createDoc(text = "", suggestions: Suggestion[] = []): EditorDoc {
-  return { text, suggestions: sortSuggestions(suggestions.filter((s) => canApply(text, s))), dismissed: [], undo: [] };
+  return {
+    text,
+    suggestions: sortSuggestions(suggestions.filter((s) => canApply(text, s))),
+    dismissed: [],
+    undo: [],
+    stale: NO_STALE,
+  };
 }
 
 export function suggestionKey(s: Pick<Suggestion, "category" | "original" | "replacement">): string {
@@ -86,6 +101,21 @@ export function rebaseSuggestions(oldText: string, newText: string, suggestions:
   return result;
 }
 
+// The smallest edit a suggestion makes, so "a" -> "an" and "a orange" -> "an orange" count as the same fix.
+function effectiveEdit(s: Suggestion): string {
+  const max = Math.min(s.original.length, s.replacement.length);
+  let prefix = 0;
+  while (prefix < max && s.original[prefix] === s.replacement[prefix]) prefix++;
+  let suffix = 0;
+  while (
+    suffix < max - prefix &&
+    s.original[s.original.length - 1 - suffix] === s.replacement[s.replacement.length - 1 - suffix]
+  ) {
+    suffix++;
+  }
+  return `${s.start + prefix}:${s.end - suffix}:${s.replacement.slice(prefix, s.replacement.length - suffix)}`;
+}
+
 function mergeBySource(doc: EditorDoc, source: SuggestionSource, incoming: Suggestion[]): Suggestion[] {
   const dismissed = new Set(doc.dismissed);
   const fresh = incoming.filter((s) => s.source === source && !dismissed.has(suggestionKey(s)) && canApply(doc.text, s));
@@ -94,7 +124,7 @@ function mergeBySource(doc: EditorDoc, source: SuggestionSource, incoming: Sugge
   // The same fix reported by both sources is shown once, as the local one.
   const seen = new Map<string, Suggestion>();
   for (const s of all) {
-    const key = `${s.start}:${s.end}:${s.replacement}`;
+    const key = effectiveEdit(s);
     const existing = seen.get(key);
     if (!existing || (existing.source === "ai" && s.source === "local")) seen.set(key, s);
   }
@@ -102,6 +132,17 @@ function mergeBySource(doc: EditorDoc, source: SuggestionSource, incoming: Sugge
 }
 
 export function editorReducer(doc: EditorDoc, action: EditorAction): EditorDoc {
+  const next = step(doc, action);
+  if (next === doc) return doc;
+  // Apply and dismiss are decisions of their own; everything else that
+  // disappears from a cloud check is reported as stale.
+  const decided = action.type === "apply" || action.type === "dismiss" ? action.id : null;
+  const kept = new Set(next.suggestions.map((s) => s.id));
+  const gone = doc.suggestions.filter((s) => s.source === "ai" && s.id !== decided && !kept.has(s.id));
+  return { ...next, stale: gone.length > 0 ? { items: gone, text: doc.text } : NO_STALE };
+}
+
+function step(doc: EditorDoc, action: EditorAction): EditorDoc {
   switch (action.type) {
     case "edit": {
       if (action.text === doc.text) return doc;

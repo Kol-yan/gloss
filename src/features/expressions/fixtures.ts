@@ -1,33 +1,30 @@
 // Sample history for the dev-only gallery. Not real learner data.
-import type { ExpressionHistory } from "./types";
+import type { ExpressionHistory } from "@/shared/contracts";
 
 export const SAMPLE_HISTORY: ExpressionHistory[] = [
   {
-    id: "push-back",
-    expression: "push back",
-    meaning: "To move something to a later time.",
-    nextPracticeLabel: "tomorrow",
+    expression: { id: "push-back", text: "push back", meaning: "To move something to a later time.", familiarity: "new" },
+    nextPracticeLabel: "Today",
+    due: true,
     entries: [
-      { id: "1", kind: "spoken", verdict: "almost", whenLabel: "Today" },
-      { id: "2", kind: "written", verdict: "used_well", whenLabel: "Yesterday" },
-      { id: "3", kind: "assisted", whenLabel: "3 days ago" },
+      { kind: "spoken_attempt", verdict: "almost", cue: "hidden", hintUsed: true, transcriptEdited: true, dayLabel: "Today" },
+      { kind: "written_attempt", verdict: "used_well", cue: "shown", hintUsed: false, transcriptEdited: false, dayLabel: "Yesterday" },
+      { kind: "assisted_use", verdict: null, cue: null, hintUsed: false, transcriptEdited: false, dayLabel: "3 Nov" },
     ],
   },
   {
-    id: "look-into",
-    expression: "look into",
-    meaning: "To check the facts about something.",
-    nextPracticeLabel: "in 4 days",
+    expression: { id: "look-into", text: "look into", meaning: "To check the facts about something.", familiarity: "known_unused" },
+    nextPracticeLabel: "In 4 days",
+    due: false,
     entries: [
-      { id: "4", kind: "written", verdict: "not_yet", whenLabel: "2 days ago" },
-      { id: "5", kind: "assisted", whenLabel: "5 days ago" },
+      { kind: "written_attempt", verdict: "not_yet", cue: "shown", hintUsed: false, transcriptEdited: false, dayLabel: "2 days ago" },
+      { kind: "assisted_use", verdict: null, cue: null, hintUsed: false, transcriptEdited: false, dayLabel: "30 Oct" },
     ],
   },
   {
-    id: "keep-in-the-loop",
-    expression: "keep someone in the loop",
-    meaning: "To keep telling someone what is happening.",
+    expression: { id: "in-the-loop", text: "keep someone in the loop", meaning: "To keep telling someone what is happening.", familiarity: "new" },
     nextPracticeLabel: null,
-    entries: [{ id: "6", kind: "assisted", whenLabel: "Today" }],
+    due: false,
+    entries: [{ kind: "assisted_use", verdict: null, cue: null, hintUsed: false, transcriptEdited: false, dayLabel: "Today" }],
   },
 ];

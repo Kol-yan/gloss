@@ -8,10 +8,13 @@ import { FAMILIARITY_OPTIONS, type Familiarity, type PracticeOffer } from "./typ
 // so the learner is invited to produce the expression themselves.
 export function TryYourselfCard({
   offer,
+  status = "idle",
   onStart,
   onSkip,
 }: {
   offer: PracticeOffer;
+  // "saving" while the expression is being added to the learner's list.
+  status?: "idle" | "saving" | "error";
   onStart: (familiarity: Familiarity) => void;
   onSkip: () => void;
 }) {
@@ -45,11 +48,17 @@ export function TryYourselfCard({
         </div>
       </fieldset>
 
+      {status === "error" ? (
+        <p role="alert" className="mt-2 text-sm leading-snug text-caution">
+          We couldn&apos;t save that just now. Try again.
+        </p>
+      ) : null}
+
       <div className="mt-3 flex items-center gap-1">
-        <Button variant="soft" onClick={() => onStart(familiarity)}>
-          Start practice
+        <Button variant="soft" onClick={() => onStart(familiarity)} pending={status === "saving"}>
+          {status === "saving" ? "Saving…" : "Start practice"}
         </Button>
-        <Button variant="quiet" onClick={onSkip}>
+        <Button variant="quiet" onClick={onSkip} disabled={status === "saving"}>
           Skip
         </Button>
       </div>

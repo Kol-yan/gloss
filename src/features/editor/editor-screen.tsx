@@ -5,46 +5,53 @@ import { useCallback, useEffect, useReducer, useRef, useState, type KeyboardEven
 import { canApply, normalizeText } from "@/lib/text";
 import { MAX_TEXT_LENGTH, type Suggestion } from "@/shared/contracts";
 import { TryYourselfCard } from "@/features/practice/try-yourself-card";
-import type { Familiarity, PracticeOffer } from "@/features/practice/types";
+import { offerFromSuggestion, type Familiarity, type PracticeOffer } from "@/features/practice/types";
 import { CheckBar } from "./check-bar";
 import { canUndo, createDoc, editorReducer } from "./editor-reducer";
 import { SuggestionRail, type RailNotice } from "./suggestion-rail";
 import type { CheckLocal, CheckStatus, CheckWithAi, ProofreadOutcome } from "./types";
 import { WritingSurface, type WritingSurfaceHandle } from "./writing-surface";
 
-type OfferState = { phase: "ask" | "started"; offer: PracticeOffer };
+type OfferState = { phase: "ask" | "saving" | "error" | "started"; offer: PracticeOffer };
 
 export type EditorScreenProps = {
   initialText?: string;
   // Must be ranges into initialText; anything that does not fit is dropped.
   initialSuggestions?: Suggestion[];
-  initialChecksLeft?: number | null;
+  // Checks left today; null when unknown. A number reported by a check wins over this.
+  checksLeft?: number | null;
+  // False when the server says cloud checking is off today. Local checks still work.
+  aiAvailable?: boolean;
   initialCheckStatus?: CheckStatus;
   // Cloud check. When missing, the check button reports that AI checking is unavailable.
   checkWithAi?: CheckWithAi;
   // In-browser rule checker. Runs shortly after the learner stops typing.
   checkLocal?: CheckLocal;
-  // Turns an accepted suggestion into a "Try using this yourself" offer, or null for none.
-  getPracticeOffer?: (suggestion: Suggestion) => PracticeOffer | null;
-  onStartPractice?: (offer: PracticeOffer, familiarity: Familiarity) => void;
-  onDecision?: (suggestion: Suggestion, decision: "accepted" | "rejected") => void;
+  // Adds the expression to the learner's practice list. Resolves true when it was saved.
+  // Without it the card simply confirms (used by the gallery).
+  onStartPractice?: (offer: PracticeOffer, familiarity: Familiarity) => Promise<boolean>;
+  // Called for every decision on a suggestion, with the text the learner was looking at.
+  // "stale" means a cloud suggestion disappeared without the learner deciding.
+  onDecision?: (suggestion: Suggestion, decision: "accepted" | "rejected" | "stale", text: string) => void;
 };
 
 export function EditorScreen({
   initialText = "",
   initialSuggestions = [],
-  initialChecksLeft = null,
+  checksLeft: checksLeftProp = null,
+  aiAvailable = true,
   initialCheckStatus = "idle",
   checkWithAi,
   checkLocal,
-  getPracticeOffer,
   onStartPractice,
   onDecision,
 }: EditorScreenProps) {
   const [doc, dispatch] = useReducer(editorReducer, undefined, () => createDoc(initialText, initialSuggestions));
   const [activeId, setActiveId] = useState<string | null>(null);
   const [status, setStatus] = useState<CheckStatus>(initialCheckStatus);
-  const [checksLeft, setChecksLeft] = useState<number | null>(initialChecksLeft);
+  // Set by a finished check; until then the number from the page is used.
+  const [reportedChecksLeft, setReportedChecksLeft] = useState<number | null>(null);
+  const checksLeft = reportedChecksLeft ?? checksLeftProp;
   const [checkedClean, setCheckedClean] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [notice, setNotice] = useState<RailNotice | null>(null);
@@ -67,6 +74,18 @@ export function EditorScreen({
     return () => clearTimeout(timer);
   }, [notice]);
 
+  // Cloud suggestions that vanished without a decision are reported once per batch.
+  const onDecisionRef = useRef(onDecision);
+  const reportedStale = useRef(doc.stale);
+  useEffect(() => {
+    onDecisionRef.current = onDecision;
+  });
+  useEffect(() => {
+    if (reportedStale.current === doc.stale) return;
+    reportedStale.current = doc.stale;
+    for (const suggestion of doc.stale.items) onDecisionRef.current?.(suggestion, "stale", doc.stale.text);
+  }, [doc.stale]);
+
   // Local checks run shortly after typing stops. They are best effort: a
   // failing local checker must never get in the way of writing.
   useEffect(() => {
@@ -80,7 +99,7 @@ export function EditorScreen({
       } catch {
         // Intentionally ignored, see above.
       }
-    }, 350);
+    }, 400);
     return () => {
       cancelled = true;
       clearTimeout(timer);
@@ -137,8 +156,8 @@ export function EditorScreen({
     setActiveId(null);
     if (!applicable) return;
     showNotice(suggestion.replacement ? `Applied: ${suggestion.replacement}` : "Applied: removed");
-    onDecision?.(suggestion, "accepted");
-    const offer = getPracticeOffer?.(suggestion) ?? null;
+    onDecision?.(suggestion, "accepted", doc.text);
+    const offer = offerFromSuggestion(suggestion);
     if (offer) setOfferState({ phase: "ask", offer });
     if (sheetOpen && doc.suggestions.length <= 1 && !offer && !offerState) closeSheet();
   };
@@ -149,7 +168,7 @@ export function EditorScreen({
     setActiveId(null);
     if (suggestion) {
       showNotice("Dismissed.");
-      onDecision?.(suggestion, "rejected");
+      onDecision?.(suggestion, "rejected", doc.text);
     }
     if (sheetOpen && doc.suggestions.length <= 1 && !offerState) closeSheet();
   };
@@ -172,7 +191,11 @@ export function EditorScreen({
       setStatus("idle");
       setCheckedClean(outcome.suggestions.length === 0);
       // Prefer the server's number; otherwise count down locally.
-      setChecksLeft((current) => (reported !== undefined ? reported : current === null ? null : Math.max(0, current - 1)));
+      setReportedChecksLeft((current) => {
+        if (reported !== undefined) return reported;
+        const known = current ?? checksLeftProp;
+        return known === null ? null : Math.max(0, known - 1);
+      });
     } else {
       setStatus(outcome.reason === "quota" ? "quota" : outcome.reason === "unavailable" ? "unavailable" : "failed");
     }
@@ -186,20 +209,31 @@ export function EditorScreen({
   };
 
   // Without a cloud checker wired in, the button explains instead of pretending.
-  let effectiveStatus: CheckStatus = checkWithAi ? status : "unavailable";
+  let effectiveStatus: CheckStatus = checkWithAi && aiAvailable ? status : "unavailable";
   if (effectiveStatus === "idle" && checksLeft !== null && checksLeft <= 0) effectiveStatus = "quota";
 
   const textIsEmpty = doc.text.trim() === "";
   const hasContent = doc.text !== "";
 
+  const startPractice = async (offer: PracticeOffer, familiarity: Familiarity) => {
+    setOfferState({ phase: "saving", offer });
+    let saved = true;
+    if (onStartPractice) {
+      try {
+        saved = await onStartPractice(offer, familiarity);
+      } catch {
+        saved = false;
+      }
+    }
+    setOfferState({ phase: saved ? "started" : "error", offer });
+  };
+
   const offerSlot = offerState ? (
-    offerState.phase === "ask" ? (
+    offerState.phase !== "started" ? (
       <TryYourselfCard
         offer={offerState.offer}
-        onStart={(familiarity) => {
-          onStartPractice?.(offerState.offer, familiarity);
-          setOfferState({ phase: "started", offer: offerState.offer });
-        }}
+        status={offerState.phase === "saving" ? "saving" : offerState.phase === "error" ? "error" : "idle"}
+        onStart={(familiarity) => void startPractice(offerState.offer, familiarity)}
         onSkip={() => {
           setOfferState(null);
           showNotice("Skipped.");

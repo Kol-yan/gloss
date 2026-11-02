@@ -18,7 +18,7 @@ const MESSAGES: Partial<Record<CheckStatus, ReactNode>> = {
       </Link>
     </>
   ),
-  unavailable: "AI checking isn't available right now. Checks on this device still work.",
+  unavailable: "AI checking isn't available today. Checks on this device still work.",
 };
 
 export function CheckBar({
