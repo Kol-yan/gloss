@@ -11,7 +11,8 @@ export type UndoEntry = {
   before: { text: string; suggestions: Suggestion[] };
   // Text right after applying. Undo is only offered while the text still equals this.
   after: string;
-  applied: Suggestion;
+  // One suggestion for a single Apply, several for "Fix all safe errors".
+  applied: Suggestion[];
 };
 
 // Cloud suggestions that vanished without the learner deciding on them (their
@@ -58,6 +59,8 @@ export type EditorAction =
   | { type: "edit"; text: string }
   | { type: "replace"; text: string }
   | { type: "apply"; id: string }
+  // Applies every safe fix (see planSafeFixes) as one step that one undo reverts.
+  | { type: "applySafe" }
   | { type: "dismiss"; id: string }
   | { type: "undo" }
   | { type: "receive"; source: SuggestionSource; forText: string; suggestions: Suggestion[] }
@@ -85,6 +88,26 @@ export function suggestionKey(s: Pick<Suggestion, "category" | "original" | "rep
 
 export function sortSuggestions(list: Suggestion[]): Suggestion[] {
   return [...list].sort((a, b) => a.start - b.start || a.end - b.end || a.id.localeCompare(b.id));
+}
+
+// A fix that can be applied without reading it first: a plain error whose edit
+// does not touch numbers, names or negation (those need an individual decision).
+export function isSafeFix(s: Suggestion): boolean {
+  return s.category === "error" && !s.meaningChange;
+}
+
+// The fixes "Fix all safe errors" applies, left to right. A fix that overlaps an
+// earlier one, or starts where another insertion already sits, is left for the
+// learner to decide; so is anything that no longer matches the text.
+export function planSafeFixes(text: string, suggestions: Suggestion[]): Suggestion[] {
+  const plan: Suggestion[] = [];
+  for (const s of sortSuggestions(suggestions)) {
+    if (!isSafeFix(s) || !canApply(text, s)) continue;
+    const last = plan.at(-1);
+    if (last && (s.start < last.end || s.start === last.start)) continue;
+    plan.push(s);
+  }
+  return plan;
 }
 
 export function canUndo(doc: EditorDoc): boolean {
@@ -198,14 +221,20 @@ export function editorReducer(doc: EditorDoc, action: EditorAction): EditorDoc {
   if (action.type === "replace") return next;
   // Apply and dismiss are decisions of their own; everything else that
   // disappears from a cloud check is reported as stale.
-  const decided = action.type === "apply" || action.type === "dismiss" ? action.id : null;
+  const decided = new Set<string>(
+    action.type === "apply" || action.type === "dismiss"
+      ? [action.id]
+      : action.type === "applySafe"
+        ? planSafeFixes(doc.text, doc.suggestions).map((s) => s.id)
+        : [],
+  );
   const kept = new Set(next.suggestions.map((s) => s.id));
-  const gone = doc.suggestions.filter((s) => s.source === "ai" && s.id !== decided && !kept.has(s.id));
+  const gone = doc.suggestions.filter((s) => s.source === "ai" && !decided.has(s.id) && !kept.has(s.id));
   return {
     ...next,
     stale: gone.length > 0 ? { items: gone, text: doc.text } : NO_STALE,
     // Only an apply that changed the text produces a batch; every other action clears it.
-    applied: action.type === "apply" && next.text !== doc.text ? next.applied : NO_APPLIED,
+    applied: (action.type === "apply" || action.type === "applySafe") && next.text !== doc.text ? next.applied : NO_APPLIED,
   };
 }
 
@@ -237,7 +266,7 @@ function step(doc: EditorDoc, action: EditorAction): EditorDoc {
       const entry: UndoEntry = {
         before: { text: doc.text, suggestions: doc.suggestions },
         after: next,
-        applied: target,
+        applied: [target],
       };
       return {
         ...doc,
@@ -251,6 +280,45 @@ function step(doc: EditorDoc, action: EditorAction): EditorDoc {
                 text: next,
               }
             : NO_APPLIED,
+      };
+    }
+
+    case "applySafe": {
+      const plan = planSafeFixes(doc.text, doc.suggestions);
+      if (plan.length === 0) return doc;
+      // From the right, so the offsets of the fixes still to apply stay valid.
+      let next = doc.text;
+      for (const fix of [...plan].reverse()) next = next.slice(0, fix.start) + fix.replacement + next.slice(fix.end);
+      const planned = new Set(plan.map((s) => s.id));
+      const others = doc.suggestions
+        .filter((s) => !planned.has(s.id) && plan.every((fix) => s.end <= fix.start || s.start >= fix.end))
+        .map((s) => {
+          const shift = plan.reduce((sum, fix) => (fix.end <= s.start ? sum + fix.replacement.length - fix.original.length : sum), 0);
+          return shift === 0 ? s : { ...s, start: s.start + shift, end: s.end + shift };
+        })
+        .filter((s) => canApply(next, s));
+      // The cloud fixes' new positions, so their sentences can be checked again.
+      const ranges: SentenceRange[] = [];
+      let moved = 0;
+      for (const fix of plan) {
+        const start = fix.start + moved;
+        moved += fix.replacement.length - fix.original.length;
+        if (fix.source !== "ai") continue;
+        for (const range of sentenceRangesTouching(next, start, start + fix.replacement.length)) {
+          if (!ranges.some((r) => r.start === range.start && r.end === range.end)) ranges.push(range);
+        }
+      }
+      const entry: UndoEntry = {
+        before: { text: doc.text, suggestions: doc.suggestions },
+        after: next,
+        applied: plan,
+      };
+      return {
+        ...doc,
+        text: next,
+        suggestions: others,
+        undo: [...doc.undo, entry].slice(-MAX_UNDO),
+        applied: ranges.length > 0 ? { ranges, text: next } : NO_APPLIED,
       };
     }
 

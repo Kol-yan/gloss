@@ -67,6 +67,14 @@ const TEMPLATES: Template[] = [
     meaning: "To move something to a later time.",
   },
   {
+    id: "sample-ai-4",
+    source: "ai",
+    category: "error",
+    fragment: "Ms Carter",
+    replacement: "Mrs Carter",
+    reason: "Check which title this person uses before you change it.",
+  },
+  {
     id: "sample-ai-3",
     source: "ai",
     category: "style",

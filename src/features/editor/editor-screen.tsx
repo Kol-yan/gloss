@@ -7,7 +7,9 @@ import { MAX_TEXT_LENGTH, type Suggestion } from "@/shared/contracts";
 import { TryYourselfCard } from "@/features/practice/try-yourself-card";
 import { offerFromSuggestion, type Familiarity, type PracticeOffer } from "@/features/practice/types";
 import { CheckBar } from "./check-bar";
-import { canUndo, createDoc, editorReducer, reportApplied } from "./editor-reducer";
+import { canUndo, createDoc, editorReducer, planSafeFixes, reportApplied } from "./editor-reducer";
+import { InlinePopover } from "./inline-popover";
+import { pickSuggestion, popoverReducer, sortedIndex, suggestionForCaret, type PopoverState } from "./popover-state";
 import {
   SentenceDetector,
   locateSentence,
@@ -90,7 +92,11 @@ export function EditorScreen({
   const [activeFlagId, setActiveFlagId] = useState<string | null>(null);
   const [jobs, setJobs] = useState<Record<string, SentenceJobState>>({});
   const [focusRequest, setFocusRequest] = useState<FocusRequest | null>(null);
+  const [popover, setPopover] = useState<PopoverState>(null);
+  // Bumped when the text scrolls or resizes, so the popover follows its word.
+  const [layoutTick, setLayoutTick] = useState(0);
 
+  const containerRef = useRef<HTMLDivElement>(null);
   const surfaceRef = useRef<WritingSurfaceHandle>(null);
   const railRef = useRef<HTMLElement>(null);
   const openerRef = useRef<HTMLElement | null>(null);
@@ -209,6 +215,7 @@ export function EditorScreen({
 
   const undo = useCallback(() => {
     dispatch({ type: "undo" });
+    setPopover(null);
     showNotice("Undone.");
   }, [showNotice]);
 
@@ -228,6 +235,44 @@ export function EditorScreen({
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [undoAvailable, undo]);
 
+  // The inline popover shows one suggestion at the underlined word; a popover
+  // whose suggestion is gone (edited, replaced, applied elsewhere) is not drawn.
+  const popoverSuggestion = popover ? doc.suggestions.find((s) => s.id === popover.id) : undefined;
+  const popoverId = popoverSuggestion ? popoverSuggestion.id : null;
+  const popoverVia = popover ? popover.via : "pointer";
+  const safeCount = useMemo(() => planSafeFixes(doc.text, doc.suggestions).length, [doc.text, doc.suggestions]);
+
+  const getPopoverAnchor = () => {
+    const container = containerRef.current;
+    return popoverId && container ? (surfaceRef.current?.anchorOf(popoverId, container) ?? null) : null;
+  };
+  const revealPopoverWord = () => {
+    if (popoverId) surfaceRef.current?.reveal(popoverId);
+  };
+  const bumpLayout = () => setLayoutTick((tick) => tick + 1);
+  const lostPopover = () => setPopover(null);
+
+  // A click anywhere else on the page puts the popover away; clicks in the text
+  // are handled by the text itself (they may open another underline).
+  useEffect(() => {
+    if (!popoverId) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if ((event.target as Element | null)?.closest("[data-inline-popover], [data-writing-surface]")) return;
+      setPopover(null);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [popoverId]);
+
+  // After a fix from the popover the caret goes behind the new words, so typing
+  // can go on where the learner was.
+  const pendingCaret = useRef<number | null>(null);
+  useEffect(() => {
+    if (pendingCaret.current === null) return;
+    surfaceRef.current?.focus(pendingCaret.current);
+    pendingCaret.current = null;
+  }, [doc.text]);
+
   // Move focus into the sheet when it opens.
   useEffect(() => {
     if (!sheetOpen) return;
@@ -246,6 +291,7 @@ export function EditorScreen({
   const handleChange = (raw: string, composing: boolean) => {
     // Normalizing mid-composition would fight the input method.
     dispatch({ type: "edit", text: composing ? raw : normalizeText(raw) });
+    setPopover(null);
     setCheckedClean(false);
     setSampleNotice("");
   };
@@ -256,6 +302,7 @@ export function EditorScreen({
     setStatus("idle");
     setActiveId(null);
     setActiveFlagId(null);
+    setPopover(null);
     setOfferState(null);
     setJobs({});
     setNotice(null);
@@ -286,6 +333,74 @@ export function EditorScreen({
       onDecision?.(suggestion, "rejected", doc.text);
     }
     if (sheetOpen && doc.suggestions.length <= 1 && !offerState) closeSheet();
+  };
+
+  // Fixes every safe error at once. One Undo puts them all back. Each fix is
+  // reported as an accepted decision, like an Apply on its own card.
+  const fixAllSafe = () => {
+    const plan = planSafeFixes(doc.text, doc.suggestions);
+    if (plan.length === 0) return;
+    dispatch({ type: "applySafe" });
+    setActiveId(null);
+    setPopover(null);
+    showNotice(`Fixed ${plan.length} ${plan.length === 1 ? "error" : "errors"}. Undo puts them back.`);
+    for (const fix of plan) onDecision?.(fix, "accepted", doc.text);
+  };
+
+  const openPopoverFor = (ids: string[]) => {
+    const picked = pickSuggestion(doc.suggestions.filter((s) => ids.includes(s.id)));
+    setPopover(picked ? { id: picked.id, via: "pointer" } : null);
+    // On a touch screen the keyboard would cover the sheet; tapping the text again brings it back.
+    if (picked && window.matchMedia("(pointer: coarse)").matches) (document.activeElement as HTMLElement | null)?.blur();
+  };
+
+  // Where the keyboard goes after a decision: the next underline, or back to the text.
+  const settlePopover = (next: PopoverState, caret: number | null) => {
+    setPopover(next);
+    if (!next && caret !== null) pendingCaret.current = caret;
+  };
+
+  const applyFromPopover = (id: string) => {
+    const target = doc.suggestions.find((s) => s.id === id);
+    if (!target) return;
+    const next = popoverReducer(popover, { type: "decided", applied: true }, doc.suggestions);
+    apply(id);
+    settlePopover(next, canApply(doc.text, target) ? target.start + target.replacement.length : null);
+  };
+
+  const dismissFromPopover = (id: string) => {
+    const target = doc.suggestions.find((s) => s.id === id);
+    if (!target) return;
+    const next = popoverReducer(popover, { type: "decided", applied: false }, doc.suggestions);
+    dismiss(id);
+    setPopover(next);
+    // The text did not change, so the textarea takes the focus back right away.
+    if (!next) surfaceRef.current?.focus(popover?.via === "keyboard" ? target.end : undefined);
+  };
+
+  const closePopover = (viaKeyboard: boolean) => {
+    setPopover(null);
+    surfaceRef.current?.focus(viaKeyboard && popoverSuggestion ? popoverSuggestion.end : undefined);
+  };
+
+  const stepPopover = (direction: 1 | -1) => setPopover((current) => popoverReducer(current, { type: "step", direction }, doc.suggestions));
+
+  // Alt+Enter in the text opens the popover at the caret, or at the next
+  // underline after it. Escape puts an open popover away.
+  const handleEditorKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === "Escape" && popoverId) {
+      event.preventDefault();
+      setPopover(null);
+      return;
+    }
+    if (event.key !== "Enter" || !event.altKey || event.ctrlKey || event.metaKey) return;
+    event.preventDefault();
+    const target = suggestionForCaret(doc.suggestions, event.currentTarget.selectionStart);
+    if (!target) {
+      showNotice("Nothing to review yet.");
+      return;
+    }
+    setPopover({ id: target.id, via: "keyboard" });
   };
 
   // Prefer the server's number; otherwise count down locally.
@@ -457,7 +572,7 @@ export function EditorScreen({
   ) : null;
 
   return (
-    <div className="@container relative mx-auto h-full w-full max-w-6xl">
+    <div ref={containerRef} className="@container relative mx-auto h-full w-full max-w-6xl">
       <h1 className="sr-only">Editor</h1>
       <div className="grid h-full grid-cols-1 grid-rows-[minmax(0,1fr)_auto] @3xl:grid-cols-[minmax(0,1fr)_22.5rem]">
         <div className="flex min-h-0 flex-col px-4 pt-3 pb-3 @3xl:pr-3">
@@ -471,15 +586,35 @@ export function EditorScreen({
             value={doc.text}
             suggestions={doc.suggestions}
             flags={flags}
-            activeId={activeId}
+            activeId={popoverId ?? activeId}
             activeFlagId={activeFlagId}
             onChange={handleChange}
+            onTextClick={openPopoverFor}
+            onEditorKeyDown={handleEditorKeyDown}
+            onLayoutChange={popoverId ? bumpLayout : undefined}
             handleRef={surfaceRef}
             nearLimit={doc.text.length >= MAX_TEXT_LENGTH * 0.8}
           />
         </div>
 
         <div className="col-start-1 row-start-2">
+          {popoverSuggestion ? (
+            <InlinePopover
+              suggestion={popoverSuggestion}
+              text={doc.text}
+              index={sortedIndex(doc.suggestions, popoverSuggestion.id)}
+              count={doc.suggestions.length}
+              via={popoverVia}
+              getAnchor={getPopoverAnchor}
+              reveal={revealPopoverWord}
+              layoutKey={layoutTick}
+              onApply={applyFromPopover}
+              onDismiss={dismissFromPopover}
+              onStep={stepPopover}
+              onClose={closePopover}
+              onLost={lostPopover}
+            />
+          ) : null}
           <CheckBar
             status={effectiveStatus}
             checksLeft={checksLeft}
@@ -524,6 +659,7 @@ export function EditorScreen({
             text={doc.text}
             activeId={activeId}
             canUndo={undoAvailable}
+            safeCount={safeCount}
             notice={notice}
             textIsEmpty={!hasContent}
             checkedClean={checkedClean}
@@ -538,6 +674,7 @@ export function EditorScreen({
             onDeactivateFlag={(id) => setActiveFlagId((current) => (current === id ? null : current))}
             onReviewFlag={(flag) => void reviewSentence(flag)}
             onDismissFlag={dismissFlag}
+            onFixAll={fixAllSafe}
             onUndo={undo}
             onClose={sheetOpen ? closeSheet : undefined}
           />

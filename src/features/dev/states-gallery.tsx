@@ -92,7 +92,9 @@ function EditorDemo({ phone }: { phone: boolean }) {
       </p>
       <p className="text-sm text-ink-muted">
         Press Apply on the &quot;push the meeting back&quot; card to see the Try it yourself card. Hover or focus a card to
-        highlight its words.
+        highlight its words. Click an underlined word, or press Alt+Enter in the text, to open the suggestion where it is;
+        then Tab moves to the next one, Enter applies and Esc closes. &quot;Fix all safe errors&quot; skips the title change
+        (it changes a name).
       </p>
       <Stage phone={phone}>
         <EditorScreen

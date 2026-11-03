@@ -4,6 +4,8 @@ import {
   canUndo,
   createDoc,
   editorReducer,
+  isSafeFix,
+  planSafeFixes,
   rebaseSuggestions,
   reportApplied,
   sentenceRangesTouching,
@@ -470,5 +472,115 @@ describe("buildSegments with sentence flags", () => {
     const word = segments.find((seg) => seg.text === "like");
     expect(word).toMatchObject({ category: "error", flag: "correction", flagActive: true });
     expect(segments.filter((seg) => seg.flag).every((seg) => seg.flagActive)).toBe(true);
+  });
+});
+
+describe("Fix all safe errors", () => {
+  const text = "I recieve the mail on 5 May. It was unfortunatelly late. We goed home, not work. Anna smiled.";
+  const err = (fragment: string, replacement: string, overrides: Partial<Suggestion> = {}) =>
+    suggest(text, fragment, replacement, { id: `e-${fragment}`, ...overrides });
+
+  function mixed(): EditorDoc {
+    return createDoc(text, [
+      err("recieve", "receive"),
+      err("unfortunatelly", "unfortunately", { source: "ai" }),
+      err("goed", "went", { source: "ai" }),
+      err("5 May", "6 May", { meaningChange: true }),
+      err("not work", "work", { meaningChange: true, id: "negation" }),
+      err("Anna", "Emma", { category: "style", id: "style-one" }),
+      err("mail", "post", { category: "expression", id: "expr-one", meaning: "letters" }),
+    ]);
+  }
+
+  it("is safe only for an error that does not change the meaning", () => {
+    const base = err("recieve", "receive");
+    expect(isSafeFix(base)).toBe(true);
+    expect(isSafeFix({ ...base, meaningChange: true })).toBe(false);
+    expect(isSafeFix({ ...base, category: "style" })).toBe(false);
+    expect(isSafeFix({ ...base, category: "expression" })).toBe(false);
+  });
+
+  it("plans only safe errors, in reading order", () => {
+    expect(planSafeFixes(text, mixed().suggestions).map((s) => s.id)).toEqual(["e-recieve", "e-unfortunatelly", "e-goed"]);
+  });
+
+  it("skips a fix that overlaps an earlier one, one that is stale and a second insertion at one spot", () => {
+    const wide = err("recieve the mail", "receive the post", { id: "wide" });
+    const inner = err("the", "a", { id: "inner" });
+    const stale = { ...err("goed", "went", { id: "stale" }), original: "gone" };
+    expect(planSafeFixes(text, [inner, wide, stale]).map((s) => s.id)).toEqual(["wide"]);
+
+    const t = "Hello world";
+    const first = suggest(t, "world", ", world", { id: "i1", original: "", start: 5, end: 5 });
+    const second = { ...first, id: "i2", replacement: "!" };
+    expect(planSafeFixes(t, [first, second]).map((s) => s.id)).toEqual(["i1"]);
+  });
+
+  it("applies every safe fix in one step and leaves the others pending and valid", () => {
+    const next = editorReducer(mixed(), { type: "applySafe" });
+    expect(next.text).toBe("I receive the mail on 5 May. It was unfortunately late. We went home, not work. Anna smiled.");
+    expect(next.suggestions.map((s) => s.id).sort()).toEqual(["e-5 May", "expr-one", "negation", "style-one"]);
+    for (const s of next.suggestions) expect(next.text.slice(s.start, s.end)).toBe(s.original);
+  });
+
+  it("is a no-op without safe errors", () => {
+    const doc = createDoc(text, [err("5 May", "6 May", { meaningChange: true }), err("Anna", "Emma", { category: "style" })]);
+    expect(editorReducer(doc, { type: "applySafe" })).toBe(doc);
+  });
+
+  it("is reverted by one undo that restores the text and all suggestions", () => {
+    const doc = mixed();
+    const next = editorReducer(doc, { type: "applySafe" });
+    expect(next.undo).toHaveLength(1);
+    expect(canUndo(next)).toBe(true);
+    const undone = editorReducer(next, { type: "undo" });
+    expect(undone.text).toBe(text);
+    expect(undone.suggestions.map((s) => s.id).sort()).toEqual(doc.suggestions.map((s) => s.id).sort());
+    expect(canUndo(undone)).toBe(false);
+  });
+
+  it("does not undo over text typed afterwards", () => {
+    const next = editorReducer(mixed(), { type: "applySafe" });
+    const typed = editorReducer(next, { type: "edit", text: next.text + " Ok." });
+    expect(canUndo(typed)).toBe(false);
+    expect(editorReducer(typed, { type: "undo" })).toBe(typed);
+  });
+
+  it("does not report accepted cloud fixes as stale, and reports the sentences they changed once", () => {
+    const next = editorReducer(mixed(), { type: "applySafe" });
+    expect(next.stale.items).toEqual([]);
+    const sentences = splitSentences(next.text);
+    expect(next.applied.text).toBe(next.text);
+    expect(next.applied.ranges).toEqual([
+      { start: sentences[1].start, end: sentences[1].end },
+      { start: sentences[2].start, end: sentences[2].end },
+    ]);
+    const recheck = vi.fn();
+    const reported = reportApplied(NO_APPLIED, next.applied, recheck);
+    expect(recheck).toHaveBeenCalledTimes(1);
+    reportApplied(reported, next.applied, recheck);
+    expect(recheck).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports nothing to re-check when only local fixes were applied", () => {
+    const doc = createDoc(text, [err("recieve", "receive"), err("goed", "went")]);
+    expect(editorReducer(doc, { type: "applySafe" }).applied).toBe(NO_APPLIED);
+  });
+
+  it("reports a cloud suggestion that an applied fix overlapped as stale", () => {
+    const doc = createDoc(text, [
+      err("recieve the mail", "receive the post", { id: "wide", source: "local" }),
+      err("the mail", "the post", { id: "inside", source: "ai" }),
+    ]);
+    const next = editorReducer(doc, { type: "applySafe" });
+    expect(next.stale.items.map((s) => s.id)).toEqual(["inside"]);
+  });
+
+  it("moves later suggestions by the total change of the fixes before them", () => {
+    const next = editorReducer(mixed(), { type: "applySafe" });
+    const negation = next.suggestions.find((s) => s.id === "negation");
+    expect(negation && next.text.slice(negation.start, negation.end)).toBe("not work");
+    const anna = next.suggestions.find((s) => s.id === "style-one");
+    expect(anna && next.text.slice(anna.start, anna.end)).toBe("Anna");
   });
 });

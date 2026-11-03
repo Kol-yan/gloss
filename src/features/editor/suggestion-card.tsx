@@ -12,7 +12,7 @@ import {
   SparkIcon,
 } from "@/components/ui/icons";
 import type { Suggestion, SuggestionCategory, SuggestionSource } from "@/shared/contracts";
-import { describeChange, splitSpaces, spoken } from "./change-view";
+import { describeChange, splitSpaces, spoken, type ChangeView } from "./change-view";
 
 // Each category differs in icon, label and colour, so Style and Expression never read as errors.
 const CATEGORY: Record<SuggestionCategory, { label: string; className: string; Icon: typeof ErrorIcon }> = {
@@ -52,6 +52,33 @@ function Visible({ text }: { text: string }) {
     ) : (
       <span key={i}>{part.text}</span>
     ),
+  );
+}
+
+// The change as one line: a label for punctuation and spacing edits, otherwise
+// the old words struck through and the new ones in bold.
+export function ChangeSummary({ suggestion, change, className = "" }: { suggestion: Suggestion; change: ChangeView; className?: string }) {
+  const { original, replacement } = suggestion;
+  return change.label ? (
+    <p className={`${className} text-base font-semibold leading-snug`}>{change.label}</p>
+  ) : (
+    <p className={`${className} text-base leading-snug [overflow-wrap:anywhere]`}>
+      <span className="sr-only">Change </span>
+      <span className="text-ink-muted line-through decoration-1">
+        <Visible text={original} />
+      </span>
+      <span aria-hidden="true" className="mx-1.5 text-ink-muted">
+        →
+      </span>
+      <span className="sr-only"> to </span>
+      {replacement === "" ? (
+        <span className="font-semibold italic">remove it</span>
+      ) : (
+        <span className="font-semibold">
+          <Visible text={replacement} />
+        </span>
+      )}
+    </p>
   );
 }
 
@@ -106,27 +133,7 @@ export function SuggestionCard({
         <SourceLabel source={suggestion.source} />
       </div>
 
-      {change.label ? (
-        <p className="mt-2 text-base font-semibold leading-snug">{change.label}</p>
-      ) : (
-        <p className="mt-2 text-base leading-snug [overflow-wrap:anywhere]">
-          <span className="sr-only">Change </span>
-          <span className="text-ink-muted line-through decoration-1">
-            <Visible text={original} />
-          </span>
-          <span aria-hidden="true" className="mx-1.5 text-ink-muted">
-            →
-          </span>
-          <span className="sr-only"> to </span>
-          {replacement === "" ? (
-            <span className="font-semibold italic">remove it</span>
-          ) : (
-            <span className="font-semibold">
-              <Visible text={replacement} />
-            </span>
-          )}
-        </p>
-      )}
+      <ChangeSummary suggestion={suggestion} change={change} className="mt-2" />
 
       {change.before || change.after ? (
         <p className="mt-1 text-sm leading-snug text-ink-muted [overflow-wrap:anywhere]">

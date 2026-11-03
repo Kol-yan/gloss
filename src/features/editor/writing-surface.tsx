@@ -1,17 +1,28 @@
 "use client";
 
-import { useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type Ref } from "react";
+import { useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type Ref } from "react";
 import { Button } from "@/components/ui/button";
 import { MAX_TEXT_LENGTH } from "@/shared/contracts";
 import type { Suggestion } from "@/shared/contracts";
 import { buildSegments } from "./highlight";
+import type { Box } from "./popover-state";
 import type { SentenceFlag } from "./sentence-detect";
 
 export type WritingSurfaceHandle = {
-  focus: () => void;
+  // Puts the caret at `caret` when given, otherwise leaves it where it was.
+  focus: (caret?: number) => void;
+  // The caret position, or null while a range is selected.
+  caret: () => number | null;
   // Scrolls the textarea so the highlighted range of a suggestion or flagged sentence is visible.
   reveal: (id: string) => void;
+  // Where a suggestion's underline is on screen, relative to `relativeTo`. Null
+  // when it is scrolled out of the visible part of the text.
+  anchorOf: (id: string, relativeTo: Element) => Box | null;
 };
+
+// Pixels above and below an underline that still count as clicking it; the text
+// line is taller than the underlined glyphs.
+const HIT_SLACK = 4;
 
 // The textarea and its backdrop must lay text out identically, so they share
 // every property that affects wrapping.
@@ -25,6 +36,9 @@ export function WritingSurface({
   activeId,
   activeFlagId = null,
   onChange,
+  onTextClick,
+  onEditorKeyDown,
+  onLayoutChange,
   handleRef,
   nearLimit,
 }: {
@@ -36,6 +50,12 @@ export function WritingSurface({
   activeFlagId?: string | null;
   // `composing` is true while an input method is mid-composition.
   onChange: (value: string, composing: boolean) => void;
+  // A click that placed the caret (no selection) reports the suggestions
+  // underlined under the pointer; the list is empty when the click hit no underline.
+  onTextClick?: (ids: string[]) => void;
+  onEditorKeyDown?: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
+  // The text scrolled or the field was resized, so anything placed next to a word has to follow.
+  onLayoutChange?: () => void;
   handleRef?: Ref<WritingSurfaceHandle>;
   nearLimit?: boolean;
 }) {
@@ -48,8 +68,56 @@ export function WritingSurface({
     [value, suggestions, activeId, flags, activeFlagId],
   );
 
+  // The underlined runs of the backdrop that belong to a suggestion.
+  const marksFor = (id: string) =>
+    Array.from(backdropRef.current?.querySelectorAll<HTMLElement>("[data-ids]") ?? []).filter((el) =>
+      el.dataset.ids?.split(" ").includes(id),
+    );
+
+  // The suggestions underlined at a point of the screen. The backdrop does not
+  // take pointer events, so the text is hit-tested by the boxes of its runs.
+  const idsAt = (x: number, y: number): string[] => {
+    for (const mark of backdropRef.current?.querySelectorAll<HTMLElement>("[data-ids]") ?? []) {
+      for (const rect of mark.getClientRects()) {
+        if (x >= rect.left && x <= rect.right && y >= rect.top - HIT_SLACK && y <= rect.bottom + HIT_SLACK) {
+          return mark.dataset.ids?.split(" ").filter(Boolean) ?? [];
+        }
+      }
+    }
+    return [];
+  };
+
   useImperativeHandle(handleRef, () => ({
-    focus: () => textareaRef.current?.focus(),
+    focus: (caret) => {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+      textarea.focus();
+      if (caret !== undefined) textarea.setSelectionRange(caret, caret);
+    },
+    caret: () => {
+      const textarea = textareaRef.current;
+      return textarea && textarea.selectionStart === textarea.selectionEnd ? textarea.selectionStart : null;
+    },
+    anchorOf: (id, relativeTo) => {
+      const textarea = textareaRef.current;
+      if (!textarea) return null;
+      const view = textarea.getBoundingClientRect();
+      const origin = relativeTo.getBoundingClientRect();
+      // Runs that wrap onto several lines have several boxes; the first one in view wins.
+      for (const mark of marksFor(id)) {
+        for (const rect of mark.getClientRects()) {
+          if (rect.bottom > view.top && rect.top < view.bottom) {
+            return {
+              left: rect.left - origin.left,
+              top: rect.top - origin.top,
+              right: rect.right - origin.left,
+              bottom: rect.bottom - origin.top,
+            };
+          }
+        }
+      }
+      return null;
+    },
     reveal: (id) => {
       const textarea = textareaRef.current;
       const backdrop = backdropRef.current;
@@ -78,15 +146,31 @@ export function WritingSurface({
       backdrop.scrollTop = textarea.scrollTop;
     };
     sync();
-    const observer = new ResizeObserver(sync);
+    const observer = new ResizeObserver(() => {
+      sync();
+      onLayoutChange?.();
+    });
     observer.observe(textarea);
     return () => observer.disconnect();
-  }, [value]);
+  }, [value, onLayoutChange]);
+
+  // A collapsed selection after a click means the learner tapped a spot, not that they are selecting text.
+  const handleClick = (event: MouseEvent<HTMLTextAreaElement>) => {
+    const textarea = event.currentTarget;
+    if (textarea.selectionStart !== textarea.selectionEnd) return;
+    onTextClick?.(idsAt(event.clientX, event.clientY));
+  };
+
+  // The pointer shows that an underline can be clicked.
+  const handleMouseMove = (event: MouseEvent<HTMLTextAreaElement>) => {
+    if (!onTextClick) return;
+    event.currentTarget.style.cursor = idsAt(event.clientX, event.clientY).length > 0 ? "pointer" : "";
+  };
 
   const showCta = value === "" && !focused;
 
   return (
-    <div className="relative min-h-0 flex-1 overflow-hidden rounded-field border border-line-strong bg-card shadow-card focus-within:border-accent focus-within:ring-4 focus-within:ring-accent/15">
+    <div data-writing-surface className="relative min-h-0 flex-1 overflow-hidden rounded-field border border-line-strong bg-card shadow-card focus-within:border-accent focus-within:ring-4 focus-within:ring-accent/15">
       <div
         ref={backdropRef}
         aria-hidden="true"
@@ -124,7 +208,11 @@ export function WritingSurface({
         onCompositionEnd={(event) => onChange(event.currentTarget.value, false)}
         onScroll={(event) => {
           if (backdropRef.current) backdropRef.current.scrollTop = event.currentTarget.scrollTop;
+          onLayoutChange?.();
         }}
+        onClick={handleClick}
+        onMouseMove={handleMouseMove}
+        onKeyDown={onEditorKeyDown}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
         spellCheck={false}
@@ -132,6 +220,7 @@ export function WritingSurface({
         lang="en"
         maxLength={MAX_TEXT_LENGTH}
         aria-label="Your text"
+        aria-keyshortcuts="Alt+Enter"
         aria-describedby={nearLimit ? "editor-limit" : undefined}
         placeholder="Type or paste your English here."
         className={`absolute inset-0 block h-full w-full resize-none overflow-y-auto bg-transparent text-ink caret-accent outline-none placeholder:text-ink-muted ${TEXT_LAYOUT}`}

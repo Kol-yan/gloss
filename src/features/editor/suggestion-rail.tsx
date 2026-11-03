@@ -28,6 +28,7 @@ export function SuggestionRail({
   text,
   activeId,
   canUndo,
+  safeCount = 0,
   notice,
   textIsEmpty,
   checkedClean,
@@ -42,6 +43,7 @@ export function SuggestionRail({
   onDeactivateFlag = () => {},
   onReviewFlag = () => {},
   onDismissFlag = () => {},
+  onFixAll = () => {},
   onUndo,
   onClose,
 }: {
@@ -58,6 +60,8 @@ export function SuggestionRail({
   text: string;
   activeId: string | null;
   canUndo: boolean;
+  // How many errors "Fix all safe errors" would apply.
+  safeCount?: number;
   notice: RailNotice | null;
   textIsEmpty: boolean;
   // True after a cloud check that found nothing to change.
@@ -75,6 +79,7 @@ export function SuggestionRail({
   onDeactivateFlag?: (id: string) => void;
   onReviewFlag?: (flag: SentenceFlag) => void;
   onDismissFlag?: (id: string) => void;
+  onFixAll?: () => void;
   onUndo: () => void;
   // Present only where the rail is a sheet (narrow screens).
   onClose?: () => void;
@@ -127,11 +132,25 @@ export function SuggestionRail({
         </div>
       </div>
 
+      {safeCount >= 2 ? (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 pb-2">
+          <Button size="sm" variant="soft" onClick={onFixAll}>
+            Fix all safe errors ({safeCount})
+          </Button>
+          <p className="text-xs leading-snug text-ink-muted">Skips changes to numbers, names and negation.</p>
+        </div>
+      ) : null}
+
       <p role="status" aria-live="polite" className={notice ? "px-3 pb-2 text-sm font-semibold text-success" : "sr-only"}>
         {notice?.text ?? ""}
       </p>
 
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
+        {items.length > 0 ? (
+          <p className="mb-2 hidden text-xs leading-snug text-ink-muted @3xl:block">
+            Click an underline, or press Alt+Enter in the text, to review it where it is.
+          </p>
+        ) : null}
         {slot ? <div className="mb-2">{slot}</div> : null}
 
         {items.length > 0 ? (
