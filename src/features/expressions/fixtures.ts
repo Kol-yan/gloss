@@ -3,6 +3,18 @@ import type { ExpressionHistory } from "@/shared/contracts";
 
 export const SAMPLE_HISTORY: ExpressionHistory[] = [
   {
+    expression: { id: "sample-bottleneck", text: "bottleneck", ipa: "/ˈbɑtəlˌnɛk/", meaning: "A stage that slows down the rest of a process.", familiarity: "new" },
+    nextPracticeLabel: null,
+    due: false,
+    entries: [{ kind: "assisted_use", verdict: null, cue: null, hintUsed: false, transcriptEdited: false, dayLabel: "Today" }],
+  },
+  {
+    expression: { id: "sample-workaround", text: "workaround", ipa: null, meaning: "A temporary way to deal with a problem.", familiarity: "known_unused" },
+    nextPracticeLabel: null,
+    due: false,
+    entries: [],
+  },
+  {
     expression: { id: "push-back", text: "push back", meaning: "To move something to a later time.", familiarity: "new" },
     nextPracticeLabel: "Today",
     due: true,
