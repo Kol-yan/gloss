@@ -1,0 +1,1062 @@
+[
+  {
+    "id": "case-001",
+    "text": "The house that the family lives in belongs to the man who painted the fence they built.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-002",
+    "text": "Lisa asked Maria to call her back once the meeting finishes.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-003",
+    "text": "The conference was held in a very big hall, which was really cool and had lots of stuff.",
+    "label": "needs_word_choice",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output; spot-checked",
+    "model_label": "needs_word_choice",
+    "spot_check": {
+      "label": "needs_word_choice",
+      "verdict": "agree",
+      "note": "Cool and stuff are vague choices for a factual description of the hall."
+    }
+  },
+  {
+    "id": "case-004",
+    "text": "The river is calm in the early morning, and fishermen often arrive before sunrise.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-005",
+    "text": "The new bridge will open to traffic next spring, which are great news for commuters.",
+    "label": "needs_correction",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "needs_correction"
+  },
+  {
+    "id": "case-006",
+    "text": "Please review the attached documents and return them to the team with any changes they require.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-007",
+    "text": "She reviewed the contract carefully before signing it.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-008",
+    "text": "If the package does not arrive by Thursday, please contact the shipping company.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-009",
+    "text": "Before the meeting ends, the chair will decide whether to table the amendment or discuss it.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output; spot-checked",
+    "model_label": "none",
+    "spot_check": {
+      "label": "none",
+      "verdict": "agree",
+      "note": "Table the amendment is a standard North American usage in this contrast."
+    }
+  },
+  {
+    "id": "case-010",
+    "text": "The train leaves at 7:40, so we should be at the station by seven.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-011",
+    "text": "The hike was a bit difficult, but it was also kind of fun and sort of rewarding.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-012",
+    "text": "Thank you for your patience while we resolved the problem with your order.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-013",
+    "text": "Let's make a research about the three options before the budget meeting on Monday.",
+    "label": "needs_word_choice",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output; spot-checked",
+    "model_label": "needs_word_choice",
+    "spot_check": {
+      "label": "needs_word_choice",
+      "verdict": "agree",
+      "note": "Make a research is an unnatural collocation; do research is idiomatic."
+    }
+  },
+  {
+    "id": "case-014",
+    "text": "He has went to the store twice this morning already.",
+    "label": "needs_correction",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "needs_correction"
+  },
+  {
+    "id": "case-015",
+    "text": "The workers were very sad about the decision, and their sadness made the mood really bad.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-016",
+    "text": "The kids was playing in the garden when the storm suddenly started.",
+    "label": "needs_correction",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "needs_correction"
+  },
+  {
+    "id": "case-017",
+    "text": "Our team has made a lot of progress recently, although we still have some issues to work out.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-018",
+    "text": "The list of required documents are longer than we expected, so please check it again before Friday.",
+    "label": "needs_correction",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "needs_correction"
+  },
+  {
+    "id": "case-019",
+    "text": "Everyone in the room liked the plan that the manager explained to the client yesterday, except for her.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-020",
+    "text": "Because the flight was delayed, we missed the connection and spent the night in the airport.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-021",
+    "text": "The results were pretty bad, so we need to fix a lot of stuff before the launch.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-022",
+    "text": "The coffee was too hot to drink right away, so I wait a few minutes before tasting it.",
+    "label": "needs_correction",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "needs_correction"
+  },
+  {
+    "id": "case-023",
+    "text": "The machine is very good at doing its job, and it works fine most of the time.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-024",
+    "text": "Students who think about the question too long tend to miss the deadline, which they dislike.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-025",
+    "text": "The manager spoke to the engineer after he had reviewed the design, and he was not happy.",
+    "label": "needs_clarity",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "needs_clarity"
+  },
+  {
+    "id": "case-026",
+    "text": "She is more taller than her older sister, but they are both very friendly.",
+    "label": "needs_correction",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "needs_correction"
+  },
+  {
+    "id": "case-027",
+    "text": "The bridge was built in order to provide a means of crossing for people who wanted to get over the river.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-028",
+    "text": "The rain effected the picnic, so we moved everything into the community hall.",
+    "label": "needs_correction",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "needs_correction"
+  },
+  {
+    "id": "case-029",
+    "text": "The soup needed more salt, so I put in a lot of salt and it tasted better.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-030",
+    "text": "The meeting was really important, and it was very good and nice for everyone who came.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-031",
+    "text": "She gave a very interesting speech that was full of many interesting things.",
+    "label": "needs_word_choice",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output; spot-checked",
+    "model_label": "needs_word_choice",
+    "spot_check": {
+      "label": "needs_word_choice",
+      "verdict": "agree",
+      "note": "Interesting is repeated and the final phrase is vague."
+    }
+  },
+  {
+    "id": "case-032",
+    "text": "It was clear that the old system needed replacing, but the vendor did not provide the logs, which had been requested.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-033",
+    "text": "The bakery's cakes are delicious, but the prices are a bit too high for my budget and so on.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-034",
+    "text": "The editor cut the chapter that the writer had rewritten after the feedback because it was too long.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-035",
+    "text": "Water boils at a lower temperature at high altitude, so pasta takes longer to cook there.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-036",
+    "text": "Their going to be late because the bus broke down near the hospital.",
+    "label": "needs_correction",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "needs_correction"
+  },
+  {
+    "id": "case-037",
+    "text": "After the rain stopped, the children ran outside to look for worms on the wet sidewalk.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output; spot-checked",
+    "model_label": "none",
+    "spot_check": {
+      "label": "none",
+      "verdict": "agree",
+      "note": "Natural and clear sentence."
+    }
+  },
+  {
+    "id": "case-038",
+    "text": "The report was sent to the auditors after it had been reviewed by the board, and they approved it.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-039",
+    "text": "The speaker seemed disinterested in the topic, so she barely listened to the questions.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-040",
+    "text": "The new phone has a lot of cool features that make it very useful for everything.",
+    "label": "needs_word_choice",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "needs_word_choice"
+  },
+  {
+    "id": "case-041",
+    "text": "She suggested that we meets at the cafe near the station at noon.",
+    "label": "needs_correction",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "needs_correction"
+  },
+  {
+    "id": "case-042",
+    "text": "The restaurant was pretty good, but the food was kind of expensive for what it was.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output; spot-check adjudication",
+    "model_label": "needs_word_choice",
+    "spot_check": {
+      "label": "none",
+      "verdict": "disagree",
+      "note": "The wording is informal but idiomatic; without context it is not clearly a word-choice problem."
+    }
+  },
+  {
+    "id": "case-043",
+    "text": "The museum, which we visited last summer, have reopened its east wing.",
+    "label": "needs_correction",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output; spot-checked",
+    "model_label": "needs_correction",
+    "spot_check": {
+      "label": "needs_correction",
+      "verdict": "agree",
+      "note": "Museum is singular, so have should be has."
+    }
+  },
+  {
+    "id": "case-044",
+    "text": "The offer for the house was accepted by the seller, who had lowered it twice.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-045",
+    "text": "Our manager asked whether I has finished the budget spreadsheet yet.",
+    "label": "needs_correction",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "needs_correction"
+  },
+  {
+    "id": "case-046",
+    "text": "The new policy affects everyone who works with the nurses and their patients.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-047",
+    "text": "He asked whether the new software could export files in PDF format.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-048",
+    "text": "Could you tell me where is the nearest pharmacy that is open on Sundays?",
+    "label": "needs_correction",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "needs_correction"
+  },
+  {
+    "id": "case-049",
+    "text": "The flowers were very pretty and they smelled nice, so the room looked good.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-050",
+    "text": "Would you prefer to meet in the morning or after lunch on Wednesday?",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-051",
+    "text": "I have been learning Spanish for two years, and I can now hold a simple conversation.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-052",
+    "text": "Could you send me the revised schedule when you have a chance?",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-053",
+    "text": "The mayor met the leaders of the neighborhood groups after the council rejected the plan they had supported.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-054",
+    "text": "The company announced it's new policy on remote work this morning.",
+    "label": "needs_correction",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "needs_correction"
+  },
+  {
+    "id": "case-055",
+    "text": "The company's new logo is very unique and totally special in a really unique way.",
+    "label": "needs_word_choice",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "needs_word_choice"
+  },
+  {
+    "id": "case-056",
+    "text": "Me and my brother will drive to the lake on Saturday if the weather stays nice.",
+    "label": "needs_correction",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "needs_correction"
+  },
+  {
+    "id": "case-057",
+    "text": "The recipe calls for two tablespoon of olive oil and a pinch of salt.",
+    "label": "needs_correction",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output; spot-checked",
+    "model_label": "needs_correction",
+    "spot_check": {
+      "label": "needs_correction",
+      "verdict": "agree",
+      "note": "Plural count nouns take the plural form after two."
+    }
+  },
+  {
+    "id": "case-058",
+    "text": "The team is definately going to finish the redesign before the holiday.",
+    "label": "needs_correction",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output; spot-checked",
+    "model_label": "needs_correction",
+    "spot_check": {
+      "label": "needs_correction",
+      "verdict": "agree",
+      "note": "Definite spelling error: definately should be definitely."
+    }
+  },
+  {
+    "id": "case-059",
+    "text": "Our team leader and his assistant want to meet with the client and the manager, who agreed to it.",
+    "label": "needs_clarity",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "needs_clarity"
+  },
+  {
+    "id": "case-060",
+    "text": "I saw the man with the telescope on the hill.",
+    "label": "needs_clarity",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output; spot-checked",
+    "model_label": "needs_clarity",
+    "spot_check": {
+      "label": "needs_clarity",
+      "verdict": "agree",
+      "note": "With the telescope can describe either the speaker or the man."
+    }
+  },
+  {
+    "id": "case-061",
+    "text": "Yesterday I go to the bank to open a new savings account.",
+    "label": "needs_correction",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "needs_correction"
+  },
+  {
+    "id": "case-062",
+    "text": "The noise from the construction site was extremely loud and bothered me quite a lot.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-063",
+    "text": "He's very confident in his abilities, and his confidence is quite strong.",
+    "label": "needs_word_choice",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "needs_word_choice"
+  },
+  {
+    "id": "case-064",
+    "text": "Before you install the update, make sure your laptop is connected to power.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-065",
+    "text": "I don't think nobody saw what happened in the hallway after the meeting.",
+    "label": "needs_correction",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "needs_correction"
+  },
+  {
+    "id": "case-066",
+    "text": "I finished the report last night and sent it to the client this morning.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-067",
+    "text": "The hotel room was clean, quiet, and close to the old town.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-068",
+    "text": "The doctor told the patient that their condition was improving, so they could go home today.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-069",
+    "text": "We planted tomatoes, basil, and peppers in the backyard this spring.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-070",
+    "text": "The number of people who signed up for the course were higher than expected.",
+    "label": "needs_correction",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output; spot-checked",
+    "model_label": "needs_correction",
+    "spot_check": {
+      "label": "needs_correction",
+      "verdict": "agree",
+      "note": "The subject head number is singular, so were should be was."
+    }
+  },
+  {
+    "id": "case-071",
+    "text": "Please bring your student card and a printed copy of the application form.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-072",
+    "text": "The teacher told the student that the essay was excellent, but she did not believe him.",
+    "label": "needs_clarity",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output; spot-checked",
+    "model_label": "needs_clarity",
+    "spot_check": {
+      "label": "needs_clarity",
+      "verdict": "agree",
+      "note": "The pronouns do not make clear whether the teacher or student disbelieved someone."
+    }
+  },
+  {
+    "id": "case-073",
+    "text": "The doctor's explanation was very enigmatic, and it was easy to understand.",
+    "label": "needs_word_choice",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "needs_word_choice"
+  },
+  {
+    "id": "case-074",
+    "text": "Please let me know if there is any thing else you need from my side.",
+    "label": "needs_correction",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "needs_correction"
+  },
+  {
+    "id": "case-075",
+    "text": "Our team reduced the average response time from two days to six hours.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-076",
+    "text": "The lecture was boring, the professor was boring, and everything about the day was boring.",
+    "label": "needs_word_choice",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "needs_word_choice"
+  },
+  {
+    "id": "case-077",
+    "text": "Our neighbors are very nice people who are always very helpful and kind to everyone.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-078",
+    "text": "The company hired four engineers in March and two more in May.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-079",
+    "text": "The new software is very user-friendly and makes it super easy for people to do things.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-080",
+    "text": "The client was very upset, and he was extremely angry and really mad about the delay.",
+    "label": "needs_word_choice",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output; spot-checked",
+    "model_label": "needs_word_choice",
+    "spot_check": {
+      "label": "needs_word_choice",
+      "verdict": "agree",
+      "note": "The three near-synonyms repeat the same emotion and make the wording needlessly repetitive."
+    }
+  },
+  {
+    "id": "case-081",
+    "text": "Each of the students have to bring their own laptop to the workshop.",
+    "label": "needs_correction",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "needs_correction"
+  },
+  {
+    "id": "case-082",
+    "text": "The company will not hire people who lack experience without a degree.",
+    "label": "needs_clarity",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output; spot-checked",
+    "model_label": "needs_clarity",
+    "spot_check": {
+      "label": "needs_clarity",
+      "verdict": "agree",
+      "note": "Without a degree can attach to the company action or to the candidates."
+    }
+  },
+  {
+    "id": "case-083",
+    "text": "The city plans to add three new bus routes next year to serve the growing suburbs.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-084",
+    "text": "The results of the survey show that most people do not like it.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-085",
+    "text": "The museum is closed on Mondays, so plan your visit for another day.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-086",
+    "text": "Anna showed her friend the report that she had written, and then she left.",
+    "label": "needs_clarity",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output; spot-checked",
+    "model_label": "needs_clarity",
+    "spot_check": {
+      "label": "needs_clarity",
+      "verdict": "agree",
+      "note": "She can refer to Anna or to her friend."
+    }
+  },
+  {
+    "id": "case-087",
+    "text": "Visiting relatives can be exhausting, especially when they stay for several weeks.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output; spot-checked",
+    "model_label": "none",
+    "spot_check": {
+      "label": "none",
+      "verdict": "agree",
+      "note": "The sentence is understandable as a general statement; its alternate reading does not block meaning."
+    }
+  },
+  {
+    "id": "case-088",
+    "text": "The library extended its opening hours during exams, which helped many students.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-089",
+    "text": "The report was very comprehensible in its coverage of the regional market.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-090",
+    "text": "I would like to recieve the final invoice by the end of this month.",
+    "label": "needs_correction",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "needs_correction"
+  },
+  {
+    "id": "case-091",
+    "text": "Flying planes can be dangerous for pilots who have not been trained properly.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-092",
+    "text": "Regular exercise improves sleep quality for many adults, according to recent studies.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-093",
+    "text": "The function returns the value before the check is complete, so it is not always safe.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-094",
+    "text": "Our flight was cancelled, but the airline offered us a hotel room and meal vouchers.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-095",
+    "text": "The movie was a huge success, but I thought it was kind of stupid in some parts.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-096",
+    "text": "We discussed hiring a consultant with the director before the vote, and she agreed with it.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output; spot-checked",
+    "model_label": "none",
+    "spot_check": {
+      "label": "none",
+      "verdict": "agree",
+      "note": "The likely reading identifies the director as the discussion partner and she; no clear issue blocks comprehension."
+    }
+  },
+  {
+    "id": "case-097",
+    "text": "Neither of the two candidates were willing to accept the offer on the table.",
+    "label": "needs_correction",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "needs_correction"
+  },
+  {
+    "id": "case-098",
+    "text": "The critic's review was ambivalent, and it was very positive from start to finish.",
+    "label": "needs_clarity",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "needs_clarity"
+  },
+  {
+    "id": "case-099",
+    "text": "Add the flour gradually while stirring, so the batter stays smooth.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-100",
+    "text": "Most of the work was done by volunteers who gave up their weekends.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-101",
+    "text": "I'm going to try to comprehend the instructions and maybe do them in a good way.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-102",
+    "text": "The report was writen by someone who had never visited the factory.",
+    "label": "needs_correction",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "needs_correction"
+  },
+  {
+    "id": "case-103",
+    "text": "She have been working on the project since early March, and she is almost finished.",
+    "label": "needs_correction",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "needs_correction"
+  },
+  {
+    "id": "case-104",
+    "text": "All of the guests did not like the cake, which was disappointing for the baker.",
+    "label": "needs_clarity",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "needs_clarity"
+  },
+  {
+    "id": "case-105",
+    "text": "The bank called the customer about the payment after it had been cancelled.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-106",
+    "text": "The garden looks beautiful in June, when the roses are in full bloom and the lawn is green.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-107",
+    "text": "This is the most easiest way to cook rice without a special pot.",
+    "label": "needs_correction",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "needs_correction"
+  },
+  {
+    "id": "case-108",
+    "text": "There is many reasons why the train was delayed on Tuesday.",
+    "label": "needs_correction",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output; spot-checked",
+    "model_label": "needs_correction",
+    "spot_check": {
+      "label": "needs_correction",
+      "verdict": "agree",
+      "note": "There is many is a subject-verb agreement error."
+    }
+  },
+  {
+    "id": "case-109",
+    "text": "Fresh bread is best eaten on the day it is baked.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output; spot-checked",
+    "model_label": "none",
+    "spot_check": {
+      "label": "none",
+      "verdict": "agree",
+      "note": "Natural and clear sentence."
+    }
+  },
+  {
+    "id": "case-110",
+    "text": "We have less people than last year, so the shifts are harder to cover.",
+    "label": "needs_word_choice",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "needs_word_choice"
+  },
+  {
+    "id": "case-111",
+    "text": "The pilot told the passengers that they would be landing soon and would have to wait.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-112",
+    "text": "The project team meets every Tuesday to review progress and plan the next sprint.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-113",
+    "text": "My grandmother taught me how to knit when I was eight years old, and I still use her needles.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-114",
+    "text": "The committee rejected the proposal after the director criticized the budget they had prepared.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-115",
+    "text": "The author describes the city in a very nice way, which makes the story quite good.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-116",
+    "text": "Please, sends the updated file to the design team before the review starts.",
+    "label": "needs_correction",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "needs_correction"
+  },
+  {
+    "id": "case-117",
+    "text": "The new process is faster than the old one, but it takes longer to set up.",
+    "label": "none",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "none"
+  },
+  {
+    "id": "case-118",
+    "text": "Despite the rain, we decided to went for a walk along the river.",
+    "label": "needs_correction",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "needs_correction"
+  },
+  {
+    "id": "case-119",
+    "text": "After the lecture, the professor spoke with the student about the notes she had written, and she was embarrassed.",
+    "label": "needs_clarity",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output; spot-checked",
+    "model_label": "needs_clarity",
+    "spot_check": {
+      "label": "needs_clarity",
+      "verdict": "agree",
+      "note": "She can refer to the professor or the student in both clauses."
+    }
+  },
+  {
+    "id": "case-120",
+    "text": "If I would have known about the delay, I would have leaved earlier.",
+    "label": "needs_correction",
+    "label_model": "openai/gpt-oss-120b",
+    "label_source": "gpt-oss-120b output",
+    "model_label": "needs_correction"
+  }
+]
