@@ -133,7 +133,7 @@ function wordsOf(text: string): string[] {
 // already hold their ranges; an edit overlapping one of them is dropped.
 // Dropped: unknown sentence, empty or missing original, no-op, fragment not
 // found or ambiguous, empty reason, and edits overlapping an earlier kept
-// edit (the first one wins), and "expression" edits beyond the second.
+// edit (the first one wins), and "expression" edits beyond the third.
 // `meaning` is kept only for "expression" edits and is null when the model
 // gave none; such a suggestion is still shown but cannot become practice.
 export function resolveEdits(

@@ -9,7 +9,7 @@ import { PROOFREAD_ROLE } from "../models/roles";
 // - Improvements are optional fragment edits (style and expressions).
 export const MAX_ERROR_SUGGESTIONS = 24;
 export const MAX_IMPROVEMENTS = 8;
-export const MAX_EXPRESSION_EDITS = 2;
+export const MAX_EXPRESSION_EDITS = 3;
 export const MAX_REASON_LENGTH = 120;
 export const MAX_MEANING_LENGTH = 100;
 // Reasoning and visible JSON share this output budget.

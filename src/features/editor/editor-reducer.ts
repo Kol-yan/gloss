@@ -56,6 +56,7 @@ export type EditorDoc = {
 
 export type EditorAction =
   | { type: "edit"; text: string }
+  | { type: "replace"; text: string }
   | { type: "apply"; id: string }
   | { type: "dismiss"; id: string }
   | { type: "undo" }
@@ -192,6 +193,9 @@ function mergeInSentence(doc: EditorDoc, range: SentenceRange, incoming: Suggest
 export function editorReducer(doc: EditorDoc, action: EditorAction): EditorDoc {
   const next = step(doc, action);
   if (next === doc) return doc;
+  // Replacing the document is an intentional reset, not an edit that makes its
+  // previous cloud suggestions stale or rebases them onto unrelated text.
+  if (action.type === "replace") return next;
   // Apply and dismiss are decisions of their own; everything else that
   // disappears from a cloud check is reported as stale.
   const decided = action.type === "apply" || action.type === "dismiss" ? action.id : null;
@@ -207,6 +211,9 @@ export function editorReducer(doc: EditorDoc, action: EditorAction): EditorDoc {
 
 function step(doc: EditorDoc, action: EditorAction): EditorDoc {
   switch (action.type) {
+    case "replace":
+      return createDoc(action.text);
+
     case "edit": {
       if (action.text === doc.text) return doc;
       return {

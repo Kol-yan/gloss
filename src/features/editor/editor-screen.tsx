@@ -20,6 +20,7 @@ import {
 } from "./sentence-detect";
 import type { SentenceJobState } from "./sentence-flag-card";
 import { SuggestionRail, type FocusRequest, type RailNotice } from "./suggestion-rail";
+import { SamplePicker } from "./sample-picker";
 import type { CheckLocal, CheckStatus, CheckWithAi, ProofreadOutcome, RecheckSentences } from "./types";
 import { WritingSurface, type WritingSurfaceHandle } from "./writing-surface";
 import type { LocalCheckStatus } from "./local-checker";
@@ -84,6 +85,7 @@ export function EditorScreen({
   const [checkedClean, setCheckedClean] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [notice, setNotice] = useState<RailNotice | null>(null);
+  const [sampleNotice, setSampleNotice] = useState("");
   const [offerState, setOfferState] = useState<OfferState | null>(null);
   const [activeFlagId, setActiveFlagId] = useState<string | null>(null);
   const [jobs, setJobs] = useState<Record<string, SentenceJobState>>({});
@@ -245,6 +247,20 @@ export function EditorScreen({
     // Normalizing mid-composition would fight the input method.
     dispatch({ type: "edit", text: composing ? raw : normalizeText(raw) });
     setCheckedClean(false);
+    setSampleNotice("");
+  };
+
+  const insertSample = (text: string) => {
+    dispatch({ type: "replace", text: normalizeText(text) });
+    setCheckedClean(false);
+    setStatus("idle");
+    setActiveId(null);
+    setActiveFlagId(null);
+    setOfferState(null);
+    setJobs({});
+    setNotice(null);
+    setSampleNotice("Sample added. Press Check with AI for suggestions.");
+    surfaceRef.current?.focus();
   };
 
   const apply = (id: string) => {
@@ -445,6 +461,12 @@ export function EditorScreen({
       <h1 className="sr-only">Editor</h1>
       <div className="grid h-full grid-cols-1 grid-rows-[minmax(0,1fr)_auto] @3xl:grid-cols-[minmax(0,1fr)_22.5rem]">
         <div className="flex min-h-0 flex-col px-4 pt-3 pb-3 @3xl:pr-3">
+          <div className="flex shrink-0 items-center justify-between gap-3 pb-2">
+            <p role="status" aria-live="polite" className={sampleNotice ? "text-sm text-ink-muted" : "sr-only"}>
+              {sampleNotice}
+            </p>
+            <SamplePicker onSelect={insertSample} />
+          </div>
           <WritingSurface
             value={doc.text}
             suggestions={doc.suggestions}

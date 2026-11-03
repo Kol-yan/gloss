@@ -71,6 +71,21 @@ describe("editorReducer", () => {
     expect(next.suggestions.map((s) => s.original)).toEqual(["recieve"]);
   });
 
+  it("replaces the document without carrying suggestions or undo state to a sample", () => {
+    const ai = suggest(TEXT, "recieve", "receive", { source: "ai" });
+    const applied = editorReducer(createDoc(TEXT, [ai]), { type: "apply", id: ai.id });
+    expect(canUndo(applied)).toBe(true);
+
+    const sample = "A new sample text.";
+    const replaced = editorReducer(applied, { type: "replace", text: sample });
+    expect(replaced.text).toBe(sample);
+    expect(replaced.suggestions).toEqual([]);
+    expect(replaced.dismissed).toEqual([]);
+    expect(replaced.undo).toEqual([]);
+    expect(replaced.stale.items).toEqual([]);
+    expect(replaced.applied.ranges).toEqual([]);
+  });
+
   it("applies a suggestion, keeps the others valid and allows undo", () => {
     const doc = docWithBoth();
     const applied = editorReducer(doc, { type: "apply", id: "s-recieve" });

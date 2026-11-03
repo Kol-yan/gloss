@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, ProofreadResponse, SuggestionDecisionResponse } from "@/shared/contracts";
+import plainExpressionResponse from "../fixtures/proofread-plain-expression-response.json";
 
 // Handlers run outside a Next request here; only the cookie reader is
 // replaced. Everything else (SQL, budget, routes) is real and the provider
@@ -231,7 +232,7 @@ describe("POST /api/proofread", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps a meaning for expression edits only, at most two, and stores it", async () => {
+  it("keeps a meaning for expression edits only, at most three, and stores it", async () => {
     login();
     const text = "She is here. He is early. They are done. We is ready.";
     fetchMock.mockResolvedValueOnce(
@@ -250,11 +251,13 @@ describe("POST /api/proofread", () => {
     expect(body.suggestions.map((s) => [s.original, s.category, s.meaning])).toEqual([
       ["is here", "expression", "is now present"],
       ["is early", "expression", null],
+      ["are done", "expression", "finished"],
       ["is", "error", null],
     ]);
     expect(rows("SELECT meaning FROM suggestions WHERE check_run_id = ? ORDER BY start", body.checkRunId)).toEqual([
       { meaning: "is now present" },
       { meaning: null },
+      { meaning: "finished" },
       { meaning: null },
     ]);
 
@@ -263,14 +266,46 @@ describe("POST /api/proofread", () => {
     expect(replay.suggestions).toEqual(body.suggestions);
   });
 
-  it("asks the model for a meaning and at most two expression edits", async () => {
+  it("turns recorded expression output for correct plain text into three expression suggestions", async () => {
+    login();
+    const text = "The weather was good. The meal was good. The movie was good.";
+    const id = requestId();
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(plainExpressionResponse), { status: 200 }));
+
+    const body = ProofreadResponse.parse(await json(await post({ requestId: id, text })));
+    expect(body.suggestions.map((suggestion) => [
+      suggestion.category,
+      suggestion.original,
+      suggestion.replacement,
+      suggestion.meaning,
+      suggestion.ipa,
+      suggestion.meaningChange,
+    ])).toEqual([
+      ["expression", "good", "pleasant", "pleasant means nice and enjoyable.", "/ˈpleɪzənt/", false],
+      ["expression", "good", "delicious", "delicious means very tasty.", "/dɪˈlɪʃəs/", false],
+      ["expression", "good", "entertaining", "entertaining means enjoyable to watch.", "/ˌɛntərˈteɪnɪŋ/", false],
+    ]);
+    for (const suggestion of body.suggestions) {
+      expect(text.slice(suggestion.start, suggestion.end)).toBe(suggestion.original);
+      expect(suggestion.source).toBe("ai");
+    }
+    expect(rows("SELECT category FROM suggestions WHERE check_run_id = ?", body.checkRunId)).toHaveLength(3);
+    expect(runFor(id)).toMatchObject({ status: "ok", serving_provider: "DekaLLM", settled_cost_micros: 87 });
+    expect(reservationFor(id)).toMatchObject({ status: "settled", actual_cost_micros: 87 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks for up to three independent expressions with meaning and IPA", async () => {
     login();
     fetchMock.mockResolvedValueOnce(modelReply([]));
     await post({ requestId: requestId(), text: "A short text." });
     const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(sent.response_format.json_schema.schema.properties.improvements.items.required).toContain("meaning");
-    expect(sent.messages[0].content).toMatch(/at most 2 of these/);
+    expect(sent.response_format.json_schema.schema.properties.improvements.items.required).toContain("ipa");
+    expect(sent.messages[0].content).toMatch(/up to 3 useful expression suggestions even if the sentences are correct/);
+    expect(sent.messages[0].content).toMatch(/include useful ones even when "corrections" is empty/);
     expect(sent.messages[0].content).toMatch(/meaning:/);
+    expect(sent.messages[0].content).toMatch(/If the replacement is a phrase, ipa MUST be an empty string/);
   });
 
   it("sends a strict json_schema request to OpenRouter with the operator's key and a bounded output", async () => {

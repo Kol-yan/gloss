@@ -324,7 +324,7 @@ describe("resolveEdits (improvements)", () => {
     expect(kept.map((s) => s.original)).toEqual(["She"]);
   });
 
-  it("keeps meaning only for expression edits and caps them at two", () => {
+  it("keeps meaning only for expression edits and caps them at three", () => {
     const kept = resolveEdits(sentences, [
       improvement({ original: "She", replacement: "He", meaning: "ignored" }),
       improvement({ sentence_index: 1, original: "is here", replacement: "has arrived", category: "expression", meaning: "is now present" }),
@@ -334,6 +334,7 @@ describe("resolveEdits (improvements)", () => {
     expect(kept.map((s) => [s.original, s.meaning])).toEqual([
       ["She", null],
       ["is here", "is now present"],
+      ["Done", "completed"],
       ["early", null],
     ]);
   });
@@ -407,14 +408,14 @@ describe("prompt", () => {
   it("asks for whole corrected sentences and keeps optional improvements separate", () => {
     const [system] = buildProofreadMessages(splitSentences("Text."));
     expect(system.content).toMatch(/corrected: the complete sentence/);
-    expect(system.content).toMatch(/at most 2 of these/);
+    expect(system.content).toMatch(/at most 3 expression suggestions total/);
     expect(system.content).toMatch(/meaning:/);
   });
 
   it("asks for errors only when verifying", () => {
     const [system] = buildProofreadMessages(splitSentences("Text."), "verify");
     expect(system.content).toMatch(/"improvements" must always be an empty list/);
-    expect(system.content).not.toMatch(/at most 2 of these/);
+    expect(system.content).not.toMatch(/at most 3 expression suggestions total/);
     expect(system.content).toMatch(/without its bracketed number/);
   });
 
