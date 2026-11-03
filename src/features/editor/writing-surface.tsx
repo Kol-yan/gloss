@@ -37,6 +37,7 @@ export function WritingSurface({
   activeFlagId = null,
   onChange,
   onTextClick,
+  onFlagClick,
   onEditorKeyDown,
   onLayoutChange,
   handleRef,
@@ -53,6 +54,7 @@ export function WritingSurface({
   // A click that placed the caret (no selection) reports the suggestions
   // underlined under the pointer; the list is empty when the click hit no underline.
   onTextClick?: (ids: string[]) => void;
+  onFlagClick?: (flagId: string) => void;
   onEditorKeyDown?: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   // The text scrolled or the field was resized, so anything placed next to a word has to follow.
   onLayoutChange?: () => void;
@@ -85,6 +87,17 @@ export function WritingSurface({
       }
     }
     return [];
+  };
+
+  const flagAt = (x: number, y: number): string | null => {
+    for (const el of backdropRef.current?.querySelectorAll<HTMLElement>("[data-flag-id]") ?? []) {
+      for (const rect of el.getClientRects()) {
+        if (x >= rect.left && x <= rect.right && y >= rect.top - HIT_SLACK && y <= rect.bottom + HIT_SLACK) {
+          return el.dataset.flagId ?? null;
+        }
+      }
+    }
+    return null;
   };
 
   useImperativeHandle(handleRef, () => ({
@@ -158,7 +171,17 @@ export function WritingSurface({
   const handleClick = (event: MouseEvent<HTMLTextAreaElement>) => {
     const textarea = event.currentTarget;
     if (textarea.selectionStart !== textarea.selectionEnd) return;
-    onTextClick?.(idsAt(event.clientX, event.clientY));
+    const ids = idsAt(event.clientX, event.clientY);
+    if (ids.length > 0) {
+      onTextClick?.(ids);
+      return;
+    }
+    const fid = flagAt(event.clientX, event.clientY);
+    if (fid) {
+      onFlagClick?.(fid);
+      return;
+    }
+    onTextClick?.([]);
   };
 
   // The pointer shows that an underline can be clicked.

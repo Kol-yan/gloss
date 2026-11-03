@@ -580,7 +580,7 @@ export function EditorScreen({
             <p role="status" aria-live="polite" className={sampleNotice ? "text-sm text-ink-muted" : "sr-only"}>
               {sampleNotice}
             </p>
-            <SamplePicker onSelect={insertSample} />
+            <SamplePicker onSelect={insertSample} hasText={hasContent} />
           </div>
           <WritingSurface
             value={doc.text}
@@ -590,6 +590,11 @@ export function EditorScreen({
             activeFlagId={activeFlagId}
             onChange={handleChange}
             onTextClick={openPopoverFor}
+            onFlagClick={(flagId) => {
+              setActiveFlagId(flagId);
+              // Below the rail breakpoint the closed rail is hidden, so show it as a sheet.
+              if (!sheetOpen && railRef.current && getComputedStyle(railRef.current).display === "none") openSheet();
+            }}
             onEditorKeyDown={handleEditorKeyDown}
             onLayoutChange={popoverId ? bumpLayout : undefined}
             handleRef={surfaceRef}

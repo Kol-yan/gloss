@@ -16,6 +16,7 @@ const OPINIONATED_RULES = [
   "NoOxfordComma",
   "SpelledNumbers",
   "Regionalisms",
+  "Excellent",
 ];
 
 // Stage 0 covers grammar and punctuation only. Spelling is left to the sentence

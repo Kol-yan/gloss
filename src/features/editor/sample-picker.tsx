@@ -6,7 +6,7 @@ import { SAMPLE_TEXTS } from "./sample-texts";
 
 // A disclosure, not a menu: every sample is an ordinary button, so the keyboard
 // path is plain Tab and Enter with no arrow-key handling to get wrong.
-export function SamplePicker({ onSelect }: { onSelect: (text: string) => void }) {
+export function SamplePicker({ onSelect, hasText = false }: { onSelect: (text: string) => void; hasText?: boolean }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const listId = useId();
@@ -19,6 +19,7 @@ export function SamplePicker({ onSelect }: { onSelect: (text: string) => void })
 
   function choose(text: string) {
     close();
+    if (hasText && !window.confirm("Replace your current text with this sample?")) return;
     onSelect(text);
   }
 
