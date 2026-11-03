@@ -132,8 +132,10 @@ function wordsOf(text: string): string[] {
 // Resolves optional style and expression edits. `taken` are suggestions that
 // already hold their ranges; an edit overlapping one of them is dropped.
 // Dropped: unknown sentence, empty or missing original, no-op, fragment not
-// found or ambiguous, empty reason, and edits overlapping an earlier kept
-// edit (the first one wins), and "expression" edits beyond the third.
+// found or ambiguous, empty reason, edits that change negation, numbers,
+// names or words of obligation, frequency and quantity (changesCommitments),
+// edits overlapping an earlier kept edit (the first one wins), and
+// "expression" edits beyond the third.
 // `meaning` is kept only for "expression" edits and is null when the model
 // gave none; such a suggestion is still shown but cannot become practice.
 export function resolveEdits(
@@ -153,6 +155,9 @@ export function resolveEdits(
 
     const range = locateFragment(sentence, edit.original);
     if (!range) continue;
+    // Only emoji, quotes or symbols before the fragment: it starts the sentence.
+    const startsSentence = !/[\p{L}\p{N}]/u.test(sentence.text.slice(0, range.start - sentence.start));
+    if (changesCommitments(edit.original, edit.replacement, startsSentence)) continue;
     if ([...taken, ...kept].some((other) => range.start < other.end && other.start < range.end)) continue;
     if (edit.category === "expression" && expressionCount >= MAX_EXPRESSION_EDITS) continue;
     if (edit.category === "expression") expressionCount++;
@@ -166,13 +171,61 @@ export function resolveEdits(
       original: edit.original,
       replacement: edit.replacement,
       reason,
-      meaningChange: changesMeaning(edit.original, edit.replacement, range.start === sentence.start),
+      meaningChange: changesMeaning(edit.original, edit.replacement, startsSentence),
       meaning: edit.category === "expression" ? tidy(edit.meaning, MAX_MEANING_LENGTH) || null : null,
       ipa: edit.category === "expression" ? sanitizeIpa(edit.ipa, edit.replacement) : null,
     });
   }
 
   return kept.sort((a, b) => a.start - b.start);
+}
+
+// An optional edit must say the same thing just as strongly. The prompt asks
+// for that, but a model sometimes still turns "never" into "not" or drops
+// "all" before a number, so such an edit is dropped here rather than shown
+// with a warning. Corrections never go through this check: a real mistake
+// next to a number or a negation still gets fixed, and is flagged instead.
+const NEGATION_WORDS =
+  /\b(?:not|no|never|none|nobody|nothing|nowhere|neither|nor|without|cannot)\b|n't\b/gi;
+const NUMBER_WORDS =
+  /\d+(?:[.,:]\d+)*|\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|twenty|thirty|forty|fifty|hundred|thousand|million|billion|half|dozen)\b/gi;
+// Obligation, possibility, frequency and quantity.
+const COMMITMENT_WORDS =
+  /\b(?:must|should|shall|need|needs|will|would|can|could|may|might|always|usually|often|sometimes|rarely|seldom|ever|only|all|every|each|most|many|few|almost|nearly|least)\b/gi;
+const CAPITALIZED_WORDS = /(?<![\p{L}\p{M}'’])\p{Lu}[\p{L}\p{M}'’-]*/gu;
+
+function changesCommitments(original: string, replacement: string, atSentenceStart: boolean): boolean {
+  return (
+    !sameWords(matches(original, NEGATION_WORDS).map(negation), matches(replacement, NEGATION_WORDS).map(negation)) ||
+    !sameWords(matches(original, NUMBER_WORDS), matches(replacement, NUMBER_WORDS)) ||
+    !sameWords(matches(original, COMMITMENT_WORDS), matches(replacement, COMMITMENT_WORDS)) ||
+    !sameWords(names(original, atSentenceStart), names(replacement, atSentenceStart))
+  );
+}
+
+function matches(text: string, pattern: RegExp): string[] {
+  return (text.match(pattern) ?? []).map((word) => word.toLowerCase());
+}
+
+// "isn't" and "is not" say the same; "never" and "not" do not.
+function negation(word: string): string {
+  return word === "n't" || word === "cannot" ? "not" : word;
+}
+
+// Capitalized words other than the pronoun "I" are likely names. The first
+// word of a sentence is capitalized anyway, so it does not count.
+function names(text: string, atSentenceStart: boolean): string[] {
+  const leading = text.length - text.trimStart().length;
+  return [...text.matchAll(CAPITALIZED_WORDS)]
+    .filter((match) => !(atSentenceStart && match.index === leading))
+    .map((match) => match[0].replace(/’/g, "'"))
+    .filter((word) => !/^I(?:'[a-z]+)?$/.test(word));
+}
+
+function sameWords(a: string[], b: string[]): boolean {
+  const left = [...a].sort();
+  const right = [...b].sort();
+  return left.length === right.length && left.every((word, i) => word === right[i]);
 }
 
 // touchesMeaning ignores a capitalized first word, assuming it starts a

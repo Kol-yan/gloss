@@ -344,21 +344,50 @@ describe("resolveEdits (improvements)", () => {
     expect(deletion.replacement).toBe("");
   });
 
-  it("flags edits that touch numbers, negation or names", () => {
-    const flagged = resolveEdits(splitSentences("I have 3 apples. She did not come. I met Anna."), [
+  it("drops optional edits that change numbers, negation, names or commitment words", () => {
+    const meaningful = splitSentences(
+      "I have 3 apples and four pears. She did not come. I met Anna. They will never agree. " +
+        "We must answer all of them. I didn't like it.",
+    );
+    const kept = resolveEdits(meaningful, [
       improvement({ sentence_index: 0, original: "3", replacement: "4" }),
+      improvement({ sentence_index: 0, original: "four pears", replacement: "4 pears" }),
       improvement({ sentence_index: 1, original: "did not come", replacement: "came" }),
-      improvement({ sentence_index: 2, original: "Anna", replacement: "Anne" }),
-      improvement({ sentence_index: 0, original: "have", replacement: "had" }),
-      improvement({ sentence_index: 1, original: "She", replacement: "He" }),
+      improvement({ sentence_index: 3, original: "will never agree", replacement: "will not agree" }),
+      improvement({ sentence_index: 5, original: "didn't like", replacement: "disliked" }),
+      improvement({ sentence_index: 2, original: "met Anna", replacement: "met her" }),
+      improvement({ sentence_index: 4, original: "must answer", replacement: "need to answer" }),
+      improvement({ sentence_index: 4, original: "all of them", replacement: "them" }),
+      improvement({ sentence_index: 0, original: "have", replacement: "own" }),
     ]);
-    expect(Object.fromEntries(flagged.map((s) => [s.original, s.meaningChange]))).toEqual({
-      "3": true,
-      "did not come": true,
-      Anna: true,
-      have: false,
-      She: false,
+    expect(kept.map((s) => [s.original, s.meaningChange])).toEqual([["have", false]]);
+  });
+
+  it("keeps optional edits that leave those words as they are", () => {
+    const plain = splitSentences(
+      "She did not come. In my opinion, I think that it works. We made the change in Rome. \u201cDone\u201d early.",
+    );
+    const kept = resolveEdits(plain, [
+      improvement({ sentence_index: 0, original: "did not come", replacement: "didn't come" }),
+      improvement({ sentence_index: 1, original: "In my opinion, I think that", replacement: "I think that" }),
+      improvement({ sentence_index: 2, original: "made the change in Rome", replacement: "made the switch in Rome", category: "expression", meaning: "changed to something new" }),
+      improvement({ sentence_index: 3, original: "Done", replacement: "Finished" }),
+    ]);
+    expect(kept.map((s) => [s.original, s.meaningChange])).toEqual([
+      ["did not come", false],
+      ["In my opinion, I think that", false],
+      ["made the change in Rome", false],
+      ["Done", false],
+    ]);
+  });
+
+  it("never drops a correction for touching such words", () => {
+    const sentences = splitSentences("They will never agrees with 3 of us.");
+    const result = resolveProofread(sentences, {
+      corrections: [correction({ corrected: "They will never agree with 3 of us." })],
+      improvements: [improvement({ original: "will never", replacement: "will not" })],
     });
+    expect(result.map((s) => [s.category, s.original, s.replacement])).toEqual([["error", "agrees", "agree"]]);
   });
 
   it("caps long reasons at 120 characters on a word boundary", () => {
