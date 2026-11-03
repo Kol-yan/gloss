@@ -106,7 +106,7 @@ export async function openRouterChat(
       usage: { include: true },
       provider,
     }),
-  }, { timeoutMs: DEFAULT_TIMEOUT_MS, signal: input.signal });
+  }, { timeoutMs: input.timeoutMs ?? DEFAULT_TIMEOUT_MS, signal: input.signal });
   const json = parseEnvelope(bodyText, latencyMs);
   const servingProvider = providerName(json.provider);
   const usage = usageFrom(json.usage);

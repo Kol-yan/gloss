@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { splitSentences } from "@/lib/text";
+import { locateFragment, splitSentences } from "@/lib/text";
 import type { Suggestion } from "@/shared/contracts";
 import { buildProofreadMessages, frameForPrompt } from "@/server/proofread/prompt";
 import { resolveCorrections, resolveEdits, resolveProofread } from "@/server/proofread/edits";
@@ -281,7 +281,7 @@ describe("resolveCorrections", () => {
 });
 
 describe("resolveEdits (improvements)", () => {
-  const text = "She likes tea and tea likes her. He is here. 😀 Done early.";
+  const text = "She likes tea and tea likes her. He is here. \u{1F600} Done early. Clear.";
   const sentences = splitSentences(text);
 
   it("computes UTF-16 ranges from exact matches, also after an emoji", () => {
@@ -327,21 +327,82 @@ describe("resolveEdits (improvements)", () => {
   it("keeps meaning only for expression edits and caps them at three", () => {
     const kept = resolveEdits(sentences, [
       improvement({ original: "She", replacement: "He", meaning: "ignored" }),
+      improvement({ original: "likes tea", replacement: "enjoys tea", category: "expression", meaning: "enjoys tea" }),
       improvement({ sentence_index: 1, original: "is here", replacement: "has arrived", category: "expression", meaning: "is now present" }),
       improvement({ sentence_index: 2, original: "early", replacement: "ahead of time", category: "expression", meaning: "   " }),
       improvement({ sentence_index: 2, original: "Done", replacement: "Finished", category: "expression", meaning: "completed" }),
+      improvement({ sentence_index: 3, original: "Clear", replacement: "Straightforward", category: "expression", meaning: "easy to understand" }),
     ]);
     expect(kept.map((s) => [s.original, s.meaning])).toEqual([
       ["She", null],
+      ["likes tea", "enjoys tea"],
       ["is here", "is now present"],
-      ["Done", "completed"],
       ["early", null],
     ]);
   });
 
-  it("allows deleting a fragment", () => {
-    const [deletion] = resolveEdits(sentences, [improvement({ sentence_index: 2, original: "early", replacement: "" })]);
-    expect(deletion.replacement).toBe("");
+  it("drops an optional deletion of a content word", () => {
+    expect(resolveEdits(sentences, [improvement({ sentence_index: 2, original: "early", replacement: "" })])).toEqual([]);
+  });
+
+  it("drops the v7 free-map fact loss but keeps synonym swaps and a redundant function word", () => {
+    const source = splitSentences(
+      "The owner gave us a free map of the city together with a list of his favourite bakeries.",
+    );
+    expect(resolveEdits(source, [
+      improvement({
+        original: "gave us a free map of the city together with a list of his favourite bakeries",
+        replacement: "handed us a map of the city and a list of his favourite bakeries",
+        category: "expression",
+      }),
+    ])).toEqual([]);
+
+    const controls = splitSentences("The meeting was very good. He is here. I think that it works.");
+    const safe = resolveEdits(controls, [
+      improvement({ sentence_index: 0, original: "good", replacement: "fine", category: "expression" }),
+      improvement({ sentence_index: 1, original: "is here", replacement: "has arrived", category: "expression" }),
+      improvement({ sentence_index: 2, original: "that", replacement: "" }),
+    ]);
+    expect(safe.map((suggestion) => [suggestion.original, suggestion.replacement])).toEqual([
+      ["good", "fine"],
+      ["is here", "has arrived"],
+      ["that", ""],
+    ]);
+  });
+
+  it("drops optional edits that replace, add or remove a time-boundary preposition", () => {
+    const cases = [
+      { text: "We arrived before Friday.", original: "before Friday", replacement: "by Friday" },
+      { text: "We should finish by Friday.", original: "by Friday", replacement: "before Friday" },
+      { text: "We came back after Friday.", original: "after Friday", replacement: "before Friday" },
+      { text: "We stayed until Friday.", original: "until Friday", replacement: "before Friday" },
+      { text: "We stayed till Friday.", original: "till Friday", replacement: "before Friday" },
+      { text: "We will reply within five days.", original: "within five days", replacement: "before five days" },
+      { text: "I have lived here since Friday.", original: "since Friday", replacement: "before Friday" },
+      { text: "I stayed home during the week.", original: "during the week", replacement: "before the week" },
+      { text: "We will finish Friday.", original: "Friday", replacement: "by Friday" },
+      { text: "We will finish by Friday.", original: "by Friday", replacement: "Friday" },
+    ];
+
+    for (const { text, original, replacement } of cases) {
+      expect(resolveEdits(splitSentences(text), [improvement({ original, replacement })])).toEqual([]);
+    }
+  });
+
+  it("keeps correction diffs outside optional-edit content and deadline filters", () => {
+    const original = "She go with a free map before Friday.";
+    const corrected = "She goes with a map by Friday.";
+    const suggestions = resolveProofread(splitSentences(original), {
+      corrections: [correction({ corrected })],
+      improvements: [
+        improvement({ original: "a free map", replacement: "a map" }),
+        improvement({ original: "before Friday", replacement: "by Friday" }),
+      ],
+    });
+
+    expect(suggestions.filter((suggestion) => suggestion.category === "error").map(({ original, replacement }) => [original, replacement]))
+      .toEqual([["go", "goes"], ["free map before", "map by"]]);
+    expect(suggestions.filter((suggestion) => suggestion.category !== "error")).toEqual([]);
   });
 
   it("drops optional edits that change numbers, negation, names or commitment words", () => {
@@ -363,7 +424,90 @@ describe("resolveEdits (improvements)", () => {
     expect(kept.map((s) => [s.original, s.meaningChange])).toEqual([["have", false]]);
   });
 
-  it("keeps optional edits that leave those words as they are", () => {
+  it("drops optional edits that change singular they into gendered words and keeps neutral pronouns", () => {
+    const text = "If a customer is unhappy with the product, they can return it within 30 days for a full refund.";
+    const sentences = splitSentences(text);
+    for (const category of ["style", "expression"] as const) {
+      expect(resolveEdits(sentences, [
+        improvement({ original: "they", replacement: "he or she", category }),
+      ])).toEqual([]);
+    }
+
+    const [retained] = resolveEdits(sentences, [
+      improvement({
+        original: "they can return it",
+        replacement: "they can send it back",
+        category: "expression",
+      }),
+    ]);
+    expect(retained).toMatchObject({
+      original: "they can return it",
+      replacement: "they can send it back",
+      category: "expression",
+      meaningChange: false,
+    });
+
+    const repeated = splitSentences("They gave them their notes and said they belonged to them.");
+    expect(resolveEdits(repeated, [
+      improvement({
+        original: "They gave them their notes and said they belonged to them",
+        replacement: "They gave them notes and said they belonged to them",
+      }),
+    ])).toEqual([]);
+  });
+
+  it.each(["they", "them", "their", "theirs", "themself", "themselves"] as const)(
+    "matches %s case-insensitively and drops its addition or removal",
+    (pronoun) => {
+      const sentence = splitSentences(`${pronoun} is here.`);
+      const [caseChange] = resolveEdits(sentence, [
+        improvement({ original: pronoun, replacement: pronoun.toUpperCase() }),
+      ]);
+      expect(caseChange).toMatchObject({ original: pronoun, replacement: pronoun.toUpperCase() });
+
+      const withPronoun = splitSentences(`We saw ${pronoun} today.`);
+      expect(resolveEdits(withPronoun, [
+        improvement({ original: pronoun, replacement: "the person" }),
+      ])).toEqual([]);
+
+      const withoutPronoun = splitSentences("We saw the person today.");
+      expect(resolveEdits(withoutPronoun, [
+        improvement({ original: "the person", replacement: `the person ${pronoun}` }),
+      ])).toEqual([]);
+    },
+  );
+
+  it("filters name changes after emoji, straight or curly quote, and symbol prefixes", () => {
+    const before = "We waited. ";
+    const prefixes = [
+      { prefix: "\u{1F44B} ", suffix: "" },
+      { prefix: "\u0022", suffix: "\u0022" },
+      { prefix: "\u201C", suffix: "\u201D" },
+      { prefix: "# ", suffix: "" },
+    ];
+
+    for (const { prefix, suffix } of prefixes) {
+      const text = `${before}${prefix}Anna arrived${suffix}.`;
+      const sentences = splitSentences(text);
+      const sentence = sentences[1];
+      expect(sentence.start).toBe(before.length);
+      const range = locateFragment(sentence, "Anna");
+      expect(range).toEqual({
+        start: before.length + prefix.length,
+        end: before.length + prefix.length + "Anna".length,
+      });
+      if (!range) throw new Error("Expected the name fragment to be located.");
+      expect(text.slice(range.start, range.end)).toBe("Anna");
+
+      for (const replacement of ["Emma", "she"]) {
+        expect(resolveEdits(sentences, [
+          improvement({ sentence_index: 1, original: "Anna", replacement }),
+        ])).toEqual([]);
+      }
+    }
+  });
+
+  it("keeps safe edits and drops a quoted sentence-initial rewrite", () => {
     const plain = splitSentences(
       "She did not come. In my opinion, I think that it works. We made the change in Rome. \u201cDone\u201d early.",
     );
@@ -375,10 +519,34 @@ describe("resolveEdits (improvements)", () => {
     ]);
     expect(kept.map((s) => [s.original, s.meaningChange])).toEqual([
       ["did not come", false],
-      ["In my opinion, I think that", false],
       ["made the change in Rome", false],
-      ["Done", false],
     ]);
+  });
+
+  it("keeps an ordinary sentence-initial expression at its exact UTF-16 offset", () => {
+    const text = "We waited. Done early.";
+    const sentences = splitSentences(text);
+    const sentence = sentences[1];
+    const [suggestion] = resolveEdits(sentences, [
+      improvement({
+        sentence_index: 1,
+        original: "Done",
+        replacement: "Finished",
+        category: "expression",
+        meaning: "completed",
+      }),
+    ]);
+
+    expect(sentence.start).toBe("We waited. ".length);
+    expect(suggestion).toMatchObject({
+      start: sentence.start,
+      end: sentence.start + "Done".length,
+      original: "Done",
+      replacement: "Finished",
+      category: "expression",
+      meaningChange: false,
+    });
+    expect(text.slice(suggestion.start, suggestion.end)).toBe("Done");
   });
 
   it("never drops a correction for touching such words", () => {
@@ -388,6 +556,13 @@ describe("resolveEdits (improvements)", () => {
       improvements: [improvement({ original: "will never", replacement: "will not" })],
     });
     expect(result.map((s) => [s.category, s.original, s.replacement])).toEqual([["error", "agrees", "agree"]]);
+  });
+
+  it("keeps singular-they grammar corrections", () => {
+    const original = "If a customer are unhappy with the product, they can return it.";
+    const corrected = "If a customer is unhappy with the product, they can return it.";
+    const [suggestion] = resolveCorrections(splitSentences(original), [correction({ corrected })]);
+    expect(suggestion).toMatchObject({ category: "error", original: "are", replacement: "is" });
   });
 
   it("caps long reasons at 120 characters on a word boundary", () => {
@@ -400,15 +575,15 @@ describe("resolveEdits (improvements)", () => {
 });
 
 describe("resolveProofread", () => {
-  const sentences = splitSentences("She go home. The meeting was very good.");
+  const sentences = splitSentences("She go home. The meeting was very good, and I think that it went well.");
   const output = {
     corrections: [correction({ corrected: "She goes home." })],
-    improvements: [improvement({ sentence_index: 1, original: "very good", replacement: "excellent" })],
+    improvements: [improvement({ sentence_index: 1, original: "that", replacement: "" })],
   };
 
   it("returns error fixes and improvements together, sorted by position", () => {
     const suggestions = resolveProofread(sentences, output);
-    expect(suggestions.map((s) => [s.category, s.original])).toEqual([["error", "go"], ["style", "very good"]]);
+    expect(suggestions.map((s) => [s.category, s.original])).toEqual([["error", "go"], ["style", "that"]]);
   });
 
   it("reports errors only in verify mode", () => {

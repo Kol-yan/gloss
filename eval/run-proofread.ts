@@ -25,6 +25,9 @@ import type { TextPrice } from "../src/server/models/prices";
 const CASES_PATH = resolve("eval/proofread-cases.json");
 const DEFAULT_CAP_USD = 0.15;
 const MAX_CAP_USD = 0.5;
+// The bench grades quality, not production cutoffs: a long paragraph on a slow
+// provider needs more than the 20 s production limit.
+const BENCH_TIMEOUT_MS = 60_000;
 const GROUPS = ["error", "correct", "style", "trap", "unicode", "long", "injection"] as const;
 const EXPECTED_GROUP_COUNTS: Record<CorpusGroup, number> = {
   error: 14,
@@ -772,6 +775,9 @@ export async function main(argv = process.argv.slice(2), dependencies: MainDepen
       jsonSchema: PROOFREAD_JSON_SCHEMA,
       maxTokens: PROOFREAD_ROLE.maxTokens,
       temperature: PROOFREAD_ROLE.temperature,
+      // One long paragraph can take longer than the production cutoff; the
+      // bench measures quality, so give a slow provider more room.
+      timeoutMs: BENCH_TIMEOUT_MS,
     }, route, config));
     const wallLatencyMs = Math.round(performance.now() - started);
     const summary = responseSummary(captured.capture.responseText);

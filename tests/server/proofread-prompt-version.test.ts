@@ -11,9 +11,9 @@ function promptHash(mode: "check" | "verify"): string {
 
 describe("proofread prompt version", () => {
   it("pins the version and both prompt hashes", () => {
-    expect(PROOFREAD_PROMPT_VERSION, updateMessage).toBe("proofread-v6");
-    expect(promptHash("check"), updateMessage).toBe("51ba2dd4c1e69161fee53be75ff52fdf91f27140c0a7c86b479d900a8c411657");
-    expect(promptHash("verify"), updateMessage).toBe("a85b7bc15987459d02dc73446d3d1503a2b2934a874c956500e1225fdc5ba4d8");
+    expect(PROOFREAD_PROMPT_VERSION, updateMessage).toBe("proofread-v9");
+    expect(promptHash("check"), updateMessage).toBe("6c71c2023535b3affdbd8fb3b633859a3f99c5e6c37fcb869a2978331554658b");
+    expect(promptHash("verify"), updateMessage).toBe("0891d84ee5a74cd9a20f72a7cf232fe4da310a5a865bf8bdf88887677c88edba");
   });
 
   it("has a result for the pinned prompt version", async () => {

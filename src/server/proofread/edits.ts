@@ -132,10 +132,9 @@ function wordsOf(text: string): string[] {
 // Resolves optional style and expression edits. `taken` are suggestions that
 // already hold their ranges; an edit overlapping one of them is dropped.
 // Dropped: unknown sentence, empty or missing original, no-op, fragment not
-// found or ambiguous, empty reason, edits that change negation, numbers,
-// names or words of obligation, frequency and quantity (changesCommitments),
-// edits overlapping an earlier kept edit (the first one wins), and
-// "expression" edits beyond the third.
+// found or ambiguous, empty reason, edits that change protected facts, names,
+// pronouns or time boundaries, edits that remove more substantive words than
+// they add, overlaps (the first one wins), and "expression" edits beyond the third.
 // `meaning` is kept only for "expression" edits and is null when the model
 // gave none; such a suggestion is still shown but cannot become practice.
 export function resolveEdits(
@@ -155,9 +154,9 @@ export function resolveEdits(
 
     const range = locateFragment(sentence, edit.original);
     if (!range) continue;
-    // Only emoji, quotes or symbols before the fragment: it starts the sentence.
-    const startsSentence = !/[\p{L}\p{N}]/u.test(sentence.text.slice(0, range.start - sentence.start));
+    const startsSentence = range.start === sentence.start;
     if (changesCommitments(edit.original, edit.replacement, startsSentence)) continue;
+    if (removesContentWords(edit.original, edit.replacement)) continue;
     if ([...taken, ...kept].some((other) => range.start < other.end && other.start < range.end)) continue;
     if (edit.category === "expression" && expressionCount >= MAX_EXPRESSION_EDITS) continue;
     if (edit.category === "expression") expressionCount++;
@@ -180,11 +179,10 @@ export function resolveEdits(
   return kept.sort((a, b) => a.start - b.start);
 }
 
-// An optional edit must say the same thing just as strongly. The prompt asks
-// for that, but a model sometimes still turns "never" into "not" or drops
-// "all" before a number, so such an edit is dropped here rather than shown
-// with a warning. Corrections never go through this check: a real mistake
-// next to a number or a negation still gets fixed, and is flagged instead.
+// An optional edit must preserve protected facts and boundaries. The prompt
+// asks for that, but a model may still alter negation, a number, a name, a
+// pronoun or a deadline, so such an edit is dropped here rather than shown
+// with a warning. Corrections never go through this check.
 const NEGATION_WORDS =
   /\b(?:not|no|never|none|nobody|nothing|nowhere|neither|nor|without|cannot)\b|n't\b/gi;
 const NUMBER_WORDS =
@@ -192,15 +190,61 @@ const NUMBER_WORDS =
 // Obligation, possibility, frequency and quantity.
 const COMMITMENT_WORDS =
   /\b(?:must|should|shall|need|needs|will|would|can|could|may|might|always|usually|often|sometimes|rarely|seldom|ever|only|all|every|each|most|many|few|almost|nearly|least)\b/gi;
+const NEUTRAL_PRONOUNS = /\b(?:they|them|their|theirs|themself|themselves)\b/gi;
+const TIME_BOUNDARY_PREPOSITIONS = /\b(?:before|by|after|until|till|within|since|during)\b/gi;
 const CAPITALIZED_WORDS = /(?<![\p{L}\p{M}'’])\p{Lu}[\p{L}\p{M}'’-]*/gu;
+const LEXICAL_WORDS = /[\p{L}\p{M}\p{N}]+(?:['’][\p{L}\p{M}\p{N}]+)*/gu;
+const NEGATIVE_CONTRACTION_BASES = new Map<string, string>([
+  ["can't", "can"],
+  ["won't", "will"],
+  ["shan't", "shall"],
+]);
+const FUNCTION_WORDS = new Set([
+  "a", "an", "the", "and", "or", "but", "nor", "so", "yet", "if", "than", "that", "though", "while",
+  "as", "at", "from", "in", "into", "of", "on", "onto", "to", "with",
+]);
 
 function changesCommitments(original: string, replacement: string, atSentenceStart: boolean): boolean {
   return (
     !sameWords(matches(original, NEGATION_WORDS).map(negation), matches(replacement, NEGATION_WORDS).map(negation)) ||
     !sameWords(matches(original, NUMBER_WORDS), matches(replacement, NUMBER_WORDS)) ||
     !sameWords(matches(original, COMMITMENT_WORDS), matches(replacement, COMMITMENT_WORDS)) ||
+    !sameWords(matches(original, NEUTRAL_PRONOUNS), matches(replacement, NEUTRAL_PRONOUNS)) ||
+    !sameWords(matches(original, TIME_BOUNDARY_PREPOSITIONS), matches(replacement, TIME_BOUNDARY_PREPOSITIONS)) ||
     !sameWords(names(original, atSentenceStart), names(replacement, atSentenceStart))
   );
+}
+
+// Optional edits may replace a content word with a synonym, but must not
+// discard more substantive words than they add. Compare the supplied fragments
+// directly: diffHunks expands deletions with neighboring context.
+function removesContentWords(original: string, replacement: string): boolean {
+  const removed = wordCounts(original);
+  const added = wordCounts(replacement);
+  let removedCount = 0;
+  let addedCount = 0;
+
+  for (const word of new Set([...removed.keys(), ...added.keys()])) {
+    const difference = (removed.get(word) ?? 0) - (added.get(word) ?? 0);
+    if (difference > 0) removedCount += difference;
+    else addedCount -= difference;
+  }
+
+  return removedCount > addedCount;
+}
+
+function wordCounts(text: string): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const match of text.matchAll(LEXICAL_WORDS)) {
+    const word = match[0].toLowerCase().replace(/’/g, "'");
+    const negativeBase = NEGATIVE_CONTRACTION_BASES.get(word);
+    const expanded = negativeBase ? [negativeBase, "not"] : word.endsWith("n't") ? [word.slice(0, -3), "not"] : [word];
+    for (const token of expanded) {
+      if (FUNCTION_WORDS.has(token)) continue;
+      counts.set(token, (counts.get(token) ?? 0) + 1);
+    }
+  }
+  return counts;
 }
 
 function matches(text: string, pattern: RegExp): string[] {

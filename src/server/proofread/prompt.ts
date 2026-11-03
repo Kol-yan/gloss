@@ -5,7 +5,7 @@ import type { ProofreadMode } from "./edits";
 
 // Bump on any change to the prompt text, then run the corpus once
 // (eval/run-proofread.ts) and commit its result for the new version.
-export const PROOFREAD_PROMPT_VERSION = "proofread-v6";
+export const PROOFREAD_PROMPT_VERSION = "proofread-v9";
 
 // The learner's text is data. The rules below are in the system message only;
 // the user message carries nothing but the framed text.
@@ -29,7 +29,7 @@ const IMPROVEMENTS = `"improvements" holds optional suggestions that are not mis
 - meaning: for an "expression", one plain-English line (at most ${MAX_MEANING_LENGTH} characters) saying what the replacement means, so the learner can remember it. For "style" use an empty string.
 - ipa: for an "expression" whose replacement is one lexical word, give its compact American English IPA transcription between slashes, at most 96 phonetic characters and no spaces. Latin accents and internal apostrophes or hyphens still count as one word. If the replacement is a phrase, ipa MUST be an empty string; never give pronunciation for only one word inside a phrase. For "style" or uncertain pronunciation use an empty string. Do not invent an expression just to supply pronunciation.
 
-Before you answer, put each improvement into its sentence and read the result. Drop the improvement unless the sentence is still correct English, says exactly the same thing just as strongly, and keeps every name, number and negation.`;
+Before you answer, put each improvement into its sentence and read the result. Drop the improvement unless the sentence is still correct English, says exactly the same thing just as strongly, and keeps every name, number and negation. Preserve gender-neutral they/them/their pronouns and their referents, including singular they. Never turn they, them, their, theirs, themself or themselves into a gendered word or phrase.`;
 
 const VERIFY_IMPROVEMENTS = `"improvements" must always be an empty list.
 
@@ -37,6 +37,7 @@ Report a sentence only when it contains a clear mistake that a teacher would mar
 
 const RULES = `Rules:
 - Never change facts, numbers, names, negation, commitments or the author's position, and never make a statement weaker or stronger ("never" to "not", "must" to "should").
+- In corrections, fix only definite mistakes and copy every other correct word unchanged; in all suggestions, preserve every content fact and time boundary.
 - Do not rewrite a sentence when a small fix is enough.
 - A correct sentence never gets a correction. An empty list is a valid answer.
 - Answer with the JSON object only.`;

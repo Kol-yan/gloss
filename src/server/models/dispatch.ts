@@ -7,7 +7,9 @@ import { openRouterChat, openRouterTranscribe } from "./openrouter";
 // The route, never the caller, decides the provider: there is no fallback from
 // one provider or tier to another.
 export function chatWithRoute(input: MetaChatInput, route: TextRoute, config: AppConfig) {
-  return route.provider === "meta" ? metaChat(input, { config }) : openRouterChat(input, route, config);
+  return route.provider === "meta"
+    ? metaChat(input, { config, timeoutMs: input.timeoutMs })
+    : openRouterChat(input, route, config);
 }
 
 export function transcribeWithAccess(input: MetaTranscribeInput, access: ProviderAccess, config: AppConfig) {

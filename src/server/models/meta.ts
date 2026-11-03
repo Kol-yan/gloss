@@ -35,6 +35,9 @@ export interface MetaChatInput {
   reasoningEffort?: "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
   temperature?: number;
   signal?: AbortSignal;
+  // Overrides the default provider deadline. Only offline benches set this;
+  // production callers keep the shared limit.
+  timeoutMs?: number;
 }
 
 export interface MetaChatResult {
