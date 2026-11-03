@@ -15,6 +15,10 @@ export function isSameOriginPost(request: Request): boolean {
 
   const origin = request.headers.get("origin");
   if (origin === null) return true;
+  // A page with a no-referrer policy (the invite page keeps its token out of
+  // Referer) makes the browser send `Origin: null` on its own form POST. Pages
+  // cannot set Sec-Fetch-Site, so "same-origin" vouches for that opaque origin.
+  if (origin === "null") return site === "same-origin";
   return ownOrigins(request).has(origin);
 }
 

@@ -99,6 +99,12 @@ describe("POST /join/[token]/continue", () => {
       await refused({ origin: "https://localhost:3000" });
     });
 
+    it("accepts the opaque Origin a no-referrer page sends on its own form post", async () => {
+      const token = newInvite();
+      expect((await post(token, { "sec-fetch-site": "same-origin", origin: "null" })).status).toBe(303);
+      expect(uses(token)).toBe(1);
+    });
+
     it("accepts a request with neither header (not a browser form post)", async () => {
       const token = newInvite();
       expect((await post(token, {})).status).toBe(303);
