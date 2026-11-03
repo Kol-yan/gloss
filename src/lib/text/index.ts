@@ -62,7 +62,10 @@ export function applyRange(text: string, range: Range): string | null {
   return text.slice(0, range.start) + range.replacement + text.slice(range.end);
 }
 
-const NEGATIONS = /\b(not|no|never|none|nobody|nothing|neither|nor|without)\b|n't\b/gi;
+// Includes "cannot" and apostrophe-less contractions ("dont"), so fixing their
+// spelling does not look like a change of meaning.
+const NEGATIONS =
+  /\b(not|no|never|none|nobody|nothing|neither|nor|without|cannot|(?:do|does|did|is|are|was|were|has|have|had|wo|ca|could|would|should|must|need)nt)\b|n't\b/gi;
 
 function tokens(text: string, pattern: RegExp): string[] {
   return (text.match(pattern) ?? []).map((t) => t.toLowerCase()).sort();

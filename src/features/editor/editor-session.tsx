@@ -21,7 +21,7 @@ import { hashText } from "@/lib/text";
 import type { Suggestion } from "@/shared/contracts";
 import { EditorScreen } from "./editor-screen";
 import { checkLocal, getLocalCheckerStatus, getServerLocalCheckerStatus, subscribeLocalChecker } from "./local-checker";
-import type { CheckWithAi, ProofreadOutcome } from "./types";
+import { NO_RECHECK, type CheckWithAi, type ProofreadOutcome, type RecheckSentences } from "./types";
 
 // `/join/{token}` sends people here with ?invite=invalid when the link did not work.
 function InviteNotice() {
@@ -54,7 +54,9 @@ async function safeHash(text: string): Promise<string> {
 }
 
 // Connects the editor to the account: quota, cloud checks, decisions and practice.
-export function EditorSession() {
+// `recheckSentences` receives the sentences an applied cloud suggestion changed;
+// it does nothing until a sentence-level check is plugged in.
+export function EditorSession({ recheckSentences = NO_RECHECK }: { recheckSentences?: RecheckSentences } = {}) {
   const router = useRouter();
   const access = useAccess();
   const capture = useSyncExternalStore(subscribeSelection, getSelectionSnapshot, getServerSelectionSnapshot);
@@ -133,6 +135,7 @@ export function EditorSession() {
             localCheckStatus={localCheckStatus}
             onDecision={onDecision}
             onStartPractice={onStartPractice}
+            recheckSentences={recheckSentences}
           />
         </div>
       )}

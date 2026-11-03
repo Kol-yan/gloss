@@ -7,9 +7,9 @@ import { MAX_TEXT_LENGTH, type Suggestion } from "@/shared/contracts";
 import { TryYourselfCard } from "@/features/practice/try-yourself-card";
 import { offerFromSuggestion, type Familiarity, type PracticeOffer } from "@/features/practice/types";
 import { CheckBar } from "./check-bar";
-import { canUndo, createDoc, editorReducer } from "./editor-reducer";
+import { canUndo, createDoc, editorReducer, reportApplied } from "./editor-reducer";
 import { SuggestionRail, type RailNotice } from "./suggestion-rail";
-import type { CheckLocal, CheckStatus, CheckWithAi, ProofreadOutcome } from "./types";
+import type { CheckLocal, CheckStatus, CheckWithAi, ProofreadOutcome, RecheckSentences } from "./types";
 import { WritingSurface, type WritingSurfaceHandle } from "./writing-surface";
 import type { LocalCheckStatus } from "./local-checker";
 
@@ -35,6 +35,9 @@ export type EditorScreenProps = {
   // Called for every decision on a suggestion, with the text the learner was looking at.
   // "stale" means a cloud suggestion disappeared without the learner deciding.
   onDecision?: (suggestion: Suggestion, decision: "accepted" | "rejected" | "stale", text: string) => void;
+  // Called once after the learner applies a cloud suggestion, with the sentences
+  // of the new text that changed (ranges into that text) and the text itself.
+  recheckSentences?: RecheckSentences;
 };
 
 export function EditorScreen({
@@ -48,6 +51,7 @@ export function EditorScreen({
   localCheckStatus,
   onStartPractice,
   onDecision,
+  recheckSentences,
 }: EditorScreenProps) {
   const [doc, dispatch] = useReducer(editorReducer, undefined, () => createDoc(initialText, initialSuggestions));
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -80,14 +84,23 @@ export function EditorScreen({
   // Cloud suggestions that vanished without a decision are reported once per batch.
   const onDecisionRef = useRef(onDecision);
   const reportedStale = useRef(doc.stale);
+  const recheckRef = useRef(recheckSentences);
   useEffect(() => {
     onDecisionRef.current = onDecision;
+    recheckRef.current = recheckSentences;
   });
   useEffect(() => {
     if (reportedStale.current === doc.stale) return;
     reportedStale.current = doc.stale;
     for (const suggestion of doc.stale.items) onDecisionRef.current?.(suggestion, "stale", doc.stale.text);
   }, [doc.stale]);
+
+  // A cloud suggestion that was just applied is passed on once, so the sentences
+  // it changed can be checked again.
+  const reportedApplied = useRef(doc.applied);
+  useEffect(() => {
+    reportedApplied.current = reportApplied(reportedApplied.current, doc.applied, recheckRef.current);
+  }, [doc.applied]);
 
   // Local checks run shortly after typing stops. They are best effort: a
   // failing local checker must never get in the way of writing.
@@ -312,6 +325,7 @@ export function EditorScreen({
         >
           <SuggestionRail
             suggestions={doc.suggestions}
+            text={doc.text}
             activeId={activeId}
             canUndo={undoAvailable}
             notice={notice}

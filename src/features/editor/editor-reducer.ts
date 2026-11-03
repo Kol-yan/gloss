@@ -2,8 +2,9 @@
 // and the undo stack for applied suggestions. No React in here so the rules
 // (stale suggestions disappear, ranges follow edits, undo never loses typing)
 // can be tested directly.
-import { applyRange, canApply } from "@/lib/text";
+import { applyRange, canApply, splitSentences } from "@/lib/text";
 import type { Suggestion, SuggestionSource } from "@/shared/contracts";
+import type { RecheckSentences, SentenceRange } from "./types";
 
 export type UndoEntry = {
   // Document before the suggestion was applied.
@@ -21,6 +22,28 @@ export type StaleBatch = { items: Suggestion[]; text: string };
 
 export const NO_STALE: StaleBatch = { items: [], text: "" };
 
+// The sentences a just-applied cloud suggestion changed, as ranges into `text`
+// (the text after applying). A new batch object means a new apply, so the
+// editor can pass each one on exactly once.
+export type AppliedBatch = { ranges: SentenceRange[]; text: string };
+
+export const NO_APPLIED: AppliedBatch = { ranges: [], text: "" };
+
+// Sentences of `text` that overlap or touch the span [start, end].
+export function sentenceRangesTouching(text: string, start: number, end: number): SentenceRange[] {
+  return splitSentences(text)
+    .filter((sentence) => sentence.start <= end && sentence.end >= start)
+    .map(({ start: from, end: to }) => ({ start: from, end: to }));
+}
+
+// Passes a new applied batch to the hook once and returns the batch to remember
+// as reported. Batches without sentences (nothing applied, or a local fix) are skipped.
+export function reportApplied(reported: AppliedBatch, current: AppliedBatch, recheck?: RecheckSentences): AppliedBatch {
+  if (reported === current) return reported;
+  if (current.ranges.length > 0) recheck?.(current.ranges, current.text);
+  return current;
+}
+
 export type EditorDoc = {
   text: string;
   suggestions: Suggestion[];
@@ -28,6 +51,7 @@ export type EditorDoc = {
   dismissed: string[];
   undo: UndoEntry[];
   stale: StaleBatch;
+  applied: AppliedBatch;
 };
 
 export type EditorAction =
@@ -46,6 +70,7 @@ export function createDoc(text = "", suggestions: Suggestion[] = []): EditorDoc 
     dismissed: [],
     undo: [],
     stale: NO_STALE,
+    applied: NO_APPLIED,
   };
 }
 
@@ -101,6 +126,16 @@ export function rebaseSuggestions(oldText: string, newText: string, suggestions:
   return result;
 }
 
+// Moves suggestions after the applied range by exactly what the apply added or
+// removed. The applied range is known, so nothing is guessed from a text diff
+// (which cannot tell that a neighbour touching the range is still intact).
+function shiftAfterApply(applied: Suggestion, next: string, others: Suggestion[]): Suggestion[] {
+  const delta = applied.replacement.length - applied.original.length;
+  return others
+    .map((s) => (s.start >= applied.end ? { ...s, start: s.start + delta, end: s.end + delta } : s))
+    .filter((s) => canApply(next, s));
+}
+
 // The smallest edit a suggestion makes, so "a" -> "an" and "a orange" -> "an orange" count as the same fix.
 function effectiveEdit(s: Suggestion): string {
   const max = Math.min(s.original.length, s.replacement.length);
@@ -139,7 +174,12 @@ export function editorReducer(doc: EditorDoc, action: EditorAction): EditorDoc {
   const decided = action.type === "apply" || action.type === "dismiss" ? action.id : null;
   const kept = new Set(next.suggestions.map((s) => s.id));
   const gone = doc.suggestions.filter((s) => s.source === "ai" && s.id !== decided && !kept.has(s.id));
-  return { ...next, stale: gone.length > 0 ? { items: gone, text: doc.text } : NO_STALE };
+  return {
+    ...next,
+    stale: gone.length > 0 ? { items: gone, text: doc.text } : NO_STALE,
+    // Only an apply that changed the text produces a batch; every other action clears it.
+    applied: action.type === "apply" && next.text !== doc.text ? next.applied : NO_APPLIED,
+  };
 }
 
 function step(doc: EditorDoc, action: EditorAction): EditorDoc {
@@ -172,8 +212,15 @@ function step(doc: EditorDoc, action: EditorAction): EditorDoc {
       return {
         ...doc,
         text: next,
-        suggestions: rebaseSuggestions(doc.text, next, others),
+        suggestions: shiftAfterApply(target, next, others),
         undo: [...doc.undo, entry].slice(-MAX_UNDO),
+        applied:
+          target.source === "ai"
+            ? {
+                ranges: sentenceRangesTouching(next, target.start, target.start + target.replacement.length),
+                text: next,
+              }
+            : NO_APPLIED,
       };
     }
 

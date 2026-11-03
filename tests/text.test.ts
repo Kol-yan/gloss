@@ -69,5 +69,7 @@ describe("touchesMeaning", () => {
   it("allows grammar and style edits", () => {
     expect(touchesMeaning("discussed about the plan", "discussed the plan")).toBe(false);
     expect(touchesMeaning("is not realistic", "isn't realistic")).toBe(false);
+    expect(touchesMeaning("I dont know", "I don't know")).toBe(false);
+    expect(touchesMeaning("we can not go", "we cannot go")).toBe(false);
   });
 });

@@ -1,12 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
+  NO_APPLIED,
   canUndo,
   createDoc,
   editorReducer,
   rebaseSuggestions,
+  reportApplied,
+  sentenceRangesTouching,
   type EditorDoc,
 } from "@/features/editor/editor-reducer";
 import { buildSegments } from "@/features/editor/highlight";
+import { splitSentences } from "@/lib/text";
 import type { Suggestion } from "@/shared/contracts";
 
 function suggest(text: string, fragment: string, replacement: string, overrides: Partial<Suggestion> = {}): Suggestion {
@@ -226,5 +230,120 @@ describe("buildSegments", () => {
     const active = buildSegments(text, suggestions, "b");
     expect(active.find((s) => s.text === "recieve")?.category).toBe("style");
     expect(active.every((s) => s.category === null || s.active)).toBe(true);
+  });
+});
+
+describe("after applying a suggestion", () => {
+  const text = "I recieve the mail. It was unfortunatelly late. We goed home yesterday.";
+  const cloud = (fragment: string, replacement: string, id: string) =>
+    suggest(text, fragment, replacement, { id, source: "ai" });
+  const threeCloud = () =>
+    createDoc(text, [cloud("recieve", "receive", "a"), cloud("unfortunatelly", "unfortunately", "b"), cloud("goed", "went", "c")]);
+
+  it("keeps the other cloud suggestions through a local re-check and a later edit", () => {
+    let doc = editorReducer(threeCloud(), { type: "apply", id: "a" });
+    expect(doc.suggestions.map((s) => s.id)).toEqual(["b", "c"]);
+
+    // The local checker answers for the new text and reports nothing.
+    doc = editorReducer(doc, { type: "receive", source: "local", forText: doc.text, suggestions: [] });
+    expect(doc.suggestions.map((s) => s.id)).toEqual(["b", "c"]);
+    expect(doc.stale.items).toHaveLength(0);
+
+    doc = editorReducer(doc, { type: "edit", text: doc.text + " Thanks." });
+    expect(doc.suggestions.map((s) => s.id)).toEqual(["b", "c"]);
+    for (const s of doc.suggestions) expect(doc.text.slice(s.start, s.end)).toBe(s.original);
+  });
+
+  it("shifts later suggestions by exactly the applied length change", () => {
+    const longer = editorReducer(threeCloud(), { type: "apply", id: "b" });
+    expect(longer.text).toContain("unfortunately late");
+    const goed = longer.suggestions.find((s) => s.id === "c");
+    expect(goed).toMatchObject({ start: longer.text.indexOf("goed"), end: longer.text.indexOf("goed") + 4 });
+
+    const shorter = editorReducer(threeCloud(), { type: "apply", id: "c" });
+    expect(shorter.suggestions.map((s) => s.id)).toEqual(["a", "b"]);
+    const mail = editorReducer(
+      createDoc(text, [cloud("recieve the mail", "get it", "wide"), cloud("goed", "went", "c")]),
+      { type: "apply", id: "wide" },
+    );
+    expect(mail.suggestions.map((s) => mail.text.slice(s.start, s.end))).toEqual(["goed"]);
+  });
+
+  it("keeps a suggestion that starts exactly where the applied one ends", () => {
+    const glued = "Enor,ous help";
+    const doc = createDoc(glued, [
+      suggest(glued, "Enor", "Enos", { id: "word" }),
+      suggest(glued, ",", ", ", { id: "comma", category: "style" }),
+      suggest(glued, "ous", "opus", { id: "tail" }),
+    ]);
+    const next = editorReducer(doc, { type: "apply", id: "word" });
+    expect(next.text).toBe("Enos,ous help");
+    expect(next.suggestions.map((s) => s.id)).toEqual(["comma", "tail"]);
+    for (const s of next.suggestions) expect(next.text.slice(s.start, s.end)).toBe(s.original);
+  });
+
+  it("keeps a suggestion that ends exactly where the applied one starts", () => {
+    const glued = "Hello,wrld there";
+    const doc = createDoc(glued, [
+      suggest(glued, ",", ", ", { id: "comma", category: "style" }),
+      suggest(glued, "wrld", "world", { id: "word" }),
+    ]);
+    const next = editorReducer(doc, { type: "apply", id: "word" });
+    expect(next.suggestions.map((s) => s.id)).toEqual(["comma"]);
+  });
+});
+
+describe("sentences changed by an applied cloud suggestion", () => {
+  const text = "I recieve the mail. It was unfortunatelly late. We goed home yesterday.";
+  const ai = (fragment: string, replacement: string, id: string) =>
+    suggest(text, fragment, replacement, { id, source: "ai" });
+
+  it("reports only the sentence the edit is in, as a range into the new text", () => {
+    const doc = createDoc(text, [ai("unfortunatelly", "unfortunately", "b")]);
+    const next = editorReducer(doc, { type: "apply", id: "b" });
+    const second = splitSentences(next.text)[1];
+    expect(next.applied.ranges).toEqual([{ start: second.start, end: second.end }]);
+    expect(next.applied.text).toBe(next.text);
+    expect(next.text.slice(second.start, second.end)).toBe("It was unfortunately late.");
+  });
+
+  it("reports every sentence a wide edit spans", () => {
+    const doc = createDoc(text, [ai("late. We goed", "late. Then we went", "wide")]);
+    const next = editorReducer(doc, { type: "apply", id: "wide" });
+    expect(next.applied.ranges).toHaveLength(2);
+  });
+
+  it("reports nothing for a local fix, an edit, an undo or an unusable apply", () => {
+    const local = createDoc(text, [suggest(text, "recieve", "receive", { id: "l" })]);
+    expect(editorReducer(local, { type: "apply", id: "l" }).applied).toBe(NO_APPLIED);
+
+    const cloud = createDoc(text, [ai("goed", "went", "c")]);
+    const applied = editorReducer(cloud, { type: "apply", id: "c" });
+    expect(applied.applied.ranges).toHaveLength(1);
+    expect(editorReducer(applied, { type: "edit", text: applied.text + " Ok." }).applied).toBe(NO_APPLIED);
+    expect(editorReducer(applied, { type: "undo" }).applied).toBe(NO_APPLIED);
+    expect(editorReducer(cloud, { type: "apply", id: "missing" }).applied).toBe(NO_APPLIED);
+  });
+
+  it("finds the sentence around an empty edit", () => {
+    const t = "One. Two words.";
+    expect(sentenceRangesTouching(t, 9, 9)).toEqual([{ start: 5, end: 15 }]);
+  });
+
+  it("passes each applied batch to the re-check hook once, with the applied sentence range", () => {
+    const doc = createDoc(text, [ai("goed", "went", "c")]);
+    const next = editorReducer(doc, { type: "apply", id: "c" });
+    const third = splitSentences(next.text)[2];
+    const recheck = vi.fn();
+
+    let reported = reportApplied(doc.applied, next.applied, recheck);
+    expect(recheck).toHaveBeenCalledTimes(1);
+    expect(recheck).toHaveBeenCalledWith([{ start: third.start, end: third.end }], next.text);
+
+    // The same batch seen again (a re-render) and the empty batch that follows an edit do nothing.
+    reported = reportApplied(reported, next.applied, recheck);
+    reportApplied(reported, NO_APPLIED, recheck);
+    expect(recheck).toHaveBeenCalledTimes(1);
+    expect(() => reportApplied(NO_APPLIED, next.applied, undefined)).not.toThrow();
   });
 });

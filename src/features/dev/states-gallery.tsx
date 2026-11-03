@@ -82,9 +82,13 @@ const CHECK_STATES: ReadonlyArray<{ id: CheckStatus; label: string }> = [
 
 function EditorDemo({ phone }: { phone: boolean }) {
   const [status, setStatus] = useState<CheckStatus>("idle");
+  const [rechecked, setRechecked] = useState<string | null>(null);
   return (
     <>
       <Chips label="Check button" options={CHECK_STATES} value={status} onChange={setStatus} />
+      <p role="status" data-testid="recheck-log" className="text-sm text-ink-muted">
+        {rechecked ?? "Applying an AI suggestion reports the sentences it changed here."}
+      </p>
       <p className="text-sm text-ink-muted">
         Press Apply on the &quot;push the meeting back&quot; card to see the Try it yourself card. Hover or focus a card to
         highlight its words.
@@ -97,6 +101,9 @@ function EditorDemo({ phone }: { phone: boolean }) {
           checksLeft={status === "quota" ? 0 : 7}
           initialCheckStatus={status}
           checkWithAi={status === "unavailable" ? undefined : sampleCheckWithAi}
+          recheckSentences={(ranges, text) =>
+            setRechecked(`Re-check requested: ${ranges.map((r) => `"${text.slice(r.start, r.end)}"`).join(", ")}`)
+          }
           onStartPractice={async () => {
             await new Promise((resolve) => setTimeout(resolve, 600));
             return true;

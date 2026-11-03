@@ -10,6 +10,7 @@ export type RailNotice = { id: number; text: string };
 
 export function SuggestionRail({
   suggestions,
+  text,
   activeId,
   canUndo,
   notice,
@@ -26,6 +27,8 @@ export function SuggestionRail({
   onClose,
 }: {
   suggestions: Suggestion[];
+  // The current text; cards show the words around each change.
+  text: string;
   activeId: string | null;
   canUndo: boolean;
   notice: RailNotice | null;
@@ -86,6 +89,7 @@ export function SuggestionRail({
               <SuggestionCard
                 key={suggestion.id}
                 suggestion={suggestion}
+                text={text}
                 active={activeId === suggestion.id}
                 onActivate={onActivate}
                 onDeactivate={onDeactivate}

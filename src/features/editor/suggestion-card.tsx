@@ -12,6 +12,7 @@ import {
   SparkIcon,
 } from "@/components/ui/icons";
 import type { Suggestion, SuggestionCategory, SuggestionSource } from "@/shared/contracts";
+import { describeChange, splitSpaces, spoken } from "./change-view";
 
 // Each category differs in icon, label and colour, so Style and Expression never read as errors.
 const CATEGORY: Record<SuggestionCategory, { label: string; className: string; Icon: typeof ErrorIcon }> = {
@@ -40,8 +41,23 @@ function SourceLabel({ source }: { source: SuggestionSource }) {
   );
 }
 
+// Spaces that would be invisible are drawn as a subtle marker, and announced.
+function Visible({ text }: { text: string }) {
+  return splitSpaces(text).map((part, i) =>
+    part.marker ? (
+      <span key={i} className="rounded-sm bg-ink/10 px-0.5 font-normal not-italic text-ink-muted">
+        <span aria-hidden="true">{part.text}</span>
+        <span className="sr-only">{part.text.length === 1 ? " space " : " spaces "}</span>
+      </span>
+    ) : (
+      <span key={i}>{part.text}</span>
+    ),
+  );
+}
+
 export function SuggestionCard({
   suggestion,
+  text,
   active,
   onActivate,
   onDeactivate,
@@ -50,6 +66,8 @@ export function SuggestionCard({
   onDismiss,
 }: {
   suggestion: Suggestion;
+  // The current text, so the card can show the words around the change.
+  text: string;
   active: boolean;
   onActivate: (id: string) => void;
   onDeactivate: (id: string) => void;
@@ -59,6 +77,10 @@ export function SuggestionCard({
   onDismiss: (id: string) => void;
 }) {
   const { id, category, original, replacement, reason, meaningChange } = suggestion;
+  const change = describeChange(text, suggestion);
+  // Harper's message for a spacing or punctuation edit says what the label says.
+  const showReason = !(change.label && suggestion.source === "local");
+  const summary = change.label ?? `${spoken(original)} to ${spoken(replacement)}`;
 
   const handleBlur = (event: FocusEvent<HTMLLIElement>) => {
     if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onDeactivate(id);
@@ -83,23 +105,50 @@ export function SuggestionCard({
         <SourceLabel source={suggestion.source} />
       </div>
 
-      <p className="mt-2 text-base leading-snug [overflow-wrap:anywhere]">
-        <span className="sr-only">Change </span>
-        <span className="text-ink-muted line-through decoration-1">{original}</span>
-        <span aria-hidden="true" className="mx-1.5 text-ink-muted">
-          →
-        </span>
-        <span className="sr-only"> to </span>
-        {replacement === "" ? (
-          <span className="font-semibold italic">remove it</span>
-        ) : (
-          <span className="font-semibold">{replacement}</span>
-        )}
-      </p>
+      {change.label ? (
+        <p className="mt-2 text-base font-semibold leading-snug">{change.label}</p>
+      ) : (
+        <p className="mt-2 text-base leading-snug [overflow-wrap:anywhere]">
+          <span className="sr-only">Change </span>
+          <span className="text-ink-muted line-through decoration-1">
+            <Visible text={original} />
+          </span>
+          <span aria-hidden="true" className="mx-1.5 text-ink-muted">
+            →
+          </span>
+          <span className="sr-only"> to </span>
+          {replacement === "" ? (
+            <span className="font-semibold italic">remove it</span>
+          ) : (
+            <span className="font-semibold">
+              <Visible text={replacement} />
+            </span>
+          )}
+        </p>
+      )}
+
+      {change.before || change.after ? (
+        <p className="mt-1 text-sm leading-snug text-ink-muted [overflow-wrap:anywhere]">
+          <span className="sr-only">In your text: </span>
+          {change.before}
+          {change.removed ? (
+            <del className="rounded-sm bg-error-soft px-0.5 text-error decoration-1">
+              <Visible text={change.removed} />
+            </del>
+          ) : null}
+          {change.removed && change.added ? <span className="sr-only"> changed to </span> : null}
+          {change.added ? (
+            <ins className="rounded-sm bg-accent-soft px-0.5 font-semibold text-ink no-underline">
+              <Visible text={change.added} />
+            </ins>
+          ) : null}
+          {change.after}
+        </p>
+      ) : null}
 
       {category === "expression" ? <VocabularyPronunciation text={replacement} ipa={suggestion.ipa} /> : null}
 
-      <p className="mt-1 text-sm leading-snug text-ink-muted">{reason}</p>
+      {showReason ? <p className="mt-1 text-sm leading-snug text-ink-muted">{reason}</p> : null}
 
       {meaningChange ? (
         <p className="mt-2 flex items-start gap-1.5 rounded-chip bg-caution-soft px-2 py-1.5 text-xs font-semibold leading-snug text-caution">
@@ -109,10 +158,10 @@ export function SuggestionCard({
       ) : null}
 
       <div className="mt-2.5 flex items-center gap-1">
-        <Button size="sm" variant="soft" onClick={() => onApply(id)} aria-label={`Apply: ${original} to ${replacement || "nothing"}`}>
+        <Button size="sm" variant="soft" onClick={() => onApply(id)} aria-label={`Apply: ${summary}`}>
           Apply
         </Button>
-        <Button size="sm" variant="quiet" onClick={() => onDismiss(id)} aria-label={`Dismiss: ${original}`}>
+        <Button size="sm" variant="quiet" onClick={() => onDismiss(id)} aria-label={`Dismiss: ${change.label ?? spoken(original)}`}>
           Dismiss
         </Button>
       </div>

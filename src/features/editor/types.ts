@@ -22,3 +22,13 @@ export type CheckWithAi = (text: string) => Promise<ProofreadOutcome>;
 
 // In-browser rule checker. Returns suggestions with source "local".
 export type CheckLocal = (text: string) => Promise<Suggestion[]> | Suggestion[];
+
+// A span of the normalized text, as UTF-16 indices.
+export type SentenceRange = { start: number; end: number };
+
+// Called after the learner applies a cloud suggestion, with the sentences of the
+// new text that the edit touched and that text. It is the point where a
+// sentence-level re-check plugs in; the default does nothing.
+export type RecheckSentences = (ranges: SentenceRange[], text: string) => void;
+
+export const NO_RECHECK: RecheckSentences = () => {};

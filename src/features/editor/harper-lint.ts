@@ -34,7 +34,8 @@ export async function collectLints(linter: LocalLinter, text: string): Promise<R
   for (const [rule, lints] of Object.entries(groups)) {
     for (const lint of lints) {
       const span = lint.span();
-      const first = lint.suggestions()[0];
+      const offered = lint.suggestions();
+      const first = offered[0];
       let fix: RawFix | null = null;
       if (first) {
         const kind = first.kind();
@@ -53,6 +54,7 @@ export async function collectLints(linter: LocalLinter, text: string): Promise<R
         problem: lint.get_problem_text(),
         message: lint.message(),
         fix,
+        candidates: offered.filter((s) => s.kind() === SuggestionKind.Replace).slice(0, 8).map((s) => s.get_replacement_text()),
       });
     }
   }
