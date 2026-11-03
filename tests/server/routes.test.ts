@@ -91,14 +91,14 @@ describe("GET /api/me", () => {
     expect(body.aiEnabled).toBe(true);
     expect(body.quotas).toEqual({
       proofread: { used: 0, limit: 20 },
-      detect: { used: 0, limit: 20 },
+      detect: { used: 0, limit: 100 },
       evaluate: { used: 0, limit: 12 },
       asrSeconds: { used: 0, limit: 180 },
     });
 
     reserve({ learnerId: body.learner.id, kind: "detect", requestId: "detect-1", units: 1, maxCostMicros: 1000 });
     body = MeResponse.parse(await (await me()).json());
-    expect(body.quotas.detect).toEqual({ used: 1, limit: 20 });
+    expect(body.quotas.detect).toEqual({ used: 1, limit: 100 });
 
     reserve({
       learnerId: body.learner.id,

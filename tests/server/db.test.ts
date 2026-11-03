@@ -173,7 +173,7 @@ describe("openDatabase", () => {
       reserve({ learnerId: "legacy-hosted", kind: "detect", requestId: "same-request", units: 1, maxCostMicros: 1000 },
         { db, now: new Date(now), config: testConfig() });
       expect(getQuotaUsage({ id: "legacy-hosted", quotaProfile: "pilot" }, { db, now: new Date(now) }))
-        .toMatchObject({ proofread: { used: 2, limit: 20 }, detect: { used: 1, limit: 20 } });
+        .toMatchObject({ proofread: { used: 2, limit: 20 }, detect: { used: 1, limit: 100 } });
       expect(db.prepare("SELECT kind, request_id FROM usage_reservations WHERE learner_id = 'legacy-hosted' AND request_id = 'same-request' ORDER BY kind").all())
         .toEqual([{ kind: "detect", request_id: "same-request" }, { kind: "proofread", request_id: "same-request" }]);
     } finally {

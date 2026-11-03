@@ -57,15 +57,15 @@ describe("reserve", () => {
   it("counts detector and generator operations against separate matching daily limits", () => {
     const learner = insertLearner(temp.db, "pilot");
     reserve(input(learner, "generator-1"), deps());
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 100; i++) {
       reserve(input(learner, `detector-${i}`, { kind: "detect" }), deps());
     }
 
     const quotas = getQuotaUsage({ id: learner, quotaProfile: "pilot" }, deps());
     expect(quotas.proofread).toEqual({ used: 1, limit: 20 });
-    expect(quotas.detect).toEqual({ used: 20, limit: 20 });
+    expect(quotas.detect).toEqual({ used: 100, limit: 100 });
     expect(() => reserve(input(learner, "detector-over", { kind: "detect" }), deps())).toThrow(
-      expect.objectContaining({ name: "QuotaExceededError", kind: "detect", used: 20, limit: 20 }),
+      expect.objectContaining({ name: "QuotaExceededError", kind: "detect", used: 100, limit: 100 }),
     );
     expect(reserve(input(learner, "generator-2"), deps()).replay).toBe(false);
   });

@@ -14,7 +14,7 @@ export type QuotaLimits = Record<QuotaKind, number>;
 // Daily per-learner limits. proofread/detect/evaluate count operations;
 // asrSeconds counts seconds of audio. Detector and generator quotas are separate.
 export const QUOTA_PROFILES: Record<QuotaProfileName, QuotaLimits> = {
-  pilot: { proofread: 20, detect: 20, evaluate: 12, asrSeconds: 180 },
+  pilot: { proofread: 20, detect: 100, evaluate: 12, asrSeconds: 180 },
   judge: { proofread: 30, detect: 30, evaluate: 30, asrSeconds: 300 },
   owner: { proofread: 200, detect: 200, evaluate: 100, asrSeconds: 1800 },
 };

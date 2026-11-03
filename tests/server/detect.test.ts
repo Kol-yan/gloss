@@ -164,10 +164,10 @@ describe("sentence detector service", () => {
 
     const response = DetectResponse.parse(await detect(learner, input));
 
-    expect(response.quota).toEqual({ used: 1, limit: 20 });
+    expect(response.quota).toEqual({ used: 1, limit: 100 });
     expect(getQuotaUsage(learner)).toMatchObject({
       proofread: { used: 20, limit: 20 },
-      detect: { used: 1, limit: 20 },
+      detect: { used: 1, limit: 100 },
     });
   });
 
