@@ -6,6 +6,7 @@ import {
   ApiError,
   CreateExpressionResponse,
   DetectResponse,
+  DictationResponse,
   Evaluation,
   ExpressionsResponse,
   MeResponse,
@@ -168,6 +169,13 @@ export function transcribe(attemptId: string, audio: Blob, signal?: AbortSignal)
   form.set("attemptId", attemptId);
   form.set("audio", audio, "answer.wav");
   return paidCall("/api/speech/transcribe", { method: "POST", body: form, signal }, TranscribeResponse);
+}
+
+// Same audio format as transcribe. Returns text ready to insert where the learner writes.
+export function dictate(audio: Blob, signal?: AbortSignal) {
+  const form = new FormData();
+  form.set("audio", audio, "dictation.wav");
+  return paidCall("/api/speech/dictate", { method: "POST", body: form, signal }, DictationResponse);
 }
 
 export function submitAttempt(attemptId: string, request: SubmitAttemptRequest) {

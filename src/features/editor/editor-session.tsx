@@ -6,6 +6,7 @@ import { InviteRequired } from "@/components/invite-required";
 import {
   createExpression,
   detect,
+  dictate,
   getMe,
   isAiOff,
   isQuota,
@@ -24,7 +25,7 @@ import type { Suggestion } from "@/shared/contracts";
 import { EditorScreen } from "./editor-screen";
 import { checkLocal, getLocalCheckerStatus, getServerLocalCheckerStatus, subscribeLocalChecker } from "./local-checker";
 import { bindToLearner, type DetectOutcome, type DetectSentences } from "./sentence-detect";
-import { NO_RECHECK, type CheckWithAi, type ProofreadOutcome, type RecheckSentences } from "./types";
+import { NO_RECHECK, type CheckWithAi, type Dictate, type DictationOutcome, type ProofreadOutcome, type RecheckSentences } from "./types";
 
 // `/join/{token}` sends people here with ?invite=invalid when the link did not work.
 function InviteNotice() {
@@ -75,6 +76,15 @@ export function EditorSession({ recheckSentences = NO_RECHECK }: { recheckSenten
       const { quota, suggestions } = result.data;
       return { ok: true, suggestions, checksLeft: Math.max(0, quota.limit - quota.used) };
     }
+    if (isUnauthorized(result)) setSessionLost(true);
+    if (isQuota(result)) return { ok: false, reason: "quota" };
+    if (isAiOff(result)) return { ok: false, reason: "unavailable" };
+    return { ok: false, reason: "failed" };
+  }, []);
+
+  const dictateSpeech: Dictate = useCallback(async (audio, signal): Promise<DictationOutcome> => {
+    const result = await dictate(audio, signal);
+    if (result.ok) return { ok: true, text: result.data.text };
     if (isUnauthorized(result)) setSessionLost(true);
     if (isQuota(result)) return { ok: false, reason: "quota" };
     if (isAiOff(result)) return { ok: false, reason: "unavailable" };
@@ -167,6 +177,7 @@ export function EditorSession({ recheckSentences = NO_RECHECK }: { recheckSenten
             checksLeft={quota ? Math.max(0, quota.limit - quota.used) : null}
             aiAvailable={me?.ok ? me.data.aiEnabled && (me.data.accessMode !== "byok" || access.hasKey) : false}
             checkWithAi={checkWithAi}
+            dictate={dictateSpeech}
             detectSentences={detectSentences}
             checkLocal={checkLocal}
             localCheckStatus={localCheckStatus}

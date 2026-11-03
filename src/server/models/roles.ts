@@ -20,6 +20,13 @@ export const BUILD_PRACTICE_ROLE = { tier: "fast", maxTokens: 4096, temperature:
   maxTokens: number;
   temperature: number;
 };
+// Tidies dictated speech: punctuation and fillers only, so little reasoning is needed.
+export const DICTATION_CLEANUP_ROLE = {
+  tier: "smart",
+  maxTokens: 2048,
+  reasoningEffort: "minimal",
+  temperature: 0,
+} as const satisfies { tier: ModelTier; maxTokens: number; reasoningEffort: string; temperature: number };
 export const EVALUATE_ATTEMPT_ROLE = {
   tier: "smart",
   maxTokens: 4096,

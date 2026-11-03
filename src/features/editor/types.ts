@@ -32,3 +32,10 @@ export type SentenceRange = { start: number; end: number };
 export type RecheckSentences = (ranges: SentenceRange[], text: string) => void;
 
 export const NO_RECHECK: RecheckSentences = () => {};
+
+// Dictated speech, already mapped from the API by whoever wires the editor.
+// `audio` is a RIFF/WAVE recording; `text` is ready to insert.
+export type DictationOutcome =
+  | { ok: true; text: string }
+  | { ok: false; reason: "quota" | "unavailable" | "failed" };
+export type Dictate = (audio: Blob, signal?: AbortSignal) => Promise<DictationOutcome>;

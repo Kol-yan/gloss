@@ -206,6 +206,18 @@ export const TranscribeResponse = z.object({
 });
 export type TranscribeResponse = z.infer<typeof TranscribeResponse>;
 
+// POST /api/speech/dictate — multipart form with field `audio` (same format
+// as above). `text` is ready to insert where the learner writes: punctuation
+// fixed and fillers removed, the learner's words unchanged. When the clean-up
+// step is unavailable, `cleaned` is false and `text` equals `rawText`.
+export const DictationResponse = z.object({
+  text: z.string(),
+  rawText: z.string(),
+  cleaned: z.boolean(),
+  durationSeconds: z.number().nonnegative(),
+});
+export type DictationResponse = z.infer<typeof DictationResponse>;
+
 // POST /api/practice/attempts/{attemptId}. For voice tasks `answer` is the
 // transcript as confirmed by the learner; the server compares it with the
 // raw transcript it stored and records substantial edits.

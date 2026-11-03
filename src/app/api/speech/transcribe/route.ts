@@ -4,40 +4,10 @@ import { errorResponse, jsonError, jsonOk } from "@/server/http";
 import { transcribeAttempt } from "@/server/practice/speech";
 import { MAX_WAV_BYTES } from "@/server/practice/wav";
 import { providerAccessFromRequest } from "@/server/models/access";
+import { BodyTooLargeError, readBoundedBody } from "@/server/bounded-body";
 
 // The multipart envelope adds a little to the audio itself.
 const MAX_BODY_BYTES = MAX_WAV_BYTES + 64 * 1024;
-
-class BodyTooLargeError extends Error {}
-
-// Reads the request body into memory, giving up as soon as it exceeds the
-// cap. Content-Length alone is not trusted: a chunked or lying client could
-// otherwise make the server buffer an unbounded body.
-async function readBoundedBody(request: Request): Promise<Uint8Array> {
-  if (!request.body) return new Uint8Array(0);
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      total += value.byteLength;
-      if (total > MAX_BODY_BYTES) throw new BodyTooLargeError();
-      chunks.push(value);
-    }
-  } catch (error) {
-    await reader.cancel().catch(() => undefined);
-    throw error;
-  }
-  const body = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    body.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return body;
-}
 
 export async function POST(request: Request) {
   try {
@@ -54,7 +24,7 @@ export async function POST(request: Request) {
     let attemptId: string;
     let audio: Uint8Array;
     try {
-      const body = await readBoundedBody(request);
+      const body = await readBoundedBody(request, MAX_BODY_BYTES);
       const form = await new Response(body as Uint8Array<ArrayBuffer>, {
         headers: { "content-type": contentType },
       }).formData();

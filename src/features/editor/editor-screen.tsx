@@ -7,6 +7,7 @@ import { MAX_TEXT_LENGTH, type Suggestion } from "@/shared/contracts";
 import { TryYourselfCard } from "@/features/practice/try-yourself-card";
 import { offerFromSuggestion, type Familiarity, type PracticeOffer } from "@/features/practice/types";
 import { CheckBar } from "./check-bar";
+import { DictateButton } from "./dictate-button";
 import { canUndo, createDoc, editorReducer, planSafeFixes, reportApplied } from "./editor-reducer";
 import { InlinePopover } from "./inline-popover";
 import { pickSuggestion, popoverReducer, sortedIndex, suggestionForCaret, type PopoverState } from "./popover-state";
@@ -23,7 +24,7 @@ import {
 import type { SentenceJobState } from "./sentence-flag-card";
 import { SuggestionRail, type FocusRequest, type RailNotice } from "./suggestion-rail";
 import { SamplePicker } from "./sample-picker";
-import type { CheckLocal, CheckStatus, CheckWithAi, ProofreadOutcome, RecheckSentences } from "./types";
+import type { CheckLocal, CheckStatus, CheckWithAi, Dictate, ProofreadOutcome, RecheckSentences } from "./types";
 import { WritingSurface, type WritingSurfaceHandle } from "./writing-surface";
 import type { LocalCheckStatus } from "./local-checker";
 
@@ -60,6 +61,8 @@ export type EditorScreenProps = {
   // Runs the generator on its own for a sentence the detector is almost sure
   // needs a correction. Off by default: it spends a check the learner did not ask for.
   prefetchCorrections?: boolean;
+  // Voice input: turns speech into text inserted at the caret. No button without it.
+  dictate?: Dictate;
 };
 
 export function EditorScreen({
@@ -77,6 +80,7 @@ export function EditorScreen({
   detectSentences,
   detectPauseMs,
   prefetchCorrections = false,
+  dictate,
 }: EditorScreenProps) {
   const [doc, dispatch] = useReducer(editorReducer, undefined, () => createDoc(initialText, initialSuggestions));
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -308,6 +312,21 @@ export function EditorScreen({
     setNotice(null);
     setSampleNotice("Sample added. Press Check with AI for suggestions.");
     surfaceRef.current?.focus();
+  };
+
+  // Dictated text goes in at the caret, or at the end, separated by spaces.
+  const insertDictation = (spoken: string) => {
+    const text = doc.text;
+    const at = surfaceRef.current?.caret() ?? text.length;
+    const before = text.slice(0, at);
+    const after = text.slice(at);
+    const lead = before && !/\s$/.test(before) ? " " : "";
+    const trail = after && !/^\s/.test(after) ? " " : "";
+    const insert = lead + spoken.trim() + trail;
+    const next = (before + insert + after).slice(0, MAX_TEXT_LENGTH);
+    handleChange(next, false);
+    const caret = Math.min(before.length + insert.length - trail.length, next.length);
+    requestAnimationFrame(() => surfaceRef.current?.focus(caret));
   };
 
   const apply = (id: string) => {
@@ -580,7 +599,10 @@ export function EditorScreen({
             <p role="status" aria-live="polite" className={sampleNotice ? "text-sm text-ink-muted" : "sr-only"}>
               {sampleNotice}
             </p>
-            <SamplePicker onSelect={insertSample} hasText={hasContent} />
+            <div className="flex items-start gap-2">
+              {dictate ? <DictateButton dictate={dictate} disabled={!aiAvailable} onText={insertDictation} /> : null}
+              <SamplePicker onSelect={insertSample} hasText={hasContent} />
+            </div>
           </div>
           <WritingSurface
             value={doc.text}
