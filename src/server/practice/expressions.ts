@@ -6,6 +6,7 @@ import type {
   Familiarity,
   HistoryEntry,
 } from "@/shared/contracts";
+import { sanitizeIpa } from "@/lib/pronunciation";
 import type { Learner } from "../auth/sessions";
 import { getDb, immediate, learnerScope, type Row } from "../db";
 import type { ServerDeps } from "../deps";
@@ -21,6 +22,7 @@ export function toExpression(row: Row): Expression {
     id: String(row.id),
     text: String(row.text),
     meaning: String(row.meaning),
+    ipa: sanitizeIpa(row.ipa, String(row.text)),
     familiarity: row.familiarity as Familiarity,
   };
 }
@@ -55,11 +57,12 @@ export function createExpression(
 
     const id = newId();
     const createdAt = now.toISOString();
+    const ipa = sanitizeIpa(suggestion.ipa, String(suggestion.replacement));
     db.prepare(
       `INSERT INTO expressions
-         (id, learner_id, suggestion_id, text, meaning, familiarity, next_practice_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, NULL, ?)`,
-    ).run(id, learner.id, input.suggestionId, String(suggestion.replacement), meaning, input.familiarity, createdAt);
+         (id, learner_id, suggestion_id, text, meaning, familiarity, next_practice_at, created_at, ipa)
+       VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
+    ).run(id, learner.id, input.suggestionId, String(suggestion.replacement), meaning, input.familiarity, createdAt, ipa);
     db.prepare(
       `INSERT INTO evidence_events
          (id, learner_id, expression_id, attempt_id, kind, verdict, cue, hint_used,
@@ -72,6 +75,7 @@ export function createExpression(
         id,
         text: String(suggestion.replacement),
         meaning,
+        ipa,
         familiarity: input.familiarity,
       },
     };

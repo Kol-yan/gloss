@@ -137,7 +137,7 @@ describe("POST /api/practice/tasks", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("hides the expression once an evaluated attempt is more than 12 hours old", async () => {
+  it("hides the expression once the latest evaluation is more than 12 hours old", async () => {
     const { learner, expressionId } = setup();
     seedEvaluatedAttempt(learner.id, expressionId, 11);
     fetchMock.mockResolvedValueOnce(situation(CLEAN));
@@ -147,7 +147,8 @@ describe("POST /api/practice/tasks", () => {
     expect(recent.cue).toBe("shown");
     expect(recent.expression).toBe(EXPRESSION);
 
-    seedEvaluatedAttempt(learner.id, expressionId, 13);
+    db().prepare("UPDATE attempts SET created_at = ? WHERE learner_id = ? AND status = 'evaluated'")
+      .run(new Date(Date.now() - 13 * 3_600_000).toISOString(), learner.id);
     fetchMock.mockResolvedValueOnce(situation(CLEAN));
     const later = PracticeTask.parse(
       await (await create({ requestId: requestId(), expressionId, kind: "written" })).json(),

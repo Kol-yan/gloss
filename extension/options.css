@@ -1,0 +1,33 @@
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, sans-serif;
+  color: #203139;
+  background: #f4efe7;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; padding: 32px 20px; }
+main { max-width: 620px; margin: 0 auto; }
+.brand { color: #0a665f; font-size: 20px; font-weight: 750; }
+h1 { font-size: 30px; line-height: 1.15; }
+p { font-size: 15px; line-height: 1.55; }
+fieldset { border: 0; padding: 0; margin: 28px 0 0; }
+label { display: block; margin-bottom: 8px; font-size: 15px; font-weight: 650; }
+input { width: 100%; border: 1px solid #9caaa8; border-radius: 12px; padding: 12px; font: inherit; color: #203139; background: #fffdf8; }
+input:focus-visible, button:focus-visible { outline: 3px solid #0d7a72; outline-offset: 3px; }
+#address-help, .privacy { color: #4c6069; font-size: 13px; }
+.actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+button { border: 1px solid transparent; border-radius: 24px; padding: 11px 18px; font: inherit; font-weight: 650; cursor: pointer; color: #fff; background: #0a665f; }
+button.secondary { border-color: #9caaa8; color: #203139; background: transparent; }
+fieldset:disabled button { cursor: wait; opacity: 0.65; }
+#status { min-height: 24px; font-weight: 600; }
+.privacy { margin-top: 30px; border-top: 1px solid #c6beb1; padding-top: 18px; }
+
+@media (prefers-color-scheme: dark) {
+  :root { color: #e9efed; background: #18272c; }
+  .brand { color: #8fd9cf; }
+  input { color: #e9efed; background: #203139; border-color: #809e9c; }
+  #address-help, .privacy { color: #c0cdcc; }
+  button.secondary { color: #e9efed; border-color: #809e9c; }
+  .privacy { border-color: #526462; }
+}

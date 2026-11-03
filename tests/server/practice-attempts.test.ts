@@ -276,7 +276,8 @@ describe("POST /api/practice/attempts/[attemptId]", () => {
           targetUsed: false,
           nextPracticeLabel: null,
           retryAttemptId: attemptId,
-          target: EXPRESSION,
+          target: "",
+          ipa: null,
         });
         expect(evaluation.message.length).toBeGreaterThan(10);
         expect(attemptRow(attemptId)).toMatchObject({ status: "failed", answer: "My own words, unlikely to happen." });
@@ -352,6 +353,19 @@ describe("POST /api/practice/attempts/[attemptId]", () => {
         expect(r.at - r.before).toBeLessThan(24 * HOUR + 5000);
         expect(r.evaluation.nextPracticeLabel).toBe("Tomorrow");
       }
+    });
+
+    it("treats a preissued hidden task as assisted after another tab reveals the target", async () => {
+      const first = setup({ cue: "hidden" });
+      const other = seedTask(first.learner.id, first.expressionId, { cue: "hidden" });
+      fetchMock.mockResolvedValueOnce(chatReply(facts())).mockResolvedValueOnce(chatReply(facts()));
+      expect((await submit(first.attemptId, answer())).status).toBe(200);
+      const before = Date.now();
+      expect((await submit(other.attemptId, answer())).status).toBe(200);
+      expect(practiceEvents(first.expressionId).map(event => event.cue)).toEqual(["hidden", "shown"]);
+      const delay = scheduled(first.expressionId) - before;
+      expect(delay).toBeGreaterThanOrEqual(24 * HOUR - 5000);
+      expect(delay).toBeLessThan(24 * HOUR + 5000);
     });
 
     it("creates a retry for anything but used_well, and a retry evaluation only adds evidence", async () => {

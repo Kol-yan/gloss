@@ -244,7 +244,7 @@ export function EditorScreen({
       />
     ) : (
       <section aria-label="Practice ready" className="rounded-tile border border-success/40 bg-success-soft p-3 text-sm text-success">
-        <p className="font-semibold">Added to your practice: {offerState.offer.expression}</p>
+        <p className="font-semibold">Added to your practice list.</p>
         <p className="mt-1">
           <Link href="/practice" className="font-semibold underline underline-offset-2">
             Go to practice

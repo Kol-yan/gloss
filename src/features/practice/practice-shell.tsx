@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
+import { VocabularyPronunciation } from "@/components/vocabulary-pronunciation";
 import type { PracticeTask } from "./types";
 
 // Layout shared by written and voice practice: content on top, a rail with the
@@ -43,6 +44,7 @@ export function TaskCard({
       {hidden ? null : (
         <>
           <p className="mt-1 text-xl font-semibold leading-tight [overflow-wrap:anywhere]">{task.expression}</p>
+          <VocabularyPronunciation text={task.expression} ipa={task.ipa} />
           <p className="text-sm leading-snug text-ink-muted">{task.meaning}</p>
         </>
       )}

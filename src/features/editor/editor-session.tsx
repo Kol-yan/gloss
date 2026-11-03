@@ -14,6 +14,8 @@ import {
 } from "@/features/api/client";
 import { useLoad } from "@/features/api/use-load";
 import { useAccess } from "@/features/api/use-access";
+import { SELECTION_NOTICE } from "@/features/capture/selection";
+import { getSelectionSnapshot, getServerSelectionSnapshot, subscribeSelection } from "@/features/capture/selection-store";
 import type { Familiarity, PracticeOffer } from "@/features/practice/types";
 import { hashText } from "@/lib/text";
 import type { Suggestion } from "@/shared/contracts";
@@ -55,6 +57,7 @@ async function safeHash(text: string): Promise<string> {
 export function EditorSession() {
   const router = useRouter();
   const access = useAccess();
+  const capture = useSyncExternalStore(subscribeSelection, getSelectionSnapshot, getServerSelectionSnapshot);
   const localCheckStatus = useSyncExternalStore(subscribeLocalChecker, getLocalCheckerStatus, getServerLocalCheckerStatus);
   const { result: me, reload } = useLoad(getMe);
   const [sessionLost, setSessionLost] = useState(false);
@@ -104,6 +107,11 @@ export function EditorSession() {
       <Suspense fallback={null}>
         <InviteNotice />
       </Suspense>
+      {capture.result ? (
+        <p role="status" className="mx-auto w-full max-w-6xl shrink-0 px-4 pt-2 text-sm text-ink-muted">
+          {SELECTION_NOTICE[capture.result.status]}
+        </p>
+      ) : null}
       {unauthorized ? (
         <div className="min-h-0 flex-1 overflow-y-auto">
           <InviteRequired
@@ -116,6 +124,8 @@ export function EditorSession() {
       ) : (
         <div className="min-h-0 flex-1">
           <EditorScreen
+            key={`${access.session?.learner.id ?? "pending"}:${capture.revision}`}
+            initialText={capture.result?.status === "accepted" ? capture.result.text : ""}
             checksLeft={quota ? Math.max(0, quota.limit - quota.used) : null}
             aiAvailable={me?.ok ? me.data.aiEnabled && (me.data.accessMode !== "byok" || access.hasKey) : false}
             checkWithAi={checkWithAi}

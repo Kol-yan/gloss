@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { buttonClasses } from "@/components/ui/button";
 import { EmptyState } from "@/components/empty-state";
+import { VocabularyPronunciation } from "@/components/vocabulary-pronunciation";
 import { VerdictBadge } from "@/features/practice/feedback-panel";
 import type { ExpressionHistory, HistoryEntry, HistoryEntryKind } from "@/shared/contracts";
 
@@ -56,6 +57,7 @@ export function ExpressionsScreen({ items }: { items: ExpressionHistory[] }) {
                     <h2 id={`expr-${expression.id}`} className="text-xl font-semibold leading-tight [overflow-wrap:anywhere]">
                       {expression.text}
                     </h2>
+                    <VocabularyPronunciation text={expression.text} ipa={expression.ipa} />
                     <p className="text-sm leading-snug text-ink-muted">{expression.meaning}</p>
                   </div>
                   {item.due ? (

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { buttonClasses } from "@/components/ui/button";
 import { EmptyState } from "@/components/empty-state";
+import { VocabularyPronunciation } from "@/components/vocabulary-pronunciation";
 import { InviteRequired } from "@/components/invite-required";
 import { LoadError, LoadingState } from "@/components/load-states";
 import { isUnauthorized, listExpressions } from "@/features/api/client";
@@ -71,6 +72,7 @@ export function PracticePicker() {
           >
             <div className="min-w-0">
               <p className="text-xl font-semibold leading-tight [overflow-wrap:anywhere]">{item.expression.text}</p>
+              <VocabularyPronunciation text={item.expression.text} ipa={item.expression.ipa} />
               <p className="text-sm leading-snug text-ink-muted">{item.expression.meaning}</p>
             </div>
             <Link

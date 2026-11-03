@@ -42,6 +42,7 @@ describe("GET /api/health", () => {
       "0003_stale_work.sql",
       "0004_task_generation_claims.sql",
       "0005_byok_funding.sql",
+      "0006_word_pronunciation.sql",
     ]);
   });
 

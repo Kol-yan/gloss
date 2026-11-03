@@ -23,6 +23,7 @@ export function VoicePractice({ task, transcribe, submit, onContinue }: VoicePra
   const sessionRef = useRef<RecordingSession | null>(null);
   const startedAtRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
+  const microphoneAbortRef = useRef<AbortController | null>(null);
   const lastTranscriptRef = useRef("");
   // Bumped whenever a running step stops mattering (cancel, new start, unmount).
   const runRef = useRef(0);
@@ -36,6 +37,7 @@ export function VoicePractice({ task, transcribe, submit, onContinue }: VoicePra
       sessionRef.current?.cancel();
       sessionRef.current = null;
       abortRef.current?.abort();
+      microphoneAbortRef.current?.abort();
       setView((current) =>
         current.kind === "starting" || current.kind === "recording" || current.kind === "processing"
           ? { kind: "idle" }
@@ -97,7 +99,10 @@ export function VoicePractice({ task, transcribe, submit, onContinue }: VoicePra
   const start = useCallback(async () => {
     const run = ++runRef.current;
     setView({ kind: "starting" });
-    const result = await startRecording();
+    microphoneAbortRef.current?.abort();
+    const controller = new AbortController();
+    microphoneAbortRef.current = controller;
+    const result = await startRecording(controller.signal);
     if (run !== runRef.current) {
       if (result.ok) result.session.cancel();
       return;
@@ -132,6 +137,7 @@ export function VoicePractice({ task, transcribe, submit, onContinue }: VoicePra
     sessionRef.current?.cancel();
     sessionRef.current = null;
     abortRef.current?.abort();
+    microphoneAbortRef.current?.abort();
     setView({ kind: "idle" });
   };
 

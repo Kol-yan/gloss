@@ -109,6 +109,31 @@ The adapters request providers that deny data collection; this routing preferenc
 is not a claim of independently verified zero retention. There is no fallback to
 operator-funded access when a visitor request fails.
 
+## Word pronunciation
+
+Single-word expression suggestions can carry American English IPA from the same
+budgeted proofreading response. A bounded phonetic-syntax check rejects missing,
+invalid or phrase-level data; it does not independently verify the pronunciation.
+Nullable IPA persists with suggestions and expressions and is returned with shown
+tasks and scored feedback. Old rows honestly display that IPA is unavailable.
+
+Pronunciation plays only after a click, using an English voice the browser reports
+as local. US voices are preferred; another local English accent is labeled when
+used. The application does not call a speech-generation provider. Playback is
+cancelled and blocked before microphone access, then unblocked when capture ends.
+Hidden tasks and unavailable hidden feedback never reveal the word or its IPA.
+Scoring rechecks recent reveals under the database lock, so a second preissued
+hidden task cannot count as independent recall after another task shows the target.
+
+## Selected text capture
+
+The optional unpacked extension transfers a selection in an editor URL fragment,
+never a query parameter. The editor consumes and clears that fragment after
+hydration, normalizes plain text, and rejects more than 6,000 UTF-16 units without
+truncation. It makes no automatic cloud call. Captured text stays in page memory,
+survives the initial sign-in, and is cleared when its authenticated learner changes.
+The extension stores only the configured editor origin, never credentials or text.
+
 ## Recovery and retention
 
 Task generation claims a durable learner/request row before any paid work. A

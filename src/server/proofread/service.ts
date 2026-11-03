@@ -3,6 +3,7 @@
 // transaction; the reservation and the final write are each atomic.
 import type { DatabaseSync } from "node:sqlite";
 import { hashText, normalizeText, splitSentences } from "@/lib/text";
+import { sanitizeIpa } from "@/lib/pronunciation";
 import {
   MAX_TEXT_LENGTH,
   type ProofreadRequest,
@@ -155,8 +156,8 @@ export async function proofread(
     const insert = tx.prepare(
       `INSERT INTO suggestions
          (id, check_run_id, learner_id, "start", "end", original, replacement, category, reason,
-          meaning_change, meaning, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+          meaning_change, meaning, ipa, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
     );
     for (const s of suggestions) {
       insert.run(
@@ -171,6 +172,7 @@ export async function proofread(
         s.reason,
         s.meaningChange ? 1 : 0,
         s.meaning,
+        s.ipa ?? null,
       );
     }
     updateRun(tx, runId, learner.id, "ok", result.latencyMs);
@@ -251,5 +253,6 @@ function storedSuggestions(db: DatabaseSync, learnerId: string, runId: string): 
     reason: String(row.reason),
     meaningChange: row.meaning_change === 1,
     meaning: row.meaning === null ? null : String(row.meaning),
+    ipa: row.category === "expression" ? sanitizeIpa(row.ipa, String(row.replacement)) : null,
   }));
 }

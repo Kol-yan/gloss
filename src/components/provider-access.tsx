@@ -115,7 +115,7 @@ export function AccountControls() {
           ) : (
             <p className="text-sm leading-snug text-ink-muted">Cloud calls use this server&apos;s keys within your invitation allowance.</p>
           )}
-          <p className="text-xs leading-snug text-ink-muted">To use another invite, sign out first. Signing out also forgets any browser key.</p>
+          <p className="text-xs leading-snug text-ink-muted">Signing out forgets your key and ends access to this workspace. To keep its history accessible, open another invite in a separate browser instead.</p>
           <Button variant="quiet" size="sm" onClick={() => void leave()} pending={pending}>{pending ? "Signing out…" : "Sign out"}</Button>
           {message ? <p role="status" className="text-sm leading-snug text-ink-muted">{message}</p> : null}
         </section>

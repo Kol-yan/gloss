@@ -2,6 +2,7 @@
 
 import type { FocusEvent } from "react";
 import { Button } from "@/components/ui/button";
+import { VocabularyPronunciation } from "@/components/vocabulary-pronunciation";
 import {
   AlertIcon,
   BookmarkIcon,
@@ -95,6 +96,8 @@ export function SuggestionCard({
           <span className="font-semibold">{replacement}</span>
         )}
       </p>
+
+      {category === "expression" ? <VocabularyPronunciation text={replacement} ipa={suggestion.ipa} /> : null}
 
       <p className="mt-1 text-sm leading-snug text-ink-muted">{reason}</p>
 

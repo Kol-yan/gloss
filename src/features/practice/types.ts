@@ -18,7 +18,7 @@ export const VERDICT_LABEL: Record<Verdict, string> = {
 };
 
 // What the feedback panel needs from an evaluation.
-export type Feedback = Pick<Evaluation, "verdict" | "message" | "correction" | "target">;
+export type Feedback = Pick<Evaluation, "verdict" | "message" | "correction" | "target" | "ipa">;
 
 // Judges one answer. Never rejects: a failed call comes back as an
 // evaluation with verdict "unavailable", which is never counted.
@@ -28,6 +28,7 @@ export type SubmitAnswer = (input: { attemptId: string; answer: string; hintUsed
 export type PracticeOffer = {
   suggestionId: string;
   expression: string;
+  ipa?: string | null;
   // One short line in plain English.
   meaning: string;
 };
@@ -36,7 +37,7 @@ export type PracticeOffer = {
 export function offerFromSuggestion(suggestion: Suggestion): PracticeOffer | null {
   if (suggestion.source !== "ai" || suggestion.category !== "expression") return null;
   if (!suggestion.meaning || suggestion.replacement.trim() === "") return null;
-  return { suggestionId: suggestion.id, expression: suggestion.replacement.trim(), meaning: suggestion.meaning };
+  return { suggestionId: suggestion.id, expression: suggestion.replacement.trim(), meaning: suggestion.meaning, ipa: suggestion.ipa ?? null };
 }
 
 // True when this evaluation lets the learner try the same task again.

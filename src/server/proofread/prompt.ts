@@ -15,6 +15,7 @@ Return only real, minimal edits as a JSON object with an "edits" list. Each edit
 - category: "error", "style" or "expression".
 - reason: one plain-English sentence for a B2 to C1 learner, at most ${MAX_REASON_LENGTH} characters.
 - meaning: for an "expression" edit, one plain-English line (at most ${MAX_MEANING_LENGTH} characters) saying what the replacement means, so the learner can remember it. For "error" and "style" edits use an empty string.
+- ipa: only for an "expression" whose replacement is one lexical word, give a compact American English IPA transcription between slashes, at most 96 phonetic characters and no spaces. Latin accents and internal apostrophes or hyphens still count as one word. For phrases, other categories, or uncertain pronunciation use an empty string. Do not invent an expression edit just to supply pronunciation.
 
 Categories:
 - "error": only for definite mistakes in grammar, spelling, punctuation or word usage. A correct sentence must never get an "error".

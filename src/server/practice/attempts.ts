@@ -2,6 +2,7 @@
 // computes the verdict, writes the evidence and schedules the next practice.
 import type { DatabaseSync } from "node:sqlite";
 import { hashText, normalizeText } from "@/lib/text";
+import { sanitizeIpa } from "@/lib/pronunciation";
 import type { Evaluation, SubmitAttemptRequest, Verdict } from "@/shared/contracts";
 import type { Learner } from "../auth/sessions";
 import { reserve } from "../budget";
@@ -31,6 +32,7 @@ import {
 } from "./evaluation";
 import { nextPracticeLabel } from "./labels";
 import { isTranscriptEdited } from "./text";
+import { HIDDEN_CUE_AFTER_MS } from "./recall";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 // First evaluated attempt of a task: a clean recall (expression hidden, no
@@ -175,7 +177,8 @@ export async function submitAttempt(
       // The learner's answer is kept; nothing is counted for or against them.
       return {
         attemptId,
-        target: targetText,
+        target: task.cue === "hidden" ? "" : targetText,
+        ipa: task.cue === "hidden" ? null : sanitizeIpa(expression.ipa, targetText),
         verdict: "unavailable",
         message: UNAVAILABLE_MESSAGE,
         correction: null,
@@ -195,6 +198,19 @@ export async function submitAttempt(
 
   return immediate((tx) => {
     const nowIso = now.toISOString();
+    // Issuing two tasks before either is scored must not turn a recent target
+    // reveal into independent recall. Check under the same lock as the write,
+    // before inserting this attempt's own evaluation.
+    const recentReveal = tx.prepare(
+      `SELECT 1 FROM attempts a
+       JOIN practice_tasks t ON t.id = a.task_id AND t.learner_id = a.learner_id
+       WHERE a.learner_id = ? AND t.expression_id = ? AND a.id != ?
+         AND a.status = 'evaluated' AND COALESCE(a.evaluated_at, a.created_at) >= ?
+       LIMIT 1`,
+    ).get(learner.id, String(expression.id), attemptId,
+      new Date(now.getTime() - HIDDEN_CUE_AFTER_MS).toISOString());
+    const effectiveCue = attempt.previous_attempt_id === null && !recentReveal
+      ? String(task.cue) : "shown";
     tx.prepare(
       `INSERT INTO evaluations
          (attempt_id, learner_id, verdict, task_completed, target_used, meaning_correct,
@@ -229,7 +245,7 @@ export async function submitAttempt(
       attemptId,
       task.kind === "voice" ? "spoken_attempt" : "written_attempt",
       verdict,
-      String(task.cue),
+      effectiveCue,
       flag(hintUsed),
       flag(transcriptEdited),
       nowIso,
@@ -239,7 +255,7 @@ export async function submitAttempt(
     let nextPracticeAt = expression.next_practice_at === null ? null : String(expression.next_practice_at);
     if (attempt.previous_attempt_id === null) {
       const delay =
-        verdict === "used_well" && task.cue === "hidden" && !hintUsed
+        verdict === "used_well" && effectiveCue === "hidden" && !hintUsed
           ? CLEAN_RECALL_DELAY_MS
           : DEFAULT_DELAY_MS;
       nextPracticeAt = new Date(now.getTime() + delay).toISOString();
@@ -262,6 +278,7 @@ export async function submitAttempt(
     return {
       attemptId,
       target: targetText,
+      ipa: sanitizeIpa(expression.ipa, targetText),
       verdict,
       message,
       correction,
@@ -306,6 +323,7 @@ function storedEvaluation(
   return {
     attemptId: String(attempt.id),
     target: String(expression.text),
+    ipa: sanitizeIpa(expression.ipa, String(expression.text)),
     verdict: stored.verdict as Verdict,
     message: String(stored.message),
     correction: stored.correction === null ? null : String(stored.correction),

@@ -24,7 +24,7 @@ export const PROOFREAD_JSON_SCHEMA = {
         items: {
           type: "object",
           additionalProperties: false,
-          required: ["sentence_index", "original", "replacement", "category", "reason", "meaning"],
+          required: ["sentence_index", "original", "replacement", "category", "reason", "meaning", "ipa"],
           properties: {
             sentence_index: { type: "integer" },
             original: { type: "string" },
@@ -32,6 +32,7 @@ export const PROOFREAD_JSON_SCHEMA = {
             category: { type: "string", enum: SuggestionCategory.options },
             reason: { type: "string" },
             meaning: { type: "string" },
+            ipa: { type: "string" },
           },
         },
       },
@@ -50,6 +51,8 @@ const RawEdit = z.object({
   // Empty for everything except "expression" edits; a missing or non-string
   // value is treated as empty rather than failing the whole edit.
   meaning: z.string().catch(""),
+  // Tolerate missing or unusable enrichment without losing the actual edit.
+  ipa: z.string().max(128).catch(""),
 });
 export type RawEdit = z.infer<typeof RawEdit>;
 

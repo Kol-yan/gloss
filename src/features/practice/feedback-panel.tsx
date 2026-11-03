@@ -1,4 +1,5 @@
 import { CheckIcon, CrossIcon, DashIcon, TildeIcon } from "@/components/ui/icons";
+import { VocabularyPronunciation } from "@/components/vocabulary-pronunciation";
 import { VERDICT_LABEL, type Feedback, type Verdict } from "./types";
 
 // Verdicts differ by glyph and wording as well as colour. "Couldn't check" is
@@ -40,10 +41,11 @@ export function FeedbackPanel({
       <div>
         <VerdictBadge verdict={feedback.verdict} />
       </div>
-      {revealTarget && feedback.target ? (
+      {revealTarget && feedback.verdict !== "unavailable" && feedback.target ? (
         <div>
           <p className="eyebrow">Expression to practice</p>
           <p className="mt-0.5 text-lg font-semibold leading-snug [overflow-wrap:anywhere]">{feedback.target}</p>
+          <VocabularyPronunciation text={feedback.target} ipa={feedback.ipa} />
         </div>
       ) : null}
       <div>
@@ -51,7 +53,7 @@ export function FeedbackPanel({
         <p className="mt-0.5 border-l-2 border-line-strong pl-3 text-base leading-snug [overflow-wrap:anywhere]">{answer}</p>
       </div>
       <p className="text-base leading-snug">{feedback.message}</p>
-      {feedback.correction ? (
+      {feedback.verdict !== "unavailable" && feedback.correction ? (
         <div className="rounded-chip bg-surface px-3 py-2">
           <p className="eyebrow">Try it like this</p>
           <p className="mt-0.5 text-base font-semibold leading-snug [overflow-wrap:anywhere]">{feedback.correction}</p>

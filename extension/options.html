@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>gloss extension settings</title>
+    <link rel="stylesheet" href="options.css" />
+    <script type="module" src="options.js"></script>
+  </head>
+  <body>
+    <main>
+      <p class="brand">gloss</p>
+      <h1>Choose your editor</h1>
+      <p>Select English text on a page, then choose “Check with gloss” from its context menu.</p>
+      <form id="settings">
+        <fieldset id="controls" disabled>
+          <label for="app-origin">Editor address</label>
+          <input id="app-origin" name="appOrigin" type="url" value="https://gloss.li" placeholder="https://gloss.li" required autocomplete="url" aria-describedby="address-help status" />
+          <p id="address-help">Use an HTTPS address without a path. Local testing also accepts HTTP on localhost or 127.0.0.1.</p>
+          <div class="actions">
+            <button type="submit">Save address</button>
+            <button id="use-default" class="secondary" type="button">Use gloss.li</button>
+          </div>
+        </fieldset>
+        <p id="status" role="status" aria-live="polite">Loading settings…</p>
+      </form>
+      <p class="privacy">Only this address is stored by the extension. Selected text travels in the new tab’s URL fragment, not an HTTP query. Checking with a model still requires a separate action in the editor.</p>
+    </main>
+  </body>
+</html>

@@ -2,6 +2,7 @@
 // Every API handler validates its input with these schemas, and the client
 // parses responses with them, so a mismatch fails loudly instead of silently.
 import { z } from "zod";
+import { MAX_IPA_LENGTH } from "@/lib/pronunciation";
 
 export const MAX_TEXT_LENGTH = 6000;
 
@@ -31,6 +32,8 @@ export const Suggestion = z.object({
   // One-line meaning of the suggested wording. Set for "expression"
   // suggestions, which can become practice; null for everything else.
   meaning: z.string().nullable(),
+  // American English IPA for a single lexical word; null for phrases or unknown.
+  ipa: z.string().max(MAX_IPA_LENGTH).nullable().optional(),
 });
 export type Suggestion = z.infer<typeof Suggestion>;
 
@@ -114,6 +117,7 @@ export const Expression = z.object({
   id: z.string(),
   text: z.string(),
   meaning: z.string(),
+  ipa: z.string().max(MAX_IPA_LENGTH).nullable().optional(),
   familiarity: Familiarity,
 });
 export type Expression = z.infer<typeof Expression>;
@@ -144,6 +148,8 @@ export const PracticeTask = z.object({
   cue: CueLevel,
   // Null when the cue is hidden.
   expression: z.string().nullable(),
+  // Null while the target is hidden, even when the stored expression has IPA.
+  ipa: z.string().max(MAX_IPA_LENGTH).nullable().optional(),
   meaning: z.string(),
   situation: z.string(),
   // Shown only on request for hidden tasks; using it is recorded.
@@ -174,8 +180,9 @@ export type SubmitAttemptRequest = z.infer<typeof SubmitAttemptRequest>;
 
 export const Evaluation = z.object({
   attemptId: z.string(),
-  // Revealed after evaluation, including when the task hid its cue.
+  // Revealed by a scored verdict; empty for unavailable hidden-cue feedback.
   target: z.string(),
+  ipa: z.string().max(MAX_IPA_LENGTH).nullable().optional(),
   verdict: Verdict,
   // Short feedback for the learner.
   message: z.string(),

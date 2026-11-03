@@ -29,6 +29,13 @@ log it. You can forget the key without deleting your workspace.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for details.
 
+Single-word vocabulary includes a pronunciation guide when available and optional
+playback through a local English browser voice. Voice availability varies by browser.
+
+An optional [unpacked browser extension](extension/README.md) opens selected text
+in the editor for review. Its source and automated checks are included; manual
+browser-extension installation is still pending verification.
+
 ## License
 
 [AGPL-3.0](LICENSE)

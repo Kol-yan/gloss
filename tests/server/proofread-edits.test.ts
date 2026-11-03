@@ -11,6 +11,7 @@ const edit = (over: Partial<RawEdit>): RawEdit => ({
   category: "error",
   reason: "A reason.",
   meaning: "",
+  ipa: "",
   ...over,
 });
 

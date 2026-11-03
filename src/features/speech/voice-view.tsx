@@ -249,7 +249,7 @@ function VoiceTaskInner({
     case "processing":
       rail = (
         <>
-          <Button variant="quiet" onClick={handlers.onCancel} disabled={view.kind === "starting"}>
+          <Button variant="quiet" onClick={handlers.onCancel}>
             Cancel
           </Button>
           <span />

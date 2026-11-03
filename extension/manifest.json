@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "gloss",
+  "version": "0.1.0",
+  "description": "Open selected English text in your gloss editor.",
+  "permissions": ["contextMenus", "storage"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "options_page": "options.html"
+}

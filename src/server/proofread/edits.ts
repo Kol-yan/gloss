@@ -1,4 +1,5 @@
 import { locateFragment, touchesMeaning, type Sentence } from "@/lib/text";
+import { sanitizeIpa } from "@/lib/pronunciation";
 import type { Suggestion } from "@/shared/contracts";
 import { newId } from "../ids";
 import {
@@ -43,6 +44,7 @@ export function resolveEdits(sentences: Sentence[], edits: RawEdit[]): Suggestio
       reason,
       meaningChange: changesMeaning(edit, range.start === sentence.start),
       meaning: edit.category === "expression" ? tidy(edit.meaning, MAX_MEANING_LENGTH) || null : null,
+      ipa: edit.category === "expression" ? sanitizeIpa(edit.ipa, edit.replacement) : null,
     });
   }
 

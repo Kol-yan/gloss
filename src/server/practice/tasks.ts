@@ -2,6 +2,7 @@
 // situation, and issue the first attempt for the learner's answer.
 import type { DatabaseSync } from "node:sqlite";
 import type { CreateTaskRequest, CueLevel, PracticeTask } from "@/shared/contracts";
+import { sanitizeIpa } from "@/lib/pronunciation";
 import type { Learner } from "../auth/sessions";
 import { reserve } from "../budget";
 import { getConfig, type AppConfig } from "../config";
@@ -16,6 +17,7 @@ import {
 } from "../errors";
 import { newId } from "../ids";
 import { staleBefore } from "../stale";
+import { HIDDEN_CUE_AFTER_MS } from "./recall";
 import {
   ModelHttpError,
   ModelOutputError,
@@ -35,9 +37,9 @@ import {
 } from "./situation";
 
 // An expression is practised with the expression hidden once the learner has
-// had an evaluated attempt at least this long ago (a later session, so it has
-// to be recalled rather than copied).
-export const HIDDEN_CUE_AFTER_MS = 12 * 60 * 60 * 1000;
+// last saw evaluated feedback at least this long ago (a later session, so it
+// has to be recalled rather than copied).
+export { HIDDEN_CUE_AFTER_MS } from "./recall";
 const TEMPLATE_MODEL = "template";
 
 export interface TaskDeps extends ServerDeps {
@@ -113,6 +115,7 @@ export async function createTask(
       kind: input.kind,
       cue,
       expression: cue === "hidden" ? null : text,
+      ipa: cue === "hidden" ? null : sanitizeIpa(expression.ipa, text),
       meaning,
       situation: generated.situation,
       hint,
@@ -207,18 +210,19 @@ function assertGenerationOwner(
   if (!owned) throw new ConflictError();
 }
 
-// "hidden" once the expression has an evaluated attempt created more than 12
-// hours ago, otherwise "shown".
+// Feedback reveals the target. The newest evaluation, including a retry,
+// starts a new waiting period before a task can claim independent recall.
 function chooseCue(db: DatabaseSync, learnerId: string, expressionId: string, now: Date): CueLevel {
   const cutoff = new Date(now.getTime() - HIDDEN_CUE_AFTER_MS).toISOString();
   const row = db
     .prepare(
-      `SELECT 1 FROM attempts a JOIN practice_tasks t ON t.id = a.task_id
+      `SELECT MAX(COALESCE(a.evaluated_at, a.created_at)) AS last_reveal
+       FROM attempts a JOIN practice_tasks t ON t.id = a.task_id
        WHERE a.learner_id = ? AND t.expression_id = ? AND a.status = 'evaluated'
-         AND a.created_at < ? LIMIT 1`,
+      `,
     )
-    .get(learnerId, expressionId, cutoff);
-  return row ? "hidden" : "shown";
+    .get(learnerId, expressionId);
+  return row?.last_reveal && String(row.last_reveal) < cutoff ? "hidden" : "shown";
 }
 
 interface SituationArgs {
@@ -334,6 +338,7 @@ function storedTask(db: DatabaseSync, learnerId: string, task: Row): PracticeTas
     kind: task.kind as PracticeTask["kind"],
     cue,
     expression: cue === "hidden" ? null : String(expression.text),
+    ipa: cue === "hidden" ? null : sanitizeIpa(expression.ipa, String(expression.text)),
     meaning: String(expression.meaning),
     situation: String(task.situation),
     hint: String(task.hint),

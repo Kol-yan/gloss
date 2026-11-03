@@ -2,6 +2,7 @@
 
 import { useId, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { VocabularyPronunciation } from "@/components/vocabulary-pronunciation";
 import { FAMILIARITY_OPTIONS, type Familiarity, type PracticeOffer } from "./types";
 
 // Shown after an accepted suggestion. Accepting a fix is help, not knowledge,
@@ -25,6 +26,7 @@ export function TryYourselfCard({
     <section aria-label="Try using this yourself" className="rounded-tile border border-accent/40 bg-surface p-3">
       <p className="eyebrow">Try using this yourself</p>
       <p className="mt-1.5 text-xl font-semibold leading-tight [overflow-wrap:anywhere]">{offer.expression}</p>
+      <VocabularyPronunciation text={offer.expression} ipa={offer.ipa} />
       <p className="mt-0.5 text-sm leading-snug text-ink-muted">{offer.meaning}</p>
 
       <fieldset className="mt-3">
