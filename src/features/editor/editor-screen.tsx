@@ -1,14 +1,25 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useReducer, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type KeyboardEvent } from "react";
 import { canApply, normalizeText } from "@/lib/text";
 import { MAX_TEXT_LENGTH, type Suggestion } from "@/shared/contracts";
 import { TryYourselfCard } from "@/features/practice/try-yourself-card";
 import { offerFromSuggestion, type Familiarity, type PracticeOffer } from "@/features/practice/types";
 import { CheckBar } from "./check-bar";
 import { canUndo, createDoc, editorReducer, reportApplied } from "./editor-reducer";
-import { SuggestionRail, type RailNotice } from "./suggestion-rail";
+import {
+  SentenceDetector,
+  locateSentence,
+  nextPrefetch,
+  offsetSuggestions,
+  sentenceTextsIn,
+  type DetectInput,
+  type DetectSentences,
+  type SentenceFlag,
+} from "./sentence-detect";
+import type { SentenceJobState } from "./sentence-flag-card";
+import { SuggestionRail, type FocusRequest, type RailNotice } from "./suggestion-rail";
 import type { CheckLocal, CheckStatus, CheckWithAi, ProofreadOutcome, RecheckSentences } from "./types";
 import { WritingSurface, type WritingSurfaceHandle } from "./writing-surface";
 import type { LocalCheckStatus } from "./local-checker";
@@ -38,6 +49,14 @@ export type EditorScreenProps = {
   // Called once after the learner applies a cloud suggestion, with the sentences
   // of the new text that changed (ranges into that text) and the text itself.
   recheckSentences?: RecheckSentences;
+  // Stage 1. When given, sentences that changed are sent here after a typing
+  // pause; the answers become badges. Without it the editor only has the button.
+  detectSentences?: DetectSentences;
+  // Overrides the typing pause (milliseconds); the default is for real use.
+  detectPauseMs?: number;
+  // Runs the generator on its own for a sentence the detector is almost sure
+  // needs a correction. Off by default: it spends a check the learner did not ask for.
+  prefetchCorrections?: boolean;
 };
 
 export function EditorScreen({
@@ -52,6 +71,9 @@ export function EditorScreen({
   onStartPractice,
   onDecision,
   recheckSentences,
+  detectSentences,
+  detectPauseMs,
+  prefetchCorrections = false,
 }: EditorScreenProps) {
   const [doc, dispatch] = useReducer(editorReducer, undefined, () => createDoc(initialText, initialSuggestions));
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -63,6 +85,9 @@ export function EditorScreen({
   const [sheetOpen, setSheetOpen] = useState(false);
   const [notice, setNotice] = useState<RailNotice | null>(null);
   const [offerState, setOfferState] = useState<OfferState | null>(null);
+  const [activeFlagId, setActiveFlagId] = useState<string | null>(null);
+  const [jobs, setJobs] = useState<Record<string, SentenceJobState>>({});
+  const [focusRequest, setFocusRequest] = useState<FocusRequest | null>(null);
 
   const surfaceRef = useRef<WritingSurfaceHandle>(null);
   const railRef = useRef<HTMLElement>(null);
@@ -81,13 +106,71 @@ export function EditorScreen({
     return () => clearTimeout(timer);
   }, [notice]);
 
+  // Latest values for callbacks that outlive a render (timers, finished requests).
+  const docRef = useRef(doc);
+  const checkWithAiRef = useRef(checkWithAi);
+  const jobsRef = useRef(jobs);
+  const detectInputRef = useRef<DetectInput>({ text: doc.text, localRanges: [], holdRanges: [] });
+  useEffect(() => {
+    docRef.current = doc;
+    checkWithAiRef.current = checkWithAi;
+    jobsRef.current = jobs;
+  });
+
+  // Stage 1: the detector looks at changed sentences after a typing pause.
+  const [detector] = useState(() => new SentenceDetector({ pauseMs: detectPauseMs }));
+  useEffect(() => {
+    detector.setDetect(detectSentences);
+  }, [detector, detectSentences]);
+  // Leaving the page or switching learner ends the queue: sentences that were
+  // not sent yet belong to a text nobody is looking at any more.
+  useEffect(() => () => detector.stop(), [detector]);
+  const detectVersion = useSyncExternalStore(detector.subscribe, detector.getVersion, detector.getVersion);
+  const detectStatus = detector.getStatus();
+  const detectEnabled = detectSentences !== undefined && aiAvailable;
+
+  // Cloud suggestions that are still pending hold their sentence back from the
+  // detector: the cards already say what is wrong there.
+  const localRanges = useMemo(
+    () => doc.suggestions.filter((s) => s.source === "local").map(({ start, end }) => ({ start, end })),
+    [doc.suggestions],
+  );
+  const holdRanges = useMemo(
+    () => doc.suggestions.filter((s) => s.source === "ai").map(({ start, end }) => ({ start, end })),
+    [doc.suggestions],
+  );
+  useEffect(() => {
+    detectInputRef.current = { text: doc.text, localRanges, holdRanges };
+  }, [doc.text, localRanges, holdRanges]);
+
+  // The pause restarts with every keystroke. Declared before the applied-fix
+  // effect below, so that an immediate re-check wins over the pause.
+  useEffect(() => {
+    if (!detectEnabled || doc.text === "") return;
+    detector.schedule(() => detectInputRef.current);
+    return () => detector.cancel();
+  }, [detector, detectEnabled, doc.text]);
+
+  const flags = useMemo(
+    () => (detectEnabled ? detector.flagsFor(doc.text, holdRanges) : []),
+    // detectVersion changes whenever the detector learns something new.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [detector, detectEnabled, detectVersion, doc.text, holdRanges],
+  );
+
   // Cloud suggestions that vanished without a decision are reported once per batch.
   const onDecisionRef = useRef(onDecision);
   const reportedStale = useRef(doc.stale);
   const recheckRef = useRef(recheckSentences);
   useEffect(() => {
     onDecisionRef.current = onDecision;
-    recheckRef.current = recheckSentences;
+    recheckRef.current = (ranges, text) => {
+      recheckSentences?.(ranges, text);
+      // Only the sentence the fix changed is unknown to the detector; everything
+      // else comes from its cache. No pause: nothing is being typed. The changed
+      // sentence is checked even if it still has other cloud suggestions waiting.
+      if (detectEnabled) detector.flush(() => detectInputRef.current, sentenceTextsIn(text, ranges));
+    };
   });
   useEffect(() => {
     if (reportedStale.current === doc.stale) return;
@@ -189,6 +272,93 @@ export function EditorScreen({
     if (sheetOpen && doc.suggestions.length <= 1 && !offerState) closeSheet();
   };
 
+  // Prefer the server's number; otherwise count down locally.
+  const noteChecksUsed = useCallback(
+    (reported: number | undefined) => {
+      setReportedChecksLeft((current) => {
+        if (reported !== undefined) return reported;
+        const known = current ?? checksLeftProp;
+        return known === null ? null : Math.max(0, known - 1);
+      });
+    },
+    [checksLeftProp],
+  );
+
+  const setJob = useCallback((id: string, state: SentenceJobState | null) => {
+    setJobs((current) => {
+      const next = { ...current };
+      if (state === null) delete next[id];
+      else next[id] = state;
+      return next;
+    });
+  }, []);
+
+  // Stage 2: the generator. One whole-sentence check; the existing diff turns it
+  // into suggestions that are placed back into the document.
+  const reviewSentence = useCallback(
+    async (flag: SentenceFlag) => {
+      const check = checkWithAiRef.current;
+      if (jobsRef.current[flag.id] === "analyzing") return;
+      if (!check) {
+        setJob(flag.id, "unavailable");
+        return;
+      }
+      if (checksLeft !== null && checksLeft <= 0) {
+        setJob(flag.id, "quota");
+        return;
+      }
+      setJob(flag.id, "analyzing");
+      let outcome: ProofreadOutcome;
+      try {
+        outcome = await check(flag.text);
+      } catch {
+        outcome = { ok: false, reason: "failed" };
+      }
+      if (!outcome.ok) {
+        setJob(flag.id, outcome.reason);
+        return;
+      }
+      setJob(flag.id, null);
+      noteChecksUsed(outcome.checksLeft);
+      // Whatever came back, this sentence has been looked at.
+      detector.markHandled(flag.id);
+
+      const where = locateSentence(docRef.current.text, flag.text, flag.start);
+      if (!where) {
+        showNotice("That sentence changed while we were looking at it.");
+        return;
+      }
+      const placed = offsetSuggestions(outcome.suggestions, where.start);
+      dispatch({ type: "receiveSentence", sentenceText: flag.text, start: where.start, end: where.end, suggestions: placed });
+      if (placed.length === 0) {
+        showNotice("Nothing to change in that sentence.");
+        return;
+      }
+      const first = [...placed].sort((a, b) => a.start - b.start)[0];
+      noticeCounter.current += 1;
+      setFocusRequest({ id: first.id, n: noticeCounter.current });
+    },
+    [checksLeft, detector, noteChecksUsed, setJob, showNotice],
+  );
+
+  const dismissFlag = (id: string) => {
+    detector.markHandled(id);
+    setActiveFlagId(null);
+    setJob(id, null);
+    showNotice("Dismissed.");
+  };
+
+  // Optional: a sentence the detector is nearly sure needs correcting is
+  // reviewed without waiting for a click, one at a time.
+  const prefetched = useRef(new Set<string>());
+  useEffect(() => {
+    if (!prefetchCorrections || !checkWithAi || !aiAvailable) return;
+    const next = nextPrefetch(flags, prefetched.current, jobs);
+    if (!next) return;
+    prefetched.current.add(next.id);
+    void reviewSentence(next);
+  }, [prefetchCorrections, checkWithAi, aiAvailable, flags, jobs, reviewSentence]);
+
   const runCheck = async () => {
     if (!checkWithAi || status === "pending") return;
     const text = normalizeText(doc.text);
@@ -202,16 +372,12 @@ export function EditorScreen({
       outcome = { ok: false, reason: "failed" };
     }
     if (outcome.ok) {
-      const reported = outcome.checksLeft;
       dispatch({ type: "receive", source: "ai", forText: text, suggestions: outcome.suggestions });
       setStatus("idle");
       setCheckedClean(outcome.suggestions.length === 0);
-      // Prefer the server's number; otherwise count down locally.
-      setReportedChecksLeft((current) => {
-        if (reported !== undefined) return reported;
-        const known = current ?? checksLeftProp;
-        return known === null ? null : Math.max(0, known - 1);
-      });
+      noteChecksUsed(outcome.checksLeft);
+      // The whole text was just looked at; sentence badges for it would repeat that.
+      for (const flag of detector.flagsFor(text)) detector.markHandled(flag.id);
     } else {
       setStatus(outcome.reason === "quota" ? "quota" : outcome.reason === "unavailable" ? "unavailable" : "failed");
     }
@@ -282,7 +448,9 @@ export function EditorScreen({
           <WritingSurface
             value={doc.text}
             suggestions={doc.suggestions}
+            flags={flags}
             activeId={activeId}
+            activeFlagId={activeFlagId}
             onChange={handleChange}
             handleRef={surfaceRef}
             nearLimit={doc.text.length >= MAX_TEXT_LENGTH * 0.8}
@@ -295,7 +463,8 @@ export function EditorScreen({
             checksLeft={checksLeft}
             textIsEmpty={textIsEmpty}
             length={doc.text.length}
-            suggestionCount={doc.suggestions.length}
+            suggestionCount={doc.suggestions.length + flags.length}
+            detectStatus={detectEnabled ? detectStatus : "idle"}
             onCheck={runCheck}
             onOpenSheet={openSheet}
             localCheckStatus={localCheckStatus}
@@ -325,6 +494,11 @@ export function EditorScreen({
         >
           <SuggestionRail
             suggestions={doc.suggestions}
+            flags={flags}
+            jobs={jobs}
+            activeFlagId={activeFlagId}
+            autoDetect={detectEnabled}
+            focusRequest={focusRequest}
             text={doc.text}
             activeId={activeId}
             canUndo={undoAvailable}
@@ -338,6 +512,10 @@ export function EditorScreen({
             onFocusCard={(id) => surfaceRef.current?.reveal(id)}
             onApply={apply}
             onDismiss={dismiss}
+            onActivateFlag={setActiveFlagId}
+            onDeactivateFlag={(id) => setActiveFlagId((current) => (current === id ? null : current))}
+            onReviewFlag={(flag) => void reviewSentence(flag)}
+            onDismissFlag={dismissFlag}
             onUndo={undo}
             onClose={sheetOpen ? closeSheet : undefined}
           />

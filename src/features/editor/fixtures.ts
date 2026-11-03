@@ -2,6 +2,7 @@
 // model output and must never be imported by a real page.
 import { touchesMeaning } from "@/lib/text";
 import type { Suggestion, SuggestionCategory, SuggestionSource } from "@/shared/contracts";
+import type { DetectBatchItem, DetectOutcome, DetectScores } from "./sentence-detect";
 import type { ProofreadOutcome } from "./types";
 
 export const SAMPLE_TEXT = [
@@ -105,4 +106,68 @@ export const SAMPLE_SUGGESTIONS = buildSampleSuggestions(SAMPLE_TEXT);
 export async function sampleCheckWithAi(text: string): Promise<ProofreadOutcome> {
   await new Promise((resolve) => setTimeout(resolve, 900));
   return { ok: true, suggestions: buildSampleSuggestions(text, ["ai"]) };
+}
+
+// ---------------------------------------------------------------------------
+// Two-stage flow: a text with mistakes for the detector and generator fakes.
+
+export const FLOW_TEXT = [
+  "Yesterday I go to the store and buy some milk.",
+  "The report is very much good for readers.",
+  "Our team have finished the project last week.",
+  "We are looking forward to hearing from you.",
+].join(" ");
+
+// What the fake detector answers, by the start of the sentence.
+const FLOW_SCORES: Array<[string, DetectScores]> = [
+  ["Yesterday I go", { correction: 0.95, clarity: 0.12, word_choice: 0.2 }],
+  ["The report is", { correction: 0.1, clarity: 0.35, word_choice: 0.82 }],
+  ["Our team have", { correction: 0.88, clarity: 0.64, word_choice: 0.05 }],
+];
+
+// Stands in for POST /api/detect in the gallery. `onRequest` lets the page show
+// which sentences were really sent.
+export function sampleDetectSentences(onRequest?: (batch: DetectBatchItem[]) => void) {
+  return async (batch: DetectBatchItem[]): Promise<DetectOutcome> => {
+    onRequest?.(batch);
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    return {
+      ok: true,
+      results: batch.map((item) => ({
+        hash: item.hash,
+        scores: FLOW_SCORES.find(([start]) => item.text.startsWith(start))?.[1] ?? { correction: 0, clarity: 0, word_choice: 0 },
+      })),
+    };
+  };
+}
+
+const FLOW_FIXES: Array<{ id: string; category: SuggestionCategory; fragment: string; replacement: string; reason: string }> = [
+  { id: "flow-1a", category: "error", fragment: "go", replacement: "went", reason: "\"Yesterday\" needs the past tense." },
+  { id: "flow-1b", category: "error", fragment: "buy", replacement: "bought", reason: "Keep both verbs in the past tense." },
+  { id: "flow-2", category: "style", fragment: "very much good", replacement: "very useful", reason: "\"Very much good\" is not idiomatic; \"very useful\" says what you mean." },
+  { id: "flow-3", category: "error", fragment: "have finished the project last week", replacement: "finished the project last week", reason: "A finished action with \"last week\" takes the simple past." },
+];
+
+// Stands in for the cloud check, whole text or one sentence. Fixes are placed
+// like the real pipeline would: only when the fragment occurs exactly once.
+export async function sampleCheckFlow(text: string): Promise<ProofreadOutcome> {
+  await new Promise((resolve) => setTimeout(resolve, 900));
+  const suggestions: Suggestion[] = [];
+  for (const fix of FLOW_FIXES) {
+    const start = text.indexOf(fix.fragment);
+    if (start === -1 || text.indexOf(fix.fragment, start + 1) !== -1) continue;
+    suggestions.push({
+      id: fix.id,
+      source: "ai",
+      category: fix.category,
+      start,
+      end: start + fix.fragment.length,
+      original: fix.fragment,
+      replacement: fix.replacement,
+      reason: fix.reason,
+      meaningChange: touchesMeaning(fix.fragment, fix.replacement),
+      meaning: null,
+    });
+  }
+  return { ok: true, suggestions };
 }

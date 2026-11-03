@@ -168,6 +168,12 @@ fix. A "verify" mode (a server option for re-checking corrected text; no API rou
 uses it yet) reports errors only: a sentence that comes back unchanged has no
 suggestions.
 
+## Two-stage checking in the editor
+
+Stage 0 is the in-browser rule checker with the dictionary spelling rule switched off; it marks grammar and punctuation instantly. Stage 1 starts when the learner stops typing for about 800 ms. Sentences whose text changed, however short and with or without final punctuation, are sent in batches to `POST /api/detect`, together with the spans Stage 0 already marks. A sentence is identified by the SHA-256 of its normalized text, and the answer is cached under that hash, so unchanged sentences are never sent again and sentences that still have pending cloud suggestions are skipped. Probabilities of at least 0.5 become small badges (Correction, Clarity, Word choice) on a card in the suggestion rail and a bar under the sentence in the text. A badge carries no suggestion.
+
+Stage 2 runs when the learner presses a badge: that single sentence goes to the proofreading generator and the resulting suggestions are placed back at the sentence's position, while suggestions in other sentences stay as they were. The card says "Analyzing…" until the answer arrives. Applying a cloud fix re-checks only the sentence it changed, after every fix, even when another cloud fix is still waiting in that sentence. Leaving the page or switching learner drops the unsent queue, and every detector request is checked against the signed-in learner just before it is sent. When the detector quota is used up or AI is off, automatic scanning stops for the session and the Check with AI button keeps working. Failed detector calls are not repeated for the same sentence.
+
 ## Word pronunciation
 
 Single-word expression suggestions can carry American English IPA from the same

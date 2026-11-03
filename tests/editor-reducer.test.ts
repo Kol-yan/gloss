@@ -347,3 +347,113 @@ describe("sentences changed by an applied cloud suggestion", () => {
     expect(() => reportApplied(NO_APPLIED, next.applied, undefined)).not.toThrow();
   });
 });
+
+
+describe("cloud suggestions for one sentence", () => {
+  const text = "I recieve the mail. It was unfortunatelly late. We goed home yesterday.";
+  const cloud = (fragment: string, replacement: string, id: string, overrides: Partial<Suggestion> = {}) =>
+    suggest(text, fragment, replacement, { id, source: "ai", ...overrides });
+  const second = splitSentences(text)[1];
+
+  it("replaces the cloud suggestions inside that sentence and leaves the others alone", () => {
+    const doc = createDoc(text, [
+      cloud("recieve", "receive", "a"),
+      cloud("unfortunatelly", "unfortunately", "old"),
+      cloud("goed", "went", "c"),
+      suggest(text, "mail", "post", { id: "local-mail" }),
+    ]);
+    const fresh = cloud("unfortunatelly", "regrettably", "new");
+    const next = editorReducer(doc, {
+      type: "receiveSentence",
+      sentenceText: second.text,
+      start: second.start,
+      end: second.end,
+      suggestions: [fresh],
+    });
+    expect(next.suggestions.map((s) => s.id)).toEqual(["a", "local-mail", "new", "c"]);
+    expect(next.stale.items.map((s) => s.id)).toEqual(["old"]);
+  });
+
+  it("keeps suggestions in other sentences when the answer is empty", () => {
+    const doc = createDoc(text, [cloud("recieve", "receive", "a"), cloud("goed", "went", "c")]);
+    const next = editorReducer(doc, { type: "receiveSentence", sentenceText: second.text, start: second.start, end: second.end, suggestions: [] });
+    expect(next.suggestions.map((s) => s.id)).toEqual(["a", "c"]);
+  });
+
+  it("drops the answer when the sentence changed on its way", () => {
+    const doc = createDoc(text);
+    const edited = editorReducer(doc, { type: "edit", text: text.replace("It was", "It is") });
+    const next = editorReducer(edited, {
+      type: "receiveSentence",
+      sentenceText: second.text,
+      start: second.start,
+      end: second.end,
+      suggestions: [cloud("unfortunatelly", "unfortunately", "x")],
+    });
+    expect(next).toBe(edited);
+  });
+
+  it("ignores suggestions outside the sentence, local ones, dismissed ones and duplicates of a local fix", () => {
+    let doc = createDoc(text, [suggest(text, "unfortunatelly", "unfortunately", { id: "local-1" })]);
+    doc = editorReducer(doc, {
+      type: "receiveSentence",
+      sentenceText: second.text,
+      start: second.start,
+      end: second.end,
+      suggestions: [
+        cloud("recieve", "receive", "outside"),
+        cloud("unfortunatelly", "unfortunately", "dup"),
+        cloud("late", "delayed", "ai-late"),
+        suggest(text, "was", "is", { id: "wrong-source" }),
+      ],
+    });
+    expect(doc.suggestions.map((s) => s.id)).toEqual(["local-1", "ai-late"]);
+
+    doc = editorReducer(doc, { type: "dismiss", id: "ai-late" });
+    doc = editorReducer(doc, {
+      type: "receiveSentence",
+      sentenceText: second.text,
+      start: second.start,
+      end: second.end,
+      suggestions: [cloud("late", "delayed", "ai-late-again")],
+    });
+    expect(doc.suggestions.map((s) => s.id)).toEqual(["local-1"]);
+  });
+
+  it("keeps every other highlight when a fix is applied and the changed sentence is asked about again", () => {
+    let doc = createDoc(text, [cloud("recieve", "receive", "a"), cloud("unfortunatelly", "unfortunately", "b"), cloud("goed", "went", "c")]);
+    doc = editorReducer(doc, { type: "apply", id: "a" });
+    expect(doc.suggestions.map((s) => s.id)).toEqual(["b", "c"]);
+    expect(doc.applied.ranges).toHaveLength(1);
+    for (const s of doc.suggestions) expect(doc.text.slice(s.start, s.end)).toBe(s.original);
+  });
+});
+
+describe("buildSegments with sentence flags", () => {
+  const text = "I go to school every day. She like apples very much.";
+  const flag = {
+    id: "f".repeat(64),
+    start: 26,
+    end: text.length,
+    text: "She like apples very much.",
+    categories: ["correction", "word_choice"] as ("correction" | "word_choice")[],
+    scores: { correction: 0.9, clarity: 0, word_choice: 0.7 },
+  };
+
+  it("marks the whole flagged sentence with its first badge category", () => {
+    const segments = buildSegments(text, [], null, [flag]);
+    expect(segments.map((s) => s.text).join("")).toBe(text);
+    const flagged = segments.filter((s) => s.flag);
+    expect(flagged.map((s) => s.text).join("")).toBe("She like apples very much.");
+    expect(flagged.every((s) => s.flag === "correction" && s.flagId === flag.id)).toBe(true);
+    expect(segments.find((s) => s.text.startsWith("I go"))?.flag).toBeNull();
+  });
+
+  it("keeps word-level suggestions inside a flagged sentence and highlights it when its card is active", () => {
+    const s = suggest(text, "like", "likes", { id: "w" });
+    const segments = buildSegments(text, [s], null, [flag], flag.id);
+    const word = segments.find((seg) => seg.text === "like");
+    expect(word).toMatchObject({ category: "error", flag: "correction", flagActive: true });
+    expect(segments.filter((seg) => seg.flag).every((seg) => seg.flagActive)).toBe(true);
+  });
+});

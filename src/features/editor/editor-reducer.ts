@@ -59,7 +59,11 @@ export type EditorAction =
   | { type: "apply"; id: string }
   | { type: "dismiss"; id: string }
   | { type: "undo" }
-  | { type: "receive"; source: SuggestionSource; forText: string; suggestions: Suggestion[] };
+  | { type: "receive"; source: SuggestionSource; forText: string; suggestions: Suggestion[] }
+  // Cloud suggestions for one sentence. The suggestions are already ranges into
+  // the current text; `sentenceText` must still sit at [start, end), otherwise the
+  // learner changed it while the answer was on its way and the answer is dropped.
+  | { type: "receiveSentence"; sentenceText: string; start: number; end: number; suggestions: Suggestion[] };
 
 const MAX_UNDO = 50;
 
@@ -151,12 +155,8 @@ function effectiveEdit(s: Suggestion): string {
   return `${s.start + prefix}:${s.end - suffix}:${s.replacement.slice(prefix, s.replacement.length - suffix)}`;
 }
 
-function mergeBySource(doc: EditorDoc, source: SuggestionSource, incoming: Suggestion[]): Suggestion[] {
-  const dismissed = new Set(doc.dismissed);
-  const fresh = incoming.filter((s) => s.source === source && !dismissed.has(suggestionKey(s)) && canApply(doc.text, s));
-  const kept = doc.suggestions.filter((s) => s.source !== source);
-  const all = [...kept, ...fresh];
-  // The same fix reported by both sources is shown once, as the local one.
+// The same fix reported by both sources is shown once, as the local one.
+function dedupe(all: Suggestion[]): Suggestion[] {
   const seen = new Map<string, Suggestion>();
   for (const s of all) {
     const key = effectiveEdit(s);
@@ -164,6 +164,29 @@ function mergeBySource(doc: EditorDoc, source: SuggestionSource, incoming: Sugge
     if (!existing || (existing.source === "ai" && s.source === "local")) seen.set(key, s);
   }
   return sortSuggestions([...seen.values()]);
+}
+
+function mergeBySource(doc: EditorDoc, source: SuggestionSource, incoming: Suggestion[]): Suggestion[] {
+  const dismissed = new Set(doc.dismissed);
+  const fresh = incoming.filter((s) => s.source === source && !dismissed.has(suggestionKey(s)) && canApply(doc.text, s));
+  const kept = doc.suggestions.filter((s) => s.source !== source);
+  return dedupe([...kept, ...fresh]);
+}
+
+// Replaces the cloud suggestions inside one sentence and leaves everything else,
+// in other sentences and from the local checker, exactly as it was.
+function mergeInSentence(doc: EditorDoc, range: SentenceRange, incoming: Suggestion[]): Suggestion[] {
+  const dismissed = new Set(doc.dismissed);
+  const fresh = incoming.filter(
+    (s) =>
+      s.source === "ai" &&
+      s.start >= range.start &&
+      s.end <= range.end &&
+      !dismissed.has(suggestionKey(s)) &&
+      canApply(doc.text, s),
+  );
+  const kept = doc.suggestions.filter((s) => !(s.source === "ai" && s.start < range.end && s.end > range.start));
+  return dedupe([...kept, ...fresh]);
 }
 
 export function editorReducer(doc: EditorDoc, action: EditorAction): EditorDoc {
@@ -257,6 +280,12 @@ function step(doc: EditorDoc, action: EditorAction): EditorDoc {
       // The checker may answer for an older version of the text.
       const incoming = rebaseSuggestions(action.forText, doc.text, action.suggestions);
       return { ...doc, suggestions: mergeBySource(doc, action.source, incoming) };
+    }
+
+    case "receiveSentence": {
+      const { start, end, sentenceText } = action;
+      if (doc.text.slice(start, end) !== sentenceText) return doc;
+      return { ...doc, suggestions: mergeInSentence(doc, { start, end }, action.suggestions) };
     }
   }
 }

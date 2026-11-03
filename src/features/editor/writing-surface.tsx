@@ -5,11 +5,12 @@ import { Button } from "@/components/ui/button";
 import { MAX_TEXT_LENGTH } from "@/shared/contracts";
 import type { Suggestion } from "@/shared/contracts";
 import { buildSegments } from "./highlight";
+import type { SentenceFlag } from "./sentence-detect";
 
 export type WritingSurfaceHandle = {
   focus: () => void;
-  // Scrolls the textarea so the highlighted range of a suggestion is visible.
-  reveal: (suggestionId: string) => void;
+  // Scrolls the textarea so the highlighted range of a suggestion or flagged sentence is visible.
+  reveal: (id: string) => void;
 };
 
 // The textarea and its backdrop must lay text out identically, so they share
@@ -20,14 +21,19 @@ const TEXT_LAYOUT =
 export function WritingSurface({
   value,
   suggestions,
+  flags = [],
   activeId,
+  activeFlagId = null,
   onChange,
   handleRef,
   nearLimit,
 }: {
   value: string;
   suggestions: Suggestion[];
+  // Sentences the detector flagged, drawn under the whole sentence.
+  flags?: SentenceFlag[];
   activeId: string | null;
+  activeFlagId?: string | null;
   // `composing` is true while an input method is mid-composition.
   onChange: (value: string, composing: boolean) => void;
   handleRef?: Ref<WritingSurfaceHandle>;
@@ -37,16 +43,19 @@ export function WritingSurface({
   const backdropRef = useRef<HTMLDivElement>(null);
   const [focused, setFocused] = useState(false);
 
-  const segments = useMemo(() => buildSegments(value, suggestions, activeId), [value, suggestions, activeId]);
+  const segments = useMemo(
+    () => buildSegments(value, suggestions, activeId, flags, activeFlagId),
+    [value, suggestions, activeId, flags, activeFlagId],
+  );
 
   useImperativeHandle(handleRef, () => ({
     focus: () => textareaRef.current?.focus(),
-    reveal: (suggestionId) => {
+    reveal: (id) => {
       const textarea = textareaRef.current;
       const backdrop = backdropRef.current;
       if (!textarea || !backdrop) return;
-      const mark = Array.from(backdrop.querySelectorAll<HTMLElement>("mark[data-ids]")).find((el) =>
-        el.dataset.ids?.split(" ").includes(suggestionId),
+      const mark = Array.from(backdrop.querySelectorAll<HTMLElement>("[data-ids], [data-flag-id]")).find(
+        (el) => el.dataset.ids?.split(" ").includes(id) || el.dataset.flagId === id,
       );
       if (!mark) return;
       const top = mark.offsetTop;
@@ -83,20 +92,27 @@ export function WritingSurface({
         aria-hidden="true"
         className={`pointer-events-none absolute inset-0 overflow-hidden text-transparent ${TEXT_LAYOUT}`}
       >
-        {segments.map((segment, i) =>
-          segment.category ? (
+        {segments.map((segment, i) => {
+          const flagClass = segment.flag ? ` sflag sflag-${segment.flag}` : "";
+          const flagProps = segment.flagId
+            ? { "data-flag-id": segment.flagId, "data-flag-active": segment.flagActive || undefined }
+            : {};
+          return segment.category ? (
             <mark
               key={i}
-              className={`hl hl-${segment.category}`}
+              className={`hl hl-${segment.category}${flagClass}`}
               data-active={segment.active || undefined}
               data-ids={segment.ids.join(" ")}
+              {...flagProps}
             >
               {segment.text}
             </mark>
           ) : (
-            <span key={i}>{segment.text}</span>
-          ),
-        )}
+            <span key={i} className={flagClass.trim() || undefined} {...flagProps}>
+              {segment.text}
+            </span>
+          );
+        })}
         {/* A trailing newline keeps the last empty line as tall as in the textarea. */}
         {"\n"}
       </div>

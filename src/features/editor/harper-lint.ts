@@ -18,12 +18,16 @@ const OPINIONATED_RULES = [
   "Regionalisms",
 ];
 
+// Stage 0 covers grammar and punctuation only. Spelling is left to the sentence
+// detector and the cloud check, so the dictionary rule is switched off.
+const SPELLING_RULES = ["SpellCheck"];
+
 export async function createLinter(binary: ConstructorParameters<typeof LocalLinter>[0]["binary"]): Promise<LocalLinter> {
   const linter = new LocalLinter({ binary, dialect: Dialect.American });
   await linter.setup();
   const defaults = await linter.getDefaultLintConfig();
   const off: Record<string, boolean> = {};
-  for (const rule of OPINIONATED_RULES) if (rule in defaults) off[rule] = false;
+  for (const rule of [...OPINIONATED_RULES, ...SPELLING_RULES]) if (rule in defaults) off[rule] = false;
   await linter.setLintConfig({ ...defaults, ...off });
   return linter;
 }
@@ -33,6 +37,8 @@ export async function collectLints(linter: LocalLinter, text: string): Promise<R
   const result: RawLint[] = [];
   for (const [rule, lints] of Object.entries(groups)) {
     for (const lint of lints) {
+      // Belt and braces: a spelling lint from any other rule is not a Stage 0 concern.
+      if (lint.lint_kind() === "Spelling") continue;
       const span = lint.span();
       const offered = lint.suggestions();
       const first = offered[0];

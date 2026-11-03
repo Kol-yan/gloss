@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createExpression, createTask, enrollByok, getMe, listExpressions, newRequestId, proofread, recordDecision, signOut, submitAttempt, transcribe } from "@/features/api/client";
+import { createExpression, createTask, detect, enrollByok, getMe, listExpressions, newRequestId, proofread, recordDecision, signOut, submitAttempt, transcribe } from "@/features/api/client";
 import { forgetProviderKey, getAccessSnapshot, getRequestProviderKey, saveProviderKey, setCurrentSession, subscribeAccess } from "@/features/api/access-store";
 import type { MeResponse } from "@/shared/contracts";
 
@@ -72,6 +72,33 @@ describe("api client", () => {
     const ids = fetchMock.mock.calls.map(([, init]) => JSON.parse(init.body as string).requestId as string);
     expect(ids[0]).not.toBe(ids[1]);
     expect(ids[0]).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  });
+
+  it("posts hashed sentences to the detector, parses probabilities and keeps the BYOK key in the header only", async () => {
+    setCurrentSession({ ...ME, accessMode: "byok" });
+    saveProviderKey(VISITOR_KEY);
+    const hash = "a".repeat(64);
+    const answer = {
+      requestId: "00000000-0000-4000-8000-000000000000",
+      sentences: [{ hash, needs_correction: 0.9, needs_clarity: 0.1, needs_word_choice: 0 }],
+      quota: { used: 1, limit: 20 },
+    };
+    const fetchMock = vi.fn().mockResolvedValue(respond(200, answer));
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await detect([{ hash, text: "I go to school every day.", localRanges: [{ start: 2, end: 4 }] }]);
+    expect(result).toEqual({ ok: true, data: answer });
+    const [path, init] = fetchMock.mock.calls[0];
+    expect(path).toBe("/api/detect");
+    expect(new Headers(init.headers).get("X-Gloss-Provider-Key")).toBe(VISITOR_KEY);
+    const body = JSON.parse(init.body as string);
+    expect(body.sentences).toEqual([{ hash, text: "I go to school every day.", localRanges: [{ start: 2, end: 4 }] }]);
+    expect(body.requestId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(init.body).not.toContain(VISITOR_KEY);
+  });
+
+  it("rejects a detector answer outside the contract", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(respond(200, { requestId: "x", sentences: [], quota: { used: 0, limit: 1 } })));
+    expect(await detect([{ hash: "b".repeat(64), text: "A sentence is here." }])).toMatchObject({ ok: false, code: "bad_response" });
   });
 
   it("uploads audio as multipart form data with the attempt id", async () => {

@@ -202,6 +202,33 @@
     background-color: color-mix(in srgb, var(--hl) 32%, transparent);
     outline: 2px solid var(--hl);
   }
+
+  /*
+   * A sentence the detector flagged but the generator has not reviewed yet: a
+   * solid bar along the bottom of the line box, below any word-level underline.
+   * The colour follows the badge in the rail.
+   */
+  .sflag {
+    background-image: linear-gradient(var(--sf), var(--sf));
+    background-repeat: no-repeat;
+    background-position: 0 100%;
+    background-size: 100% 2px;
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
+  }
+  .sflag-correction {
+    --sf: var(--color-error-mark);
+  }
+  .sflag-clarity {
+    --sf: var(--color-info-mark);
+  }
+  .sflag-word_choice {
+    --sf: var(--color-caution-mark);
+  }
+  .sflag[data-flag-active="true"] {
+    background-color: color-mix(in srgb, var(--sf) 14%, transparent);
+    background-size: 100% 3px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, type KeyboardEvent, type ReactNode } from "react";
+import { useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
 import { EditorScreen } from "@/features/editor/editor-screen";
-import { SAMPLE_SUGGESTIONS, SAMPLE_TEXT, sampleCheckWithAi } from "@/features/editor/fixtures";
+import { FLOW_TEXT, SAMPLE_SUGGESTIONS, SAMPLE_TEXT, sampleCheckFlow, sampleCheckWithAi, sampleDetectSentences } from "@/features/editor/fixtures";
 import type { CheckStatus } from "@/features/editor/types";
 import { ExpressionsScreen } from "@/features/expressions/expressions-screen";
 import { SAMPLE_HISTORY } from "@/features/expressions/fixtures";
@@ -25,6 +25,7 @@ import { VoiceTaskView, type VoiceHandlers } from "@/features/speech/voice-view"
 const TABS = [
   { id: "empty", label: "Empty editor" },
   { id: "editor", label: "Editor with suggestions" },
+  { id: "flow", label: "Sentence flow" },
   { id: "try", label: "Try it yourself" },
   { id: "written", label: "Written feedback" },
   { id: "speech", label: "Speech states" },
@@ -108,6 +109,48 @@ function EditorDemo({ phone }: { phone: boolean }) {
             await new Promise((resolve) => setTimeout(resolve, 600));
             return true;
           }}
+        />
+      </Stage>
+    </>
+  );
+}
+
+// Stage 1 and 2 with fakes: nothing here calls a model. The log shows which
+// sentences the detector was really sent.
+function FlowDemo({ phone }: { phone: boolean }) {
+  const [requests, setRequests] = useState<string[]>([]);
+  const detectSentences = useMemo(
+    () =>
+      sampleDetectSentences((batch) =>
+        setRequests((current) => [
+          ...current,
+          `Request ${current.length + 1}: ${batch.length} ${batch.length === 1 ? "sentence" : "sentences"} (${batch
+            .map((item) => `"${item.text.slice(0, 18)}…"`)
+            .join(", ")})`,
+        ]),
+      ),
+    [],
+  );
+  return (
+    <>
+      <p className="text-sm text-ink-muted">
+        The text starts with four sentences. After a pause the detector (a fake here) marks three of them. Select a label to run the
+        generator (also a fake) for that sentence. Edit any sentence to see that only the changed one is sent again.
+      </p>
+      <ol data-testid="detect-log" aria-label="Detector requests" className="list-inside list-decimal text-sm text-ink-muted">
+        {requests.length === 0 ? <li className="list-none">No detector request yet.</li> : null}
+        {requests.map((line) => (
+          <li key={line} className="list-none">
+            {line}
+          </li>
+        ))}
+      </ol>
+      <Stage phone={phone}>
+        <EditorScreen
+          initialText={FLOW_TEXT}
+          checksLeft={7}
+          checkWithAi={sampleCheckFlow}
+          detectSentences={detectSentences}
         />
       </Stage>
     </>
@@ -299,6 +342,8 @@ export function StatesGallery() {
           </>
         ) : tab === "editor" ? (
           <EditorDemo phone={phone} />
+        ) : tab === "flow" ? (
+          <FlowDemo phone={phone} />
         ) : tab === "try" ? (
           <TryDemo />
         ) : tab === "written" ? (

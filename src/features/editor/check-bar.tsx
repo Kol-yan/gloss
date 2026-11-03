@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { AlertIcon, SparkIcon } from "@/components/ui/icons";
 import { MAX_TEXT_LENGTH } from "@/shared/contracts";
+import type { DetectorStatus } from "./sentence-detect";
 import type { CheckStatus } from "./types";
 import type { LocalCheckStatus } from "./local-checker";
 
@@ -31,6 +32,7 @@ export function CheckBar({
   onCheck,
   onOpenSheet,
   localCheckStatus,
+  detectStatus = "idle",
 }: {
   status: CheckStatus;
   // null when the number is unknown; the slot is then hidden.
@@ -41,6 +43,9 @@ export function CheckBar({
   onCheck: () => void;
   onOpenSheet: () => void;
   localCheckStatus?: LocalCheckStatus;
+  // Automatic sentence scanning. Only "scanning" (a request is really running)
+  // and "quota" (it stopped for today) say anything.
+  detectStatus?: DetectorStatus;
 }) {
   // An empty editor explains itself; the "unavailable" note only matters once there is text to check.
   const message = status === "unavailable" && textIsEmpty ? undefined : MESSAGES[status];
@@ -56,6 +61,15 @@ export function CheckBar({
     <div className="relative shrink-0 border-t border-line bg-paper/95 px-4 py-2.5">
       {localCheckStatus === "starting" ? (
         <p role="status" className="mb-2 text-sm leading-snug text-ink-muted">Starting on-device checks…</p>
+      ) : null}
+      {detectStatus === "scanning" ? (
+        <p role="status" className="mb-2 text-sm leading-snug text-ink-muted">Looking for sentences to improve…</p>
+      ) : null}
+      {detectStatus === "quota" ? (
+        <p role="status" className="mb-2 flex items-start gap-1.5 text-sm leading-snug text-caution">
+          <AlertIcon size={16} className="mt-0.5 shrink-0" />
+          <span>Automatic suggestions are used up for today. Check with AI still works.</span>
+        </p>
       ) : null}
       {pending ? (
         <div

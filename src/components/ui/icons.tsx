@@ -90,6 +90,26 @@ export function BookmarkIcon(props: IconProps) {
   );
 }
 
+// Clarity badge glyph: an eye, for "would a reader see what you mean".
+export function EyeIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" />
+      <circle cx="12" cy="12" r="2.8" />
+    </Icon>
+  );
+}
+
+// Word choice badge glyph: two speech lines, one being swapped for another.
+export function SwapIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M4 8h13M13.5 4.5L17 8l-3.5 3.5" />
+      <path d="M20 16H7M10.5 12.5L7 16l3.5 3.5" />
+    </Icon>
+  );
+}
+
 export function DeviceIcon(props: IconProps) {
   return (
     <Icon {...props}>

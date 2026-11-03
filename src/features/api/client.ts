@@ -5,6 +5,7 @@ import { forgetProviderKey, getAccessSnapshot, getRequestProviderKey, isProvider
 import {
   ApiError,
   CreateExpressionResponse,
+  DetectResponse,
   Evaluation,
   ExpressionsResponse,
   MeResponse,
@@ -14,6 +15,7 @@ import {
   TranscribeResponse,
   type ApiErrorCode,
   type CreateExpressionRequest,
+  type DetectSentenceRequest,
   type PracticeKind,
   type SubmitAttemptRequest,
   type SuggestionDecision,
@@ -136,6 +138,12 @@ export async function signOut() {
 
 export function proofread(text: string, requestId: string = newRequestId()) {
   return paidCall("/api/proofread", postJson({ requestId, text }), ProofreadResponse);
+}
+
+// Classifies changed sentences after a typing pause. Sentences are identified by
+// the SHA-256 of their normalized text; the response carries probabilities only.
+export function detect(sentences: DetectSentenceRequest[], requestId: string = newRequestId()) {
+  return paidCall("/api/detect", postJson({ requestId, sentences }), DetectResponse);
 }
 
 export function recordDecision(suggestionId: string, decision: SuggestionDecision, textHash: string) {

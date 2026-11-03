@@ -1,10 +1,11 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useRef, useState, useSyncExternalStore } from "react";
+import { Suspense, useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { InviteRequired } from "@/components/invite-required";
 import {
   createExpression,
+  detect,
   getMe,
   isAiOff,
   isQuota,
@@ -12,6 +13,7 @@ import {
   proofread,
   recordDecision,
 } from "@/features/api/client";
+import { getAccessSnapshot } from "@/features/api/access-store";
 import { useLoad } from "@/features/api/use-load";
 import { useAccess } from "@/features/api/use-access";
 import { SELECTION_NOTICE } from "@/features/capture/selection";
@@ -21,6 +23,7 @@ import { hashText } from "@/lib/text";
 import type { Suggestion } from "@/shared/contracts";
 import { EditorScreen } from "./editor-screen";
 import { checkLocal, getLocalCheckerStatus, getServerLocalCheckerStatus, subscribeLocalChecker } from "./local-checker";
+import { bindToLearner, type DetectOutcome, type DetectSentences } from "./sentence-detect";
 import { NO_RECHECK, type CheckWithAi, type ProofreadOutcome, type RecheckSentences } from "./types";
 
 // `/join/{token}` sends people here with ?invite=invalid when the link did not work.
@@ -78,6 +81,39 @@ export function EditorSession({ recheckSentences = NO_RECHECK }: { recheckSenten
     return { ok: false, reason: "failed" };
   }, []);
 
+  // Stage 1. Failures are quiet: the learner never asked for this call, so only
+  // "quota" and "unavailable" change what the editor says.
+  const sendSentences: DetectSentences = useCallback(async (sentences): Promise<DetectOutcome> => {
+    const result = await detect(sentences);
+    if (result.ok) {
+      const { sentences: answers, quota } = result.data;
+      return {
+        ok: true,
+        results: answers.map((answer) => ({
+          hash: answer.hash,
+          scores: {
+            correction: answer.needs_correction,
+            clarity: answer.needs_clarity,
+            word_choice: answer.needs_word_choice,
+          },
+        })),
+        checksLeft: Math.max(0, quota.limit - quota.used),
+      };
+    }
+    if (isUnauthorized(result)) setSessionLost(true);
+    if (isQuota(result)) return { ok: false, reason: "quota" };
+    if (isAiOff(result)) return { ok: false, reason: "unavailable" };
+    if (result.code === "rate_limited") return { ok: false, reason: "busy" };
+    return { ok: false, reason: "failed" };
+  }, []);
+  // The text belongs to the learner who is signed in now. Every request re-checks
+  // that, so a queue that outlives a sign-out or an account switch sends nothing.
+  const learnerId = access.session?.learner.id ?? null;
+  const detectSentences = useMemo(
+    () => bindToLearner(sendSentences, learnerId, () => getAccessSnapshot().session?.learner.id ?? null),
+    [sendSentences, learnerId],
+  );
+
   const onDecision = useCallback((suggestion: Suggestion, decision: "accepted" | "rejected" | "stale", text: string) => {
     // Only cloud suggestions exist on the server.
     if (suggestion.source !== "ai") return;
@@ -126,11 +162,12 @@ export function EditorSession({ recheckSentences = NO_RECHECK }: { recheckSenten
       ) : (
         <div className="min-h-0 flex-1">
           <EditorScreen
-            key={`${access.session?.learner.id ?? "pending"}:${capture.revision}`}
+            key={`${learnerId ?? "pending"}:${capture.revision}`}
             initialText={capture.result?.status === "accepted" ? capture.result.text : ""}
             checksLeft={quota ? Math.max(0, quota.limit - quota.used) : null}
             aiAvailable={me?.ok ? me.data.aiEnabled && (me.data.accessMode !== "byok" || access.hasKey) : false}
             checkWithAi={checkWithAi}
+            detectSentences={detectSentences}
             checkLocal={checkLocal}
             localCheckStatus={localCheckStatus}
             onDecision={onDecision}

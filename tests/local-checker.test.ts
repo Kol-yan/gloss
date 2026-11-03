@@ -187,15 +187,25 @@ describe("Harper integration", () => {
     const linter = await createLinter(binaryInlined);
     const text = normalizeText("😀😀 I recieved it yesterday. An apple and a orange.");
     const suggestions = mapLints(text, await collectLints(linter, text));
-    const spelling = suggestions.find((s) => s.original === "recieved");
-    expect(spelling).toBeDefined();
-    expect(spelling?.start).toBe(text.indexOf("recieved"));
-    expect(spelling?.category).toBe("error");
+    const article = suggestions.find((s) => s.original === "a");
+    expect(article).toBeDefined();
+    expect(article?.start).toBe(text.indexOf(" a orange") + 1);
+    expect(article?.replacement).toBe("an");
+    expect(article?.category).toBe("error");
     expect(suggestions.every((s) => canApply(text, s))).toBe(true);
     await linter.dispose();
   }, 60_000);
 
-  it("gives one clear suggestion for words glued by a comma and keeps real spelling fixes", async () => {
+  it("leaves spelling to the later stages", async () => {
+    const { binaryInlined } = await import("harper.js/binaryInlined");
+    const linter = await createLinter(binaryInlined);
+    const text = normalizeText("I recieved the mail, but unfortunatelly it was late.");
+    expect(await collectLints(linter, text)).toEqual([]);
+    expect(await linter.getLintConfig()).toMatchObject({ SpellCheck: false });
+    await linter.dispose();
+  }, 60_000);
+
+  it("keeps grammar and punctuation rules on, with one clear suggestion for words glued by a comma", async () => {
     const { binaryInlined } = await import("harper.js/binaryInlined");
     const linter = await createLinter(binaryInlined);
 
@@ -207,11 +217,10 @@ describe("Harper integration", () => {
     const paragraph = normalizeText("I recieve the mail yesterday,and it was unfortunatelly late. We goed home. Enor,ous help.");
     const found = mapLints(paragraph, await collectLints(linter, paragraph));
     const pairs = found.map((s) => `${s.original}>${s.replacement}`);
-    expect(pairs).toContain("recieve>receive");
-    expect(pairs).toContain("unfortunatelly>unfortunately");
     expect(pairs.some((p) => p.startsWith("goed>"))).toBe(true);
     expect(pairs).toContain("yesterday,and>yesterday, and");
     expect(pairs).toContain("Enor,ous>Enor, ous");
+    expect(pairs.some((p) => p.startsWith("recieve>") || p.startsWith("unfortunatelly>"))).toBe(false);
     expect(pairs.some((p) => p.includes("Enos") || p.includes("opus"))).toBe(false);
     expect(found.every((s) => canApply(paragraph, s))).toBe(true);
     await linter.dispose();

@@ -88,6 +88,7 @@ export function SuggestionCard({
 
   return (
     <li
+      data-suggestion-id={id}
       onMouseEnter={() => onActivate(id)}
       onMouseLeave={() => onDeactivate(id)}
       onFocus={() => {
