@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { UnknownModelError } from "@/server/models/errors";
 import { estimateMaxCostMicros } from "@/server/models/meta";
-import { asrCostMicros, textCostMicros, textPrice } from "@/server/models/prices";
+import {
+  asrCostMicros,
+  FAST_MODEL_DEFAULT,
+  FAST_PRICE_DEFAULT,
+  settledTextCostMicros,
+  textCostMicros,
+  textPrice,
+} from "@/server/models/prices";
 
 describe("prices", () => {
   it("prices text models per million tokens, rounded up to a micro-dollar", () => {
@@ -9,6 +16,28 @@ describe("prices", () => {
     expect(textCostMicros("muse-spark-1.3", 1000, 200)).toBe(2100);
     expect(textCostMicros("muse-spark-1.3", 1, 1)).toBe(6); // 5.5 rounds up
     expect(textCostMicros("muse-spark-1.3", 0, 0)).toBe(0);
+  });
+
+  it("prices gpt-oss-120b at twice the highest provider price listed in November 2026", () => {
+    // Highest listed: $0.35 per million input tokens, $0.95 per million output tokens.
+    expect(FAST_MODEL_DEFAULT).toBe("openai/gpt-oss-120b");
+    expect(textPrice(FAST_MODEL_DEFAULT)).toEqual({ kind: "text", inputUsdPerMTok: 0.7, outputUsdPerMTok: 1.9 });
+    expect(FAST_PRICE_DEFAULT).toBe(textPrice(FAST_MODEL_DEFAULT));
+    expect(textCostMicros(FAST_MODEL_DEFAULT, 1000, 200)).toBe(1080);
+  });
+
+  it("prices with an explicit price when one is given", () => {
+    const price = { kind: "text", inputUsdPerMTok: 2, outputUsdPerMTok: 10 } as const;
+    expect(textCostMicros("any-model", 1000, 200, price)).toBe(4000);
+    expect(estimateMaxCostMicros("any-model", 100, 2048, price)).toBe(Math.ceil((300 + 600) * 2 + 2048 * 10));
+  });
+
+  it("settles at the reported cost, else at tokens times the price, else at the bound", () => {
+    const price = textPrice(FAST_MODEL_DEFAULT);
+    expect(settledTextCostMicros(price, { inputTokens: 1000, outputTokens: 200, costMicros: 77 }, 9999)).toBe(77);
+    expect(settledTextCostMicros(price, { inputTokens: 1000, outputTokens: 200, costMicros: 0 }, 9999)).toBe(0);
+    expect(settledTextCostMicros(price, { inputTokens: 1000, outputTokens: 200 }, 9999)).toBe(1080);
+    expect(settledTextCostMicros(price, null, 9999)).toBe(9999);
   });
 
   it("prices speech-to-text per minute", () => {

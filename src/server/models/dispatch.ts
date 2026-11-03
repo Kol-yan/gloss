@@ -1,11 +1,13 @@
 import type { AppConfig } from "../config";
-import type { ProviderAccess } from "./access";
+import type { ProviderAccess, TextRoute } from "./access";
 import { metaChat, type MetaChatInput } from "./meta";
 import { metaTranscribe, type MetaTranscribeInput } from "./meta-asr";
 import { openRouterChat, openRouterTranscribe } from "./openrouter";
 
-export function chatWithAccess(input: MetaChatInput, access: ProviderAccess, config: AppConfig) {
-  return access.provider === "meta" ? metaChat(input, { config }) : openRouterChat(input, access.apiKey, config);
+// The route, never the caller, decides the provider: there is no fallback from
+// one provider or tier to another.
+export function chatWithRoute(input: MetaChatInput, route: TextRoute, config: AppConfig) {
+  return route.provider === "meta" ? metaChat(input, { config }) : openRouterChat(input, route, config);
 }
 
 export function transcribeWithAccess(input: MetaTranscribeInput, access: ProviderAccess, config: AppConfig) {

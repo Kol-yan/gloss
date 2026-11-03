@@ -23,6 +23,9 @@ installApp();
 const EXPRESSION = "unlikely to happen";
 const CLEAN = "You are in a meeting and a client asks whether the delay could repeat next month.";
 
+// 1000 input * 0.70 + 200 output * 1.90 micro-dollars: the usage chatReply reports.
+const FAST_COST = 1080;
+
 const create = (body: unknown) => postJson(taskRoute, body);
 const situation = (text: string) => chatReply({ situation: text });
 const reservationsFor = (id: string) =>
@@ -72,12 +75,13 @@ describe("POST /api/practice/tasks", () => {
     ).toMatchObject({ learner_id: learner.id, task_id: task.id, status: "issued", previous_attempt_id: null });
     expect(db().prepare("SELECT * FROM practice_tasks WHERE id = ?").get(task.id)).toMatchObject({
       request_id: id,
-      model: "muse-spark-1.3",
+      model: "openai/gpt-oss-120b",
     });
 
-    // One "evaluate" operation reserved and settled at the reported usage.
+    // One "evaluate" operation reserved and settled at the reported usage:
+    // 1000 * 0.70 + 200 * 1.90 = 1080 micro-dollars at the fast tier's price bound.
     expect(reservationsFor(id)).toEqual([
-      expect.objectContaining({ kind: "evaluate", units: 1, status: "settled", actual_cost_micros: 2100 }),
+      expect.objectContaining({ kind: "evaluate", units: 1, status: "settled", actual_cost_micros: FAST_COST }),
     ]);
     const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(sent.max_tokens).toBeGreaterThanOrEqual(2048);
@@ -204,7 +208,7 @@ describe("POST /api/practice/tasks", () => {
       // Each model call has its own reservation.
       expect(reservationsFor(id)).toHaveLength(2);
       expect(db().prepare("SELECT model FROM practice_tasks WHERE id = ?").get(task.id)).toEqual({
-        model: "muse-spark-1.3",
+        model: "openai/gpt-oss-120b",
       });
     });
 
@@ -341,7 +345,7 @@ describe("POST /api/practice/tasks", () => {
   });
 
   it.each([
-    ["unusable output", () => chatReply("not json at all"), 502, 2100],
+    ["unusable output", () => chatReply("not json at all"), 502, FAST_COST],
     ["provider refusal", () => new Response("down", { status: 500 }), 503, 0],
   ] as const)("retries the same request after settled %s", async (_name, failed, status, cost) => {
     const { expressionId } = setup();
@@ -358,7 +362,7 @@ describe("POST /api/practice/tasks", () => {
     const task = PracticeTask.parse(await retried.json());
     expect(reservationsFor(id)).toEqual([
       expect.objectContaining({ status: "settled", actual_cost_micros: cost }),
-      expect.objectContaining({ status: "settled", actual_cost_micros: 2100 }),
+      expect.objectContaining({ status: "settled", actual_cost_micros: FAST_COST }),
     ]);
     expect(await (await create(body)).json()).toEqual(task);
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -397,7 +401,7 @@ describe("POST /api/practice/tasks", () => {
     const response = await create({ requestId: id, expressionId, kind: "written" });
     expect(response.status).toBe(502);
     expect(ApiError.parse(await response.json()).error.code).toBe("model_unavailable");
-    expect(reservationsFor(id)).toEqual([expect.objectContaining({ status: "settled", actual_cost_micros: 2100 })]);
+    expect(reservationsFor(id)).toEqual([expect.objectContaining({ status: "settled", actual_cost_micros: FAST_COST })]);
     expect(db().prepare("SELECT COUNT(*) AS n FROM practice_tasks WHERE request_id = ?").get(id)).toEqual({ n: 0 });
   });
 
@@ -421,15 +425,25 @@ describe("POST /api/practice/tasks", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("answers ai_disabled without a call when the API key is missing", async () => {
+  it("answers ai_disabled without a call or reservation when the OpenRouter key is missing", async () => {
     const { expressionId } = setup();
-    delete process.env.META_API_KEY;
+    delete process.env.OPENROUTER_API_KEY;
     vi.spyOn(console, "error").mockImplementation(() => {});
-    const response = await create({ requestId: requestId(), expressionId, kind: "written" });
+    const id = requestId();
+    const response = await create({ requestId: id, expressionId, kind: "written" });
     expect(response.status).toBe(503);
     expect(ApiError.parse(await response.json()).error.code).toBe("ai_disabled");
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(reservationsFor(id)).toEqual([]);
     vi.restoreAllMocks();
+  });
+
+  it("does not need the Meta key: situations run on the fast tier", async () => {
+    const { expressionId } = setup();
+    delete process.env.META_API_KEY;
+    fetchMock.mockResolvedValueOnce(situation(CLEAN));
+    expect((await create({ requestId: requestId(), expressionId, kind: "written" })).status).toBe(200);
+    expect(fetchMock.mock.calls[0][0]).toBe("https://openrouter.ai/api/v1/chat/completions");
   });
 
   it("requires a session and a valid body", async () => {

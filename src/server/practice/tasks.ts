@@ -24,7 +24,7 @@ import {
   ModelTimeoutError,
 } from "../models/errors";
 import { estimateMaxCostMicros } from "../models/meta";
-import { resolveProviderAccess, textModel, type ProviderAccess } from "../models/access";
+import { resolveProviderAccess, resolveTextRoute, type ProviderAccess } from "../models/access";
 import { BUILD_PRACTICE_ROLE } from "../models/roles";
 import { runReservedChat } from "../models/reserved-chat";
 import {
@@ -177,7 +177,8 @@ function claimGeneration(
       params: { id: input.expressionId },
     });
     if (!expression) throw new NotFoundError();
-    textModel(access, config);
+    // Fails before any claim or reservation when the tier cannot be served.
+    resolveTextRoute(access, config, BUILD_PRACTICE_ROLE.tier);
 
     const generationId = newId();
     tx.prepare(
@@ -242,7 +243,7 @@ interface SituationArgs {
 // Asks the model for a situation. If a hidden-cue situation leaks the
 // expression it asks once more, then falls back to a generic template.
 async function writeSituation(a: SituationArgs): Promise<{ situation: string; model: string }> {
-  const model = textModel(a.providerAccess, a.config);
+  const route = resolveTextRoute(a.providerAccess, a.config, BUILD_PRACTICE_ROLE.tier);
   const messages = buildSituationMessages({
     expression: a.expression,
     meaning: a.meaning,
@@ -252,7 +253,7 @@ async function writeSituation(a: SituationArgs): Promise<{ situation: string; mo
     messages.reduce((total, m) => total + m.content.length, 0) +
     JSON.stringify(SITUATION_JSON_SCHEMA).length;
   // Throws for a model without a price: no cost bound, no call.
-  const maxCostMicros = estimateMaxCostMicros(model, inputChars, BUILD_PRACTICE_ROLE.maxTokens);
+  const maxCostMicros = estimateMaxCostMicros(route.model, inputChars, BUILD_PRACTICE_ROLE.maxTokens, route.price);
 
   for (let attempt = 0; attempt < 2; attempt++) {
     // Each claimed generation pays for its own calls, without changing the
@@ -289,13 +290,12 @@ async function writeSituation(a: SituationArgs): Promise<{ situation: string; mo
         config: a.config,
         reservation,
         providerAccess: a.providerAccess,
+        tier: BUILD_PRACTICE_ROLE.tier,
         chat: {
-          model,
           messages,
           jsonSchema: SITUATION_JSON_SCHEMA,
           maxTokens: BUILD_PRACTICE_ROLE.maxTokens,
           temperature: BUILD_PRACTICE_ROLE.temperature,
-          reasoningEffort: BUILD_PRACTICE_ROLE.reasoningEffort,
         },
         parse: parseSituation,
       }));
@@ -306,7 +306,7 @@ async function writeSituation(a: SituationArgs): Promise<{ situation: string; mo
       throw error;
     }
     if (a.cue === "shown" || !leaksExpression(value, a.expression)) {
-      return { situation: value, model };
+      return { situation: value, model: route.model };
     }
   }
   return { situation: templateSituation(a.expression), model: TEMPLATE_MODEL };

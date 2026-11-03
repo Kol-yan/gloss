@@ -10,9 +10,9 @@ import {
   type TokenUsage,
 } from "./errors";
 import { type MetaChatInput } from "./meta";
-import { textCostMicros } from "./prices";
-import { resolveProviderAccess, type ProviderAccess } from "./access";
-import { chatWithAccess } from "./dispatch";
+import { settledTextCostMicros } from "./prices";
+import { resolveProviderAccess, resolveTextRoute, type ModelTier, type ProviderAccess, type TextRoute } from "./access";
+import { chatWithRoute } from "./dispatch";
 
 export interface ReservedChatArgs<T> {
   db: DatabaseSync;
@@ -20,7 +20,9 @@ export interface ReservedChatArgs<T> {
   config: AppConfig;
   // Already made by the caller, before this call.
   reservation: Reservation;
-  chat: MetaChatInput;
+  // The model comes from the route that the tier selects for this learner.
+  tier: ModelTier;
+  chat: Omit<MetaChatInput, "model">;
   providerAccess?: ProviderAccess;
   // Returns null when the content is not usable.
   parse: (content: string) => T | null;
@@ -42,13 +44,15 @@ export async function runReservedChat<T>(args: ReservedChatArgs<T>): Promise<{
       if (cost === "unknown") markUnknown(reservation.id, { db: tx, now });
       else settle(reservation.id, cost, { db: tx, now });
     }, db);
+  let route: TextRoute | undefined;
   const billed = (usage: TokenUsage | null) =>
-    usage ? textCostMicros(chat.model, usage.inputTokens, usage.outputTokens) : reservation.maxCostMicros;
+    route ? settledTextCostMicros(route.price, usage, reservation.maxCostMicros) : reservation.maxCostMicros;
 
   let result;
   try {
     const access = resolveProviderAccess(reservation.learnerId, args.providerAccess, db);
-    result = await chatWithAccess(chat, access, config);
+    route = resolveTextRoute(access, config, args.tier);
+    result = await chatWithRoute({ ...chat, model: route.model }, route, config);
   } catch (error) {
     if (error instanceof ModelOutputError) close(billed(error.usage));
     else if (

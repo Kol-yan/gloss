@@ -17,7 +17,7 @@ import { SESSION_COOKIE, findLearnerBySessionToken } from "@/server/auth/session
 import { getBudgetStatus, reserve, setAiEnabled, settle } from "@/server/budget";
 import { RateLimitedError, QuotaExceededError } from "@/server/errors";
 import { PROVIDER_KEY_HEADER, resolveProviderAccess } from "@/server/models/access";
-import { chatReply, db, fetchMock, installApp, login, makeWav, requestId, seedExpression, seedTask, session } from "./helpers/app";
+import { chatReply, db, fetchMock, installApp, login, makeWav, OWNER_OPENROUTER_KEY, proofreadReply, requestId, sentBody, seedExpression, seedTask, session } from "./helpers/app";
 
 installApp();
 
@@ -96,7 +96,7 @@ describe("public BYOK access", () => {
     expect(MeResponse.parse(await (await meRoute()).json()).aiEnabled).toBe(true);
     setAiEnabled(false);
     expect(MeResponse.parse(await (await meRoute()).json()).aiEnabled).toBe(false);
-    fetchMock.mockResolvedValueOnce(chatReply({ edits: [] }));
+    fetchMock.mockResolvedValueOnce(proofreadReply([]));
     const response = await proofreadRoute(request("/api/proofread", { requestId: requestId(), text: "A short sentence." }));
     expect(ApiError.parse(await response.json()).error.code).toBe("ai_disabled");
     expect(fetchMock).not.toHaveBeenCalled();
@@ -123,20 +123,21 @@ describe("public BYOK access", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("routes hosted learners to Meta even when a visitor header is present", async () => {
+  it("routes hosted proofreading to the operator's OpenRouter account even when a visitor header is present", async () => {
     login();
-    fetchMock.mockResolvedValueOnce(chatReply({ edits: [] }));
+    fetchMock.mockResolvedValueOnce(proofreadReply([]));
     const response = await proofreadRoute(request("/api/proofread", { requestId: requestId(), text: "A short sentence." }));
     expect(response.status).toBe(200);
-    expect(fetchMock.mock.calls[0][0]).toBe("https://meta.test/v1/chat/completions");
-    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe("Bearer test-key");
+    expect(fetchMock.mock.calls[0][0]).toBe("https://openrouter.ai/api/v1/chat/completions");
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe(`Bearer ${OWNER_OPENROUTER_KEY}`);
+    expect(JSON.stringify(fetchMock.mock.calls)).not.toContain(visitorKey);
   });
 
   it("uses the visitor key for proofreading, tasks, evaluation and multipart speech", async () => {
     const body = await enroll();
     const initialOwnerSpend = getBudgetStatus().spentMicros;
     process.env.DAILY_BUDGET_USD = "0";
-    fetchMock.mockResolvedValueOnce(chatReply({ edits: [] }));
+    fetchMock.mockResolvedValueOnce(proofreadReply([]));
     const checked = await proofreadRoute(request("/api/proofread", { requestId: requestId(), text: "A short sentence." }));
     expect(ProofreadResponse.parse(await checked.json()).suggestions).toEqual([]);
 
@@ -158,9 +159,13 @@ describe("public BYOK access", () => {
       expect(url).toMatch(/^https:\/\/openrouter\.ai\/api\/v1\//);
       expect(init.headers.Authorization).toBe(`Bearer ${visitorKey}`);
     }
-    const chat = JSON.parse(fetchMock.mock.calls[0][1].body);
-    expect(chat).toMatchObject({ model: "meta/muse-spark-1.3", max_tokens: 4096, reasoning_effort: "minimal",
-      provider: { allow_fallbacks: false, require_parameters: true, data_collection: "deny" } });
+    // Visitors get the fast model for proofreading and situations, Muse Spark for evaluation.
+    const options = { max_tokens: 4096, usage: { include: true },
+      provider: { allow_fallbacks: false, require_parameters: true, data_collection: "deny" } };
+    expect(sentBody(0)).toMatchObject({ model: "openai/gpt-oss-120b", reasoning: { effort: "low" }, ...options });
+    expect(sentBody(1)).toMatchObject({ model: "openai/gpt-oss-120b", reasoning: { effort: "low" }, ...options });
+    expect(sentBody(2)).toMatchObject({ model: "meta/muse-spark-1.3", reasoning_effort: "low", ...options });
+    expect(sentBody(2)).not.toHaveProperty("reasoning");
     const form = fetchMock.mock.calls[3][1].body as FormData;
     expect(form.get("model")).toBe("meta/muse-voice-transcribe-1.0");
     expect(form.get("file")).toBeInstanceOf(Blob);
@@ -192,7 +197,7 @@ describe("public BYOK access", () => {
     await enroll();
     let release!: () => void;
     const waiting = new Promise<void>(resolve => { release = resolve; });
-    fetchMock.mockImplementation(() => waiting.then(() => chatReply({ edits: [] })));
+    fetchMock.mockImplementation(() => waiting.then(() => proofreadReply([])));
     const first = proofreadRoute(request("/api/proofread", { requestId: requestId(), text: "First sentence." }));
     const second = proofreadRoute(request("/api/proofread", { requestId: requestId(), text: "Second sentence." }));
     try {

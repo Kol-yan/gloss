@@ -46,6 +46,57 @@ describe("loadConfig", () => {
   });
 });
 
+describe("fast-tier configuration", () => {
+  it("defaults to gpt-oss-120b without prices", () => {
+    expect(loadConfig({}).openRouter).toEqual({
+      apiKey: undefined,
+      fastModel: "openai/gpt-oss-120b",
+      fastPriceInUsdPerM: undefined,
+      fastPriceOutUsdPerM: undefined,
+    });
+  });
+
+  it("reads the model, its prices and the key", () => {
+    const { openRouter } = loadConfig({
+      OPENROUTER_API_KEY: "key",
+      OPENROUTER_FAST_MODEL: "@preset/gpt-oss-120b-balanced",
+      OPENROUTER_FAST_PRICE_IN_PER_M: "0.35",
+      OPENROUTER_FAST_PRICE_OUT_PER_M: "0.95",
+    });
+    expect(openRouter).toEqual({
+      apiKey: "key",
+      fastModel: "@preset/gpt-oss-120b-balanced",
+      fastPriceInUsdPerM: 0.35,
+      fastPriceOutUsdPerM: 0.95,
+    });
+  });
+
+  it("reads the legacy proofreading model name as an alias, and prefers the new name", () => {
+    const alias = "@preset/gpt-oss-120b-balanced";
+    expect(loadConfig({ OPENROUTER_PROOFREAD_MODEL: alias }).openRouter.fastModel).toBe(alias);
+    expect(loadConfig({ OPENROUTER_PROOFREAD_MODEL: alias, OPENROUTER_FAST_MODEL: "vendor/model:floor" }).openRouter.fastModel)
+      .toBe("vendor/model:floor");
+    expect(loadConfig({ OPENROUTER_PROOFREAD_MODEL: alias, OPENROUTER_FAST_MODEL: " " }).openRouter.fastModel).toBe(alias);
+    expect(loadConfig({ OPENROUTER_PROOFREAD_MODEL: "", OPENROUTER_FAST_MODEL: "" }).openRouter.fastModel).toBe("openai/gpt-oss-120b");
+  });
+
+  it("rejects prices that would remove the cost bound, and odd model ids, without echoing values", () => {
+    for (const value of ["0", "-1", "abc", "Infinity", "1001"]) {
+      expect(() => loadConfig({ OPENROUTER_FAST_PRICE_IN_PER_M: value })).toThrow(/OPENROUTER_FAST_PRICE_IN_PER_M/);
+      expect(() => loadConfig({ OPENROUTER_FAST_PRICE_OUT_PER_M: value })).toThrow(/OPENROUTER_FAST_PRICE_OUT_PER_M/);
+    }
+    for (const value of ["has space", "x".repeat(201), "model\nname", "<script>"]) {
+      expect(() => loadConfig({ OPENROUTER_FAST_MODEL: value })).toThrow(/OPENROUTER_FAST_MODEL/);
+    }
+    try {
+      loadConfig({ OPENROUTER_FAST_PRICE_OUT_PER_M: "secret-looking-value" });
+      expect.unreachable();
+    } catch (error) {
+      expect((error as Error).message).not.toContain("secret-looking-value");
+    }
+  });
+});
+
 describe("quota profiles", () => {
   it("matches the documented limits", () => {
     expect(QUOTA_PROFILES.pilot).toEqual({ proofread: 20, evaluate: 12, asrSeconds: 180 });

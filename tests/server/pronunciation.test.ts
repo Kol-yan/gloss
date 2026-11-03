@@ -71,10 +71,10 @@ describe("single-word pronunciation validation", () => {
   });
 
   it("requests IPA in the existing model schema and keeps it only on single-word expression edits", () => {
-    expect(PROOFREAD_JSON_SCHEMA.schema.properties.edits.items.required).toContain("ipa");
+    expect(PROOFREAD_JSON_SCHEMA.schema.properties.improvements.items.required).toContain("ipa");
     const raw = { sentence_index: 0, original: "careful", replacement: WORD, category: "expression",
       reason: "A more precise word.", meaning: "very careful about details", ipa: IPA };
-    const parsed = parseProofreadOutput(JSON.stringify({ edits: [raw] }))!;
+    const parsed = parseProofreadOutput(JSON.stringify({ corrections: [], improvements: [raw] }))!.improvements;
     const sentences = splitSentences("She is careful.");
     expect(resolveEdits(sentences, parsed)[0].ipa).toBe(IPA);
     expect(resolveEdits(sentences, [{ ...parsed[0], replacement: "very meticulous" }])[0].ipa).toBeNull();
@@ -127,8 +127,8 @@ describe("pronunciation persistence", () => {
     login();
     const id = requestId();
     const input = { requestId: id, text: "She is careful." };
-    fetchMock.mockResolvedValueOnce(chatReply({ edits: [{ sentence_index: 0, original: "careful", replacement: WORD,
-      category: "expression", reason: "A more precise word.", meaning: "very careful about details", ipa: IPA }] }));
+    fetchMock.mockResolvedValueOnce(chatReply({ corrections: [], improvements: [{ sentence_index: 0, original: "careful",
+      replacement: WORD, category: "expression", reason: "A more precise word.", meaning: "very careful about details", ipa: IPA }] }));
     const checked = ProofreadResponse.parse(await (await proofreadRoute(jsonRequest(input))).json());
     expect(checked.suggestions[0].ipa).toBe(IPA);
     const replay = ProofreadResponse.parse(await (await proofreadRoute(jsonRequest(input))).json());

@@ -26,17 +26,21 @@ const db_ = () => getDb();
 const fetchMock = vi.fn();
 let dir: string;
 const savedEnv: Record<string, string | undefined> = {};
+const OWNER_KEY = "sk-or-v1-" + "owner".repeat(8);
 const ENV = {
   META_API_KEY: "test-key",
   META_API_BASE_URL: "https://meta.test/v1",
   META_TEXT_MODEL: "muse-spark-1.3",
+  OPENROUTER_API_KEY: OWNER_KEY,
+  OPENROUTER_FAST_MODEL: "openai/gpt-oss-120b",
   DAILY_BUDGET_USD: "5",
   AI_ENABLED: "true",
 };
+const OPTIONAL_ENV = ["OPENROUTER_PROOFREAD_MODEL", "OPENROUTER_FAST_PRICE_IN_PER_M", "OPENROUTER_FAST_PRICE_OUT_PER_M"];
 
 beforeAll(() => {
   dir = mkdtempSync(path.join(tmpdir(), "glossy-proofread-"));
-  for (const key of [...Object.keys(ENV), "GLOSSY_DATABASE_PATH"]) savedEnv[key] = process.env[key];
+  for (const key of [...Object.keys(ENV), ...OPTIONAL_ENV, "GLOSSY_DATABASE_PATH"]) savedEnv[key] = process.env[key];
   process.env.GLOSSY_DATABASE_PATH = path.join(dir, "proofread.db");
 });
 
@@ -51,6 +55,7 @@ afterAll(() => {
 
 beforeEach(() => {
   Object.assign(process.env, ENV);
+  for (const key of OPTIONAL_ENV) delete process.env[key];
   fetchMock.mockReset();
   vi.stubGlobal("fetch", fetchMock);
   setAiEnabled(true);
@@ -86,25 +91,31 @@ function decide(id: string, body: unknown) {
   );
 }
 
-interface ModelEdit {
+// What the model returns for a sentence it corrected as a whole.
+function fix(sentenceIndex: number, corrected: string, changes: { original: string; replacement: string; reason: string }[] = []) {
+  return { sentence_index: sentenceIndex, corrected, changes };
+}
+
+// An optional style or expression suggestion.
+function improvement(e: {
   sentence_index: number;
   original: string;
   replacement: string;
-  category?: "error" | "style" | "expression";
+  category?: "style" | "expression";
   reason?: string;
-}
-
-function edit(e: ModelEdit & { meaning?: string }) {
-  return { category: "error", reason: "Fixes the grammar.", meaning: "", ...e };
+  meaning?: string;
+}) {
+  return { category: "style", reason: "Reads better.", meaning: "", ipa: "", ...e };
 }
 
 function modelReply(
-  edits: unknown[],
-  usage: Record<string, number> | null = { prompt_tokens: 1000, completion_tokens: 200 },
+  corrections: unknown[],
+  improvements: unknown[] = [],
+  usage: Record<string, unknown> | null = { prompt_tokens: 1000, completion_tokens: 200 },
 ) {
   return new Response(
     JSON.stringify({
-      choices: [{ message: { content: JSON.stringify({ edits }) }, finish_reason: "stop" }],
+      choices: [{ message: { content: JSON.stringify({ corrections, improvements }) }, finish_reason: "stop" }],
       ...(usage ? { usage } : {}),
     }),
     { status: 200 },
@@ -132,26 +143,27 @@ describe("POST /api/proofread", () => {
     login();
     const text = "I has a dog 😀. She go to school every days.";
     fetchMock.mockResolvedValueOnce(
-      modelReply([
-        edit({ sentence_index: 1, original: "go", replacement: "goes" }),
-        edit({ sentence_index: 0, original: "has", replacement: "have" }),
-        edit({
-          sentence_index: 1,
-          original: "every days",
-          replacement: "every day",
-          category: "style",
-        }),
-      ]),
+      modelReply(
+        [
+          fix(1, "She goes to school every day.", [
+            { original: "go", replacement: "goes", reason: "The verb agrees with she." },
+            { original: "every days", replacement: "every day", reason: "Use the singular after every." },
+          ]),
+          fix(0, "I have a dog 😀.", [{ original: "has", replacement: "have", reason: "I takes have." }]),
+        ],
+        [improvement({ sentence_index: 1, original: "school", replacement: "class" })],
+      ),
     );
     const id = requestId();
     const response = await post({ requestId: id, text });
     expect(response.status).toBe(200);
     const body = ProofreadResponse.parse(await json(response));
 
-    expect(body.suggestions.map((s) => [s.original, s.replacement])).toEqual([
-      ["has", "have"],
-      ["go", "goes"],
-      ["every days", "every day"],
+    expect(body.suggestions.map((s) => [s.category, s.original, s.replacement, s.reason])).toEqual([
+      ["error", "has", "have", "I takes have."],
+      ["error", "go", "goes", "The verb agrees with she."],
+      ["style", "school", "class", "Reads better."],
+      ["error", "days", "day", "Use the singular after every."],
     ]);
     for (const s of body.suggestions) {
       expect(text.slice(s.start, s.end)).toBe(s.original);
@@ -165,24 +177,38 @@ describe("POST /api/proofread", () => {
     expect(run).toMatchObject({
       id: body.checkRunId,
       status: "ok",
-      provider: "meta",
-      model: "muse-spark-1.3",
+      provider: "openrouter",
+      model: "openai/gpt-oss-120b",
       text_hash: body.textHash,
       text_length: text.length,
     });
     expect(Number(run.latency_ms)).toBeGreaterThanOrEqual(0);
-    expect(rows("SELECT status FROM suggestions WHERE check_run_id = ?", body.checkRunId)).toEqual([
-      { status: "pending" },
-      { status: "pending" },
-      { status: "pending" },
-    ]);
-    // 1000 input * 1.25 + 200 output * 4.25 = 2100 micro-dollars.
+    expect(rows("SELECT status FROM suggestions WHERE check_run_id = ?", body.checkRunId)).toHaveLength(4);
+    // 1000 input * 0.70 + 200 output * 1.90 = 1080 micro-dollars at the fast tier's price bound.
     expect(reservationFor(id)).toMatchObject({
       status: "settled",
-      actual_cost_micros: 2100,
+      actual_cost_micros: 1080,
       kind: "proofread",
       units: 1,
     });
+  });
+
+  it("applying every error suggestion of the check yields the model's corrected text", async () => {
+    login();
+    const text = "I has a dog. She go to school every days. He dont like it.";
+    const corrected = "I have a dog. She goes to school every day. He doesn't like it.";
+    fetchMock.mockResolvedValueOnce(
+      modelReply([
+        fix(0, "I have a dog."),
+        fix(1, "She goes to school every day."),
+        fix(2, "He doesn't like it."),
+      ]),
+    );
+    const body = ProofreadResponse.parse(await json(await post({ requestId: requestId(), text })));
+    const errors = body.suggestions.filter((s) => s.category === "error");
+    expect(errors.length).toBeGreaterThan(3);
+    const applied = [...errors].reverse().reduce((t, s) => t.slice(0, s.start) + s.replacement + t.slice(s.end), text);
+    expect(applied).toBe(corrected);
   });
 
   it("returns the proofread quota after the call, also on replay", async () => {
@@ -205,14 +231,16 @@ describe("POST /api/proofread", () => {
 
   it("keeps a meaning for expression edits only, at most two, and stores it", async () => {
     login();
-    const text = "She is here. He is early. They are done. We are ready.";
+    const text = "She is here. He is early. They are done. We is ready.";
     fetchMock.mockResolvedValueOnce(
-      modelReply([
-        edit({ sentence_index: 0, original: "is here", replacement: "has arrived", category: "expression", meaning: "is now present" }),
-        edit({ sentence_index: 1, original: "is early", replacement: "is ahead of time", category: "expression", meaning: "" }),
-        edit({ sentence_index: 2, original: "are done", replacement: "have wrapped up", category: "expression", meaning: "finished" }),
-        edit({ sentence_index: 3, original: "are ready", replacement: "is ready", category: "error", meaning: "should be ignored" }),
-      ]),
+      modelReply(
+        [fix(3, "We are ready.")],
+        [
+          improvement({ sentence_index: 0, original: "is here", replacement: "has arrived", category: "expression", meaning: "is now present" }),
+          improvement({ sentence_index: 1, original: "is early", replacement: "is ahead of time", category: "expression", meaning: "" }),
+          improvement({ sentence_index: 2, original: "are done", replacement: "have wrapped up", category: "expression", meaning: "finished" }),
+        ],
+      ),
     );
     const id = requestId();
     const body = ProofreadResponse.parse(await json(await post({ requestId: id, text })));
@@ -220,7 +248,7 @@ describe("POST /api/proofread", () => {
     expect(body.suggestions.map((s) => [s.original, s.category, s.meaning])).toEqual([
       ["is here", "expression", "is now present"],
       ["is early", "expression", null],
-      ["are ready", "error", null],
+      ["is", "error", null],
     ]);
     expect(rows("SELECT meaning FROM suggestions WHERE check_run_id = ? ORDER BY start", body.checkRunId)).toEqual([
       { meaning: "is now present" },
@@ -238,23 +266,26 @@ describe("POST /api/proofread", () => {
     fetchMock.mockResolvedValueOnce(modelReply([]));
     await post({ requestId: requestId(), text: "A short text." });
     const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
-    expect(sent.response_format.json_schema.schema.properties.edits.items.required).toContain("meaning");
+    expect(sent.response_format.json_schema.schema.properties.improvements.items.required).toContain("meaning");
     expect(sent.messages[0].content).toMatch(/at most 2 of these/);
     expect(sent.messages[0].content).toMatch(/meaning:/);
   });
 
-  it("sends a strict json_schema request with bearer auth and a bounded output", async () => {
+  it("sends a strict json_schema request to OpenRouter with the operator's key and a bounded output", async () => {
     login();
     fetchMock.mockResolvedValueOnce(modelReply([]));
     const response = await post({ requestId: requestId(), text: "All good here." });
     expect(ProofreadResponse.parse(await json(response)).suggestions).toEqual([]);
 
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe("https://meta.test/v1/chat/completions");
-    expect(init.headers.Authorization).toBe("Bearer test-key");
+    expect(url).toBe("https://openrouter.ai/api/v1/chat/completions");
+    expect(init.headers.Authorization).toBe(`Bearer ${OWNER_KEY}`);
     const sent = JSON.parse(init.body);
-    expect(sent.model).toBe("muse-spark-1.3");
+    expect(sent.model).toBe("openai/gpt-oss-120b");
     expect(sent.max_tokens).toBeGreaterThanOrEqual(2048);
+    expect(sent.reasoning).toEqual({ effort: "low" });
+    expect(sent.usage).toEqual({ include: true });
+    expect(sent.provider.require_parameters).toBe(true);
     expect(sent.response_format.type).toBe("json_schema");
     expect(sent.response_format.json_schema.strict).toBe(true);
     expect(sent.response_format.json_schema.schema.additionalProperties).toBe(false);
@@ -281,9 +312,7 @@ describe("POST /api/proofread", () => {
 
   it("replays a stored result without calling the model again", async () => {
     login();
-    fetchMock.mockResolvedValueOnce(
-      modelReply([edit({ sentence_index: 0, original: "has", replacement: "have" })]),
-    );
+    fetchMock.mockResolvedValueOnce(modelReply([fix(0, "I have a dog.")]));
     const id = requestId();
     const first = await json(await post({ requestId: id, text: "I has a dog." }));
     const second = await json(await post({ requestId: id, text: "I has a dog." }));
@@ -362,42 +391,51 @@ describe("POST /api/proofread", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("drops fragments that are missing, ambiguous, no-ops or overlapping", async () => {
+  it("ignores corrections that are unchanged or name an unknown sentence", async () => {
     login();
-    const text = "She likes tea and tea likes her. He is here.";
+    const text = "She likes tea. He is here. It rains.";
     fetchMock.mockResolvedValueOnce(
       modelReply([
-        edit({ sentence_index: 0, original: "coffee", replacement: "tea" }),
-        edit({ sentence_index: 0, original: "tea", replacement: "coffee" }),
-        edit({ sentence_index: 1, original: "is", replacement: "is" }),
-        edit({ sentence_index: 5, original: "is", replacement: "was" }),
-        edit({ sentence_index: 0, original: "likes tea", replacement: "enjoys tea" }),
-        edit({ sentence_index: 0, original: "tea and", replacement: "tea or" }),
-        edit({ sentence_index: 1, original: "is", replacement: "was" }),
+        fix(0, "She likes tea."),
+        fix(9, "He is there."),
+        fix(1, "He is there."),
+        fix(2, "   "),
       ]),
     );
     const body = ProofreadResponse.parse(await json(await post({ requestId: requestId(), text })));
-    expect(body.suggestions.map((s) => s.original)).toEqual(["likes tea", "is"]);
-    expect(rows("SELECT id FROM suggestions WHERE check_run_id = ?", body.checkRunId)).toHaveLength(2);
+    expect(body.suggestions.map((s) => [s.original, s.replacement])).toEqual([["here", "there"]]);
+    expect(rows("SELECT id FROM suggestions WHERE check_run_id = ?", body.checkRunId)).toHaveLength(1);
   });
 
-  it("flags edits that change numbers or negation as meaningChange", async () => {
+  it("drops an improvement that overlaps an error fix and keeps the rest", async () => {
+    login();
+    const text = "She go to the shop quickly.";
+    fetchMock.mockResolvedValueOnce(
+      modelReply(
+        [fix(0, "She goes to the shop quickly.")],
+        [
+          improvement({ sentence_index: 0, original: "go to", replacement: "visit" }),
+          improvement({ sentence_index: 0, original: "quickly", replacement: "fast" }),
+        ],
+      ),
+    );
+    const body = ProofreadResponse.parse(await json(await post({ requestId: requestId(), text })));
+    expect(body.suggestions.map((s) => [s.category, s.original])).toEqual([["error", "go"], ["style", "quickly"]]);
+  });
+
+  it("flags differences that change numbers or negation as meaningChange", async () => {
     login();
     fetchMock.mockResolvedValueOnce(
-      modelReply([
-        edit({ sentence_index: 0, original: "3", replacement: "4" }),
-        edit({ sentence_index: 1, original: "did not come", replacement: "came" }),
-        edit({ sentence_index: 0, original: "have", replacement: "had" }),
-      ]),
+      modelReply([fix(0, "I have 4 apples."), fix(1, "She came.")]),
     );
     const body = ProofreadResponse.parse(
       await json(await post({ requestId: requestId(), text: "I have 3 apples. She did not come." })),
     );
     const flags = Object.fromEntries(body.suggestions.map((s) => [s.original, s.meaningChange]));
-    expect(flags).toEqual({ "3": true, "did not come": true, have: false });
+    expect(flags).toEqual({ "3": true, "did not come": true });
     expect(
       rows("SELECT meaning_change FROM suggestions WHERE check_run_id = ? ORDER BY start", body.checkRunId),
-    ).toEqual([{ meaning_change: 0 }, { meaning_change: 1 }, { meaning_change: 1 }]);
+    ).toEqual([{ meaning_change: 1 }, { meaning_change: 1 }]);
   });
 
   it("keeps an unknown outcome counted when the call times out or the connection drops", async () => {
@@ -446,8 +484,8 @@ describe("POST /api/proofread", () => {
 
     expect(response.status).toBe(502);
     expect(ApiError.parse(await json(response)).error.code).toBe("model_unavailable");
-    // 1000 * 1.25 + 50 * 4.25 = 1462.5, rounded up.
-    expect(reservationFor(id)).toMatchObject({ status: "settled", actual_cost_micros: 1463 });
+    // 1000 * 0.70 + 50 * 1.90 = 795 micro-dollars.
+    expect(reservationFor(id)).toMatchObject({ status: "settled", actual_cost_micros: 795 });
     expect(runFor(id)).toMatchObject({ status: "failed" });
     expect(
       rows(
@@ -474,7 +512,7 @@ describe("POST /api/proofread", () => {
 
   it("settles at the upper bound when a valid answer has no usage", async () => {
     login();
-    fetchMock.mockResolvedValueOnce(modelReply([], null));
+    fetchMock.mockResolvedValueOnce(modelReply([], [], null));
     const id = requestId();
     expect((await post({ requestId: id, text: "Some text to check." })).status).toBe(200);
     const reservation = reservationFor(id) as Record<string, number | string>;
@@ -515,20 +553,30 @@ describe("POST /api/proofread", () => {
     expect(runFor(id)).toBeUndefined();
   });
 
-  it("answers ai_disabled without reserving anything when the API key is missing", async () => {
+  it("answers ai_disabled without reserving anything when the OpenRouter key is missing", async () => {
     login();
-    delete process.env.META_API_KEY;
+    delete process.env.OPENROUTER_API_KEY;
+    vi.spyOn(console, "error").mockImplementation(() => {});
     const id = requestId();
     const response = await post({ requestId: id, text: "A short text." });
     expect(response.status).toBe(503);
     expect(ApiError.parse(await json(response)).error.code).toBe("ai_disabled");
     expect(fetchMock).not.toHaveBeenCalled();
     expect(reservationFor(id)).toBeUndefined();
+    expect(runFor(id)).toBeUndefined();
+    vi.restoreAllMocks();
+  });
+
+  it("does not need the Meta key", async () => {
+    login();
+    delete process.env.META_API_KEY;
+    fetchMock.mockResolvedValueOnce(modelReply([]));
+    expect((await post({ requestId: requestId(), text: "A short text." })).status).toBe(200);
   });
 
   it("refuses a model without a price", async () => {
     login();
-    process.env.META_TEXT_MODEL = "unpriced-model-9";
+    process.env.OPENROUTER_FAST_MODEL = "vendor/unpriced-model-9";
     vi.spyOn(console, "error").mockImplementation(() => {});
     const id = requestId();
     const response = await post({ requestId: id, text: "A short text." });
@@ -587,14 +635,11 @@ describe("POST /api/proofread", () => {
     expect(sent.messages).toHaveLength(2);
   });
 
-  it("does not obey a model that claims everything is an error: a correct sentence stays untouched by code", async () => {
-    // The server only keeps edits whose original fragment really occurs in the sentence.
+  it("does not obey a model that rewrites a correct sentence: the change is ignored", async () => {
     login();
-    fetchMock.mockResolvedValueOnce(
-      modelReply([edit({ sentence_index: 0, original: "The whole text is wrong", replacement: "ok" })]),
-    );
+    fetchMock.mockResolvedValueOnce(modelReply([fix(0, "ok")]));
     const body = ProofreadResponse.parse(
-      await json(await post({ requestId: requestId(), text: "The sky is blue." })),
+      await json(await post({ requestId: requestId(), text: "The sky above the quiet harbour is blue today." })),
     );
     expect(body.suggestions).toEqual([]);
   });
@@ -603,9 +648,7 @@ describe("POST /api/proofread", () => {
 describe("POST /api/suggestions/[id]", () => {
   async function suggestionFor(learnerProfile: "pilot" | "judge" = "judge") {
     login(learnerProfile);
-    fetchMock.mockResolvedValueOnce(
-      modelReply([edit({ sentence_index: 0, original: "has", replacement: "have" })]),
-    );
+    fetchMock.mockResolvedValueOnce(modelReply([fix(0, "I have a dog.")]));
     const body = ProofreadResponse.parse(
       await json(await post({ requestId: requestId(), text: "I has a dog." })),
     );

@@ -25,14 +25,27 @@ export const nextHeadersMock = {
 
 export const fetchMock = vi.fn();
 
+// The operator's OpenRouter key funds the fast tier; the Meta key funds the
+// smart tier and speech-to-text.
+export const OWNER_OPENROUTER_KEY = "sk-or-v1-" + "owner".repeat(8);
+
 export const ENV = {
   META_API_KEY: "test-key",
   META_API_BASE_URL: "https://meta.test/v1",
   META_TEXT_MODEL: "muse-spark-1.3",
   META_ASR_MODEL: "muse-voice-transcribe-1.0",
+  OPENROUTER_API_KEY: OWNER_OPENROUTER_KEY,
+  OPENROUTER_FAST_MODEL: "openai/gpt-oss-120b",
   DAILY_BUDGET_USD: "5",
   AI_ENABLED: "true",
 };
+
+// Optional settings that a test may set; each test starts without them.
+export const OPTIONAL_ENV = [
+  "OPENROUTER_PROOFREAD_MODEL",
+  "OPENROUTER_FAST_PRICE_IN_PER_M",
+  "OPENROUTER_FAST_PRICE_OUT_PER_M",
+];
 
 // Registers the per-file hooks: a scratch database, test environment
 // variables, a fetch stub and a clean session before each test.
@@ -42,7 +55,7 @@ export function installApp(): void {
 
   beforeAll(() => {
     dir = mkdtempSync(path.join(tmpdir(), "glossy-app-test-"));
-    for (const key of [...Object.keys(ENV), "GLOSSY_DATABASE_PATH"]) saved[key] = process.env[key];
+    for (const key of [...Object.keys(ENV), ...OPTIONAL_ENV, "GLOSSY_DATABASE_PATH"]) saved[key] = process.env[key];
     process.env.GLOSSY_DATABASE_PATH = path.join(dir, "test.db");
   });
 
@@ -57,6 +70,7 @@ export function installApp(): void {
 
   beforeEach(() => {
     Object.assign(process.env, ENV);
+    for (const key of OPTIONAL_ENV) delete process.env[key];
     fetchMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
     setAiEnabled(true);
@@ -87,7 +101,7 @@ export function postJson(route: (request: Request) => Promise<Response>, body: u
 // An OpenAI-style chat completion whose content is the given JSON value.
 export function chatReply(
   content: unknown,
-  usage: Record<string, number> | null = { prompt_tokens: 1000, completion_tokens: 200 },
+  usage: Record<string, unknown> | null = { prompt_tokens: 1000, completion_tokens: 200 },
   finishReason = "stop",
 ): Response {
   const text = typeof content === "string" ? content : JSON.stringify(content);
@@ -98,6 +112,21 @@ export function chatReply(
     }),
     { status: 200 },
   );
+}
+
+// A proofreading answer: corrected sentences plus optional improvements.
+export function proofreadReply(
+  corrections: unknown[],
+  improvements: unknown[] = [],
+  usage?: Record<string, unknown> | null,
+): Response {
+  return usage === undefined
+    ? chatReply({ corrections, improvements })
+    : chatReply({ corrections, improvements }, usage);
+}
+
+export function sentBody(callIndex = 0): Record<string, unknown> & { model: string; messages: { content: string }[]; max_tokens: number } {
+  return JSON.parse(fetchMock.mock.calls[callIndex][1].body);
 }
 
 export function sentMessages(callIndex = 0): { role: string; content: string }[] {

@@ -4,6 +4,9 @@
 export interface TokenUsage {
   inputTokens: number;
   outputTokens: number;
+  // Cost the provider itself reported for the call, in micro-dollars. When
+  // present it replaces tokens times the configured price.
+  costMicros?: number;
 }
 
 // The outcome of the call is unknown: the provider may have done the work and

@@ -18,22 +18,22 @@ import type { ServerDeps } from "../deps";
 import { ConflictError, InvalidRequestError } from "../errors";
 import { newId } from "../ids";
 import { staleBefore } from "../stale";
-import {
-  ModelHttpError,
-  ModelOutputError,
-  ModelTimeoutError,
-  type TokenUsage,
-} from "../models/errors";
+import { ModelHttpError, ModelOutputError, ModelTimeoutError } from "../models/errors";
 import { estimateMaxCostMicros, type MetaChatResult } from "../models/meta";
-import { resolveProviderAccess, textModel } from "../models/access";
-import { chatWithAccess } from "../models/dispatch";
-import { textCostMicros } from "../models/prices";
+import { resolveProviderAccess, resolveTextRoute } from "../models/access";
+import { chatWithRoute } from "../models/dispatch";
+import { settledTextCostMicros, type TextPrice } from "../models/prices";
+import { PROOFREAD_ROLE } from "../models/roles";
 import { buildProofreadMessages } from "./prompt";
-import { resolveEdits } from "./edits";
-import { PROOFREAD_JSON_SCHEMA, PROOFREAD_MAX_TOKENS, parseProofreadOutput } from "./schema";
+import { resolveProofread, type ProofreadMode } from "./edits";
+import { PROOFREAD_JSON_SCHEMA, parseProofreadOutput } from "./schema";
 
 export interface ProofreadDeps extends ServerDeps {
   config?: AppConfig;
+  // "verify" is for re-checking text that was already corrected: only
+  // definite mistakes are reported, and an unchanged sentence has none.
+  // The default checks fully and also offers optional improvements.
+  mode?: ProofreadMode;
 }
 
 export async function proofread(
@@ -44,6 +44,7 @@ export async function proofread(
   const config = deps.config ?? getConfig();
   const db = deps.db ?? getDb();
   const now = deps.now ?? new Date();
+  const mode = deps.mode ?? "check";
   const access = resolveProviderAccess(learner.id, deps.providerAccess, db);
 
   const text = normalizeText(input.text);
@@ -78,13 +79,15 @@ export async function proofread(
     };
   }
 
-  const model = textModel(access, config);
-  const messages = buildProofreadMessages(sentences);
+  // Routine job: the fast tier. Throws before any reservation when it cannot
+  // be served (no key, or a model without a cost bound).
+  const route = resolveTextRoute(access, config, PROOFREAD_ROLE.tier);
+  const messages = buildProofreadMessages(sentences, mode);
   const inputChars =
     messages.reduce((total, message) => total + message.content.length, 0) +
     JSON.stringify(PROOFREAD_JSON_SCHEMA).length;
   // Throws for a model without a price: no cost bound, no call.
-  const maxCostMicros = estimateMaxCostMicros(model, inputChars, PROOFREAD_MAX_TOKENS);
+  const maxCostMicros = estimateMaxCostMicros(route.model, inputChars, PROOFREAD_ROLE.maxTokens, route.price);
 
   // Reservation and check run appear together or not at all. A reservation
   // that already exists means another attempt with this request id is in
@@ -112,14 +115,14 @@ export async function proofread(
       input.requestId,
       textHash,
       text.length,
-      access.provider,
-      model,
+      route.provider,
+      route.model,
       now.toISOString(),
     );
     return reserved;
   }, db);
 
-  const bookkeeping = { db, now, reservation, runId, learnerId: learner.id, model, maxCostMicros };
+  const bookkeeping = { db, now, reservation, runId, learnerId: learner.id, price: route.price, maxCostMicros };
   const started = performance.now();
 
   let result: MetaChatResult;
@@ -127,16 +130,15 @@ export async function proofread(
     // Deliberately not tied to the request's abort signal: if the browser
     // disconnects, the call still finishes and its result is stored, so a
     // retry with the same request id gets it without a second charge.
-    result = await chatWithAccess(
+    result = await chatWithRoute(
       {
-        model,
+        model: route.model,
         messages,
         jsonSchema: PROOFREAD_JSON_SCHEMA,
-        maxTokens: PROOFREAD_MAX_TOKENS,
-        reasoningEffort: "minimal",
-        temperature: 0,
+        maxTokens: PROOFREAD_ROLE.maxTokens,
+        temperature: PROOFREAD_ROLE.temperature,
       },
-      access,
+      route,
       config,
     );
   } catch (error) {
@@ -144,13 +146,13 @@ export async function proofread(
     throw error;
   }
 
-  const edits = parseProofreadOutput(result.content);
-  if (!edits) {
+  const output = parseProofreadOutput(result.content);
+  if (!output) {
     const error = new ModelOutputError("invalid_output", result.usage, result.latencyMs);
     closeFailedRun(bookkeeping, error, result.latencyMs);
     throw error;
   }
-  const suggestions = resolveEdits(sentences, edits);
+  const suggestions = resolveProofread(sentences, output, mode);
 
   immediate((tx) => {
     const insert = tx.prepare(
@@ -176,7 +178,7 @@ export async function proofread(
       );
     }
     updateRun(tx, runId, learner.id, "ok", result.latencyMs);
-    settle(reservation.id, actualCost(model, result.usage, maxCostMicros), { db: tx, now });
+    settle(reservation.id, settledTextCostMicros(route.price, result.usage, maxCostMicros), { db: tx, now });
   }, db);
 
   return {
@@ -193,7 +195,7 @@ interface Bookkeeping {
   reservation: Reservation;
   runId: string;
   learnerId: string;
-  model: string;
+  price: TextPrice;
   maxCostMicros: number;
 }
 
@@ -208,7 +210,7 @@ function closeFailedRun(b: Bookkeeping, error: unknown, latencyMs: number): void
       settle(b.reservation.id, 0, deps);
       updateRun(tx, b.runId, b.learnerId, "failed", latencyMs);
     } else if (error instanceof ModelOutputError) {
-      settle(b.reservation.id, actualCost(b.model, error.usage, b.maxCostMicros), deps);
+      settle(b.reservation.id, settledTextCostMicros(b.price, error.usage, b.maxCostMicros), deps);
       updateRun(tx, b.runId, b.learnerId, "failed", latencyMs);
     } else {
       // ModelTimeoutError or anything unexpected: assume the provider may have
@@ -218,10 +220,6 @@ function closeFailedRun(b: Bookkeeping, error: unknown, latencyMs: number): void
       updateRun(tx, b.runId, b.learnerId, status, latencyMs);
     }
   }, b.db);
-}
-
-function actualCost(model: string, usage: TokenUsage | null, maxCostMicros: number): number {
-  return usage ? textCostMicros(model, usage.inputTokens, usage.outputTokens) : maxCostMicros;
 }
 
 function updateRun(

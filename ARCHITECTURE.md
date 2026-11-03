@@ -6,8 +6,8 @@ gloss is one Next.js application with a SQLite database on a persistent disk. Th
 Browser                                   Server (Next.js route handlers)
 ├─ Editor + rule checker (WASM worker)    ├─ Session and invites
 │   local suggestions, never uploaded     ├─ Budget: quotas + daily spend ceiling
-├─ Practice: writing and voice            ├─ Proofread (cloud model)
-└─ History                                ├─ Practice tasks and evaluation (Meta Muse Spark)
+├─ Practice: writing and voice            ├─ Proofread, practice situations (fast tier)
+└─ History                                ├─ Evaluation of answers (smart tier: Meta Muse Spark)
                                           ├─ Speech-to-text (Meta Muse Voice Transcribe)
                                           └─ SQLite
 ```
@@ -15,7 +15,7 @@ Browser                                   Server (Next.js route handlers)
 ## Principles
 
 - **Local first, cloud on request.** Rule-based checking runs in the browser. Cloud model calls happen only when the learner presses a button.
-- **The model proposes, code decides.** Models return replacement fragments; positions, diffs and validity checks are computed by deterministic code.
+- **The model proposes, code decides.** Models return corrected sentences or replacement fragments; positions, diffs and validity checks are computed by deterministic code.
 - **Help is not knowledge.** An accepted suggestion is recorded as assisted use. Only an unprompted later attempt counts as the learner producing the expression.
 - **Every external call is paid for in advance.** A budget reservation is made before the call and settled after it.
 
@@ -94,20 +94,66 @@ Request and response schemas are in `src/shared/contracts.ts`. Errors use `{ err
 
 ## Models
 
-Each role has one configured provider and model, an explicit `max_tokens` and a price used for the cost upper bound. Chat roles reserve 4096 output tokens, including reasoning. Proofreading and task generation use minimal reasoning; evaluation uses low reasoning. The input reservation uses a conservative UTF-8 byte bound rather than an average English token ratio. There is no automatic fallback to another provider.
+Text jobs run on one of two tiers. A role (a kind of job) fixes its tier, an
+explicit `max_tokens` and a price used for the cost upper bound. Chat roles
+reserve 4096 output tokens, including reasoning. The input reservation uses a
+conservative UTF-8 byte bound rather than an average English token ratio. A
+model without a known price is never called. There is no automatic fallback to
+another provider or tier: a job whose tier cannot be served is refused.
 
-| Role | Default |
+| Tier | Hosted (operator-funded) | Visitor (BYOK, OpenRouter) | Reasoning |
+|---|---|---|---|
+| fast | OpenRouter with the operator's `OPENROUTER_API_KEY`; model or preset from `OPENROUTER_FAST_MODEL`, default `openai/gpt-oss-120b` | `openai/gpt-oss-120b` | low |
+| smart | Meta Muse Spark directly | `meta/muse-spark-1.3` | the role's setting |
+
+| Role | Tier |
 |---|---|
-| Proofreading | Meta Muse Spark |
-| Practice tasks and evaluation | Meta Muse Spark |
-| Speech-to-text | Meta Muse Voice Transcribe |
+| Proofreading | fast |
+| Practice situations | fast |
+| Evaluation of learner answers | smart |
+| Speech-to-text | Meta Muse Voice Transcribe (`meta/muse-voice-transcribe-1.0` for visitors) |
+
+The fast tier asks OpenRouter for a strict `json_schema` response, `reasoning`
+effort `low`, an explicit `max_tokens`, `provider.require_parameters` (so routing
+never lands on a provider without structured output), no provider fallbacks,
+`provider.sort: "latency"` and `usage.include`. Latency sorting matters: with
+OpenRouter's default price-balanced routing, a proofreading call took 36 to 73
+seconds on the cheapest provider and would hit the 20 second timeout; sorted by
+latency it takes about half a second and costs under a tenth of a cent. The reservation uses a price
+bound: `OPENROUTER_FAST_PRICE_IN_PER_M` and `OPENROUTER_FAST_PRICE_OUT_PER_M`, or
+the default, which is twice the highest per-token price any provider listed for
+gpt-oss-120b in November 2026. A preset hides its provider, so a preset uses the
+same bound unless both prices are set; any other model needs both prices or it
+has no bound and is refused. When the call finishes, the reservation settles at
+the `usage.cost` OpenRouter reports, or at the reported tokens times the bound's
+price when no cost is reported. A missing `OPENROUTER_API_KEY` answers
+`ai_disabled` for fast jobs; Meta is never used instead.
 
 Model output is validated against a JSON schema. Learner text is passed as data inside clear delimiters; models have no tools and cannot change the rubric.
 
-BYOK uses the same non-contributor Spark and Voice models through OpenRouter.
-The adapters request providers that deny data collection; this routing preference
-is not a claim of independently verified zero retention. There is no fallback to
-operator-funded access when a visitor request fails.
+BYOK uses OpenRouter with the visitor's key for both tiers. The adapters request
+providers that deny data collection; this routing preference is not a claim of
+independently verified zero retention. There is no fallback to operator-funded
+access when a visitor request fails.
+
+## Proofreading
+
+The model does not return independent fragment edits. For each sentence with a
+definite mistake it returns the whole corrected sentence, with every fix applied
+together, and a short note per fix. Optional style and expression suggestions
+travel separately as `improvements` and are never mixed into the correction.
+
+The server compares each original sentence with its corrected version word by
+word (deterministic code in `src/server/proofread/diff.ts`), merges differences
+that depend on each other (at most one word between them), and turns each
+difference into one `error` suggestion. A note labels a difference by the words it
+shares with it. Applying every error suggestion of a sentence, in any order,
+gives exactly the corrected sentence, so checking the corrected text again finds
+nothing new. A sentence is kept with all of its fixes or none. Improvements are
+located as exact fragments of the original and dropped when they overlap an error
+fix. A "verify" mode (a server option for re-checking corrected text; no API route
+uses it yet) reports errors only: a sentence that comes back unchanged has no
+suggestions.
 
 ## Word pronunciation
 

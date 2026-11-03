@@ -18,7 +18,7 @@ import {
   ModelTimeoutError,
 } from "../models/errors";
 import { estimateMaxCostMicros } from "../models/meta";
-import { resolveProviderAccess, textModel } from "../models/access";
+import { resolveProviderAccess, resolveTextRoute } from "../models/access";
 import { runReservedChat } from "../models/reserved-chat";
 import { EVALUATE_ATTEMPT_ROLE } from "../models/roles";
 import {
@@ -92,7 +92,8 @@ export async function submitAttempt(
   }
   assertSubmittable(attempt, task);
 
-  const model = textModel(access, config);
+  // The smart tier judges the learner's answer.
+  const route = resolveTextRoute(access, config, EVALUATE_ATTEMPT_ROLE.tier);
   const targetText = String(expression.text);
   const transcriptEdited =
     task.kind === "voice" &&
@@ -108,7 +109,7 @@ export async function submitAttempt(
     messages.reduce((total, m) => total + m.content.length, 0) +
     JSON.stringify(EVALUATION_JSON_SCHEMA).length;
   // Throws for a model without a price: no cost bound, no call.
-  const maxCostMicros = estimateMaxCostMicros(model, inputChars, EVALUATE_ATTEMPT_ROLE.maxTokens);
+  const maxCostMicros = estimateMaxCostMicros(route.model, inputChars, EVALUATE_ATTEMPT_ROLE.maxTokens, route.price);
 
   // Reservation and the "evaluating" lock appear together or not at all; a
   // second submit while this one runs gets a conflict. A failed attempt may be
@@ -154,8 +155,8 @@ export async function submitAttempt(
       config,
       reservation,
       providerAccess: access,
+      tier: EVALUATE_ATTEMPT_ROLE.tier,
       chat: {
-        model,
         messages,
         jsonSchema: EVALUATION_JSON_SCHEMA,
         maxTokens: EVALUATE_ATTEMPT_ROLE.maxTokens,
@@ -226,7 +227,7 @@ export async function submitAttempt(
       flag(raw.form_correct),
       message,
       correction,
-      model,
+      route.model,
       RUBRIC_VERSION,
       nowIso,
     );

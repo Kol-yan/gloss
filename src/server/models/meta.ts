@@ -10,7 +10,7 @@ import {
   ModelTimeoutError,
   type TokenUsage,
 } from "./errors";
-import { textCostMicros, textPrice } from "./prices";
+import { textCostMicros, textPrice, type TextPrice } from "./prices";
 
 export const MIN_MAX_TOKENS = 2048;
 export const DEFAULT_TIMEOUT_MS = 20_000;
@@ -50,14 +50,16 @@ export interface MetaChatOptions {
 }
 
 // Upper bound on what one call can cost, in micro-dollars. Throws
-// UnknownModelError for a model without a price.
+// UnknownModelError for a model without a price. A route passes its own price
+// when the model is configured rather than listed.
 export function estimateMaxCostMicros(
   model: string,
   inputChars: number,
   maxTokens: number,
+  price?: TextPrice,
 ): number {
   const inputTokens = Math.ceil(inputChars * MAX_BYTES_PER_CODE_UNIT + INPUT_OVERHEAD_TOKENS);
-  return textCostMicros(model, inputTokens, maxTokens);
+  return textCostMicros(model, inputTokens, maxTokens, price);
 }
 
 export async function metaChat(

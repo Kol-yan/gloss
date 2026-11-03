@@ -6,7 +6,7 @@ gloss is one Next.js container with a SQLite database on a mounted folder. This 
 
 - A Linux host with Docker and Compose, about 1 GB of free memory.
 - HTTPS in front of the container (a reverse proxy or a tunnel). The session cookie is `Secure`, so browsers only keep it over HTTPS (or on `localhost`).
-- A Meta API key for the cloud features. Without one the editor still runs its local checks, and cloud features report that they are switched off.
+- A Meta API key (evaluation of practice answers and speech-to-text) and an OpenRouter API key (proofreading and practice situations). Without a key the features that need it report that they are switched off, and the editor still runs its local checks.
 
 ## 1. Configure
 
@@ -18,7 +18,10 @@ cp .env.example .env.production
 
 | Variable | Meaning |
 |---|---|
-| `META_API_KEY` | API key for proofreading, practice and speech-to-text. |
+| `META_API_KEY` | Meta API key for the smart tier (evaluation of practice answers) and speech-to-text. |
+| `OPENROUTER_API_KEY` | OpenRouter API key for the fast tier (proofreading and practice situations), funded by you. Without it those jobs answer that cloud checking is off; Meta is never used instead. |
+| `OPENROUTER_FAST_MODEL` | Optional. OpenRouter model or preset for the fast tier; default `openai/gpt-oss-120b`. The older name `OPENROUTER_PROOFREAD_MODEL` is read when this one is empty. |
+| `OPENROUTER_FAST_PRICE_IN_PER_M`, `OPENROUTER_FAST_PRICE_OUT_PER_M` | Optional. USD per million input and output tokens that bound and settle the fast model's cost. The defaults are twice the highest price listed for gpt-oss-120b; a preset uses them too. Set both for any other model, or it is refused. |
 | `GLOSSY_PUBLIC_URL` | The address people open, for example `https://gloss.li`. Used for invite links and to accept form posts from your own site only. |
 | `DAILY_BUDGET_USD` | Hard spending ceiling for the whole instance per UTC day. |
 | `AI_ENABLED` | `false` switches every cloud call off. |
@@ -71,7 +74,7 @@ docker-compose exec gloss node scripts/ai-switch.mjs off      # or: on, status
 
 The second is `AI_ENABLED` in `.env.production`; change it and run `docker-compose up -d`.
 
-Every cloud call reserves its worst-case cost before it is sent, and the total for the UTC day can never pass `DAILY_BUDGET_USD`. A call whose outcome is unknown (a timeout, for instance) keeps counting at its worst case. When the ceiling is reached, cloud features report it and the editor keeps working with local checks. `ai-switch.mjs status` shows today's spending. To change the ceiling, edit `DAILY_BUDGET_USD` and run `docker-compose up -d`.
+Every cloud call reserves its worst-case cost before it is sent (for the fast tier, from the price variables above), and the total for the UTC day can never pass `DAILY_BUDGET_USD`. A call whose outcome is unknown (a timeout, for instance) keeps counting at its worst case. When the ceiling is reached, cloud features report it and the editor keeps working with local checks. `ai-switch.mjs status` shows today's spending. To change the ceiling, edit `DAILY_BUDGET_USD` and run `docker-compose up -d`.
 
 ## 5. Back up
 

@@ -22,8 +22,10 @@ Open the printed invite link.
 - Rule-based checking runs in your browser and never leaves your device.
 - Cloud checking, practice tasks, feedback and speech-to-text run on the server only when you ask for them, within daily quotas.
 
-Invited learners use hosted Meta models. Other visitors can use their own
-OpenRouter key for the same models. The key is stored in the browser and passes
+Invited learners use hosted models: an open-weight model through the operator's
+OpenRouter account for proofreading and practice situations, and Meta Muse Spark
+for judging answers. Other visitors can use their own OpenRouter key for
+equivalent models. The key is stored in the browser and passes
 transiently through the server to OpenRouter; the application does not store or
 log it. You can forget the key without deleting your workspace.
 
