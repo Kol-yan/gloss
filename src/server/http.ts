@@ -85,7 +85,12 @@ export function errorResponse(error: unknown): Response {
     logUnexpected(error);
     return jsonError("ai_disabled");
   }
-  if (error instanceof ModelTimeoutError || error instanceof ModelHttpError) {
+  if (error instanceof ModelTimeoutError) {
+    console.warn("[gloss] model request incomplete:", error.reason, error.latencyMs);
+    return jsonError("model_unavailable", 503);
+  }
+  if (error instanceof ModelHttpError) {
+    console.warn("[gloss] model provider status:", error.status);
     return jsonError("model_unavailable", 503);
   }
   if (error instanceof ModelOutputError) {

@@ -5,7 +5,7 @@ import { reserve } from "../../../src/server/budget";
 import { loadConfig } from "../../../src/server/config";
 import { openDatabase } from "../../../src/server/db";
 
-const [dbPath, learnerId, attempts, cost, budgetUsd, tag] = process.argv.slice(2);
+const [dbPath, learnerId, attempts, cost, budgetUsd, tag, timestamp] = process.argv.slice(2);
 
 const db = openDatabase(dbPath);
 const config = loadConfig({ DAILY_BUDGET_USD: budgetUsd });
@@ -21,7 +21,7 @@ for (let i = 0; i < Number(attempts); i++) {
         units: 1,
         maxCostMicros: Number(cost),
       },
-      { db, config },
+      { db, config, now: new Date(timestamp) },
     );
     counts.ok++;
   } catch (error) {

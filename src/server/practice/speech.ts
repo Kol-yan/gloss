@@ -102,7 +102,7 @@ export async function transcribeAttempt(
   // match what was measured, which should not happen with a canonical file.
   if (result.durationMs !== null && Math.ceil(result.durationMs / 1000) > units) {
     console.warn(
-      `[glossy] speech-to-text reported ${result.durationMs} ms for ${units} reserved seconds`,
+      `[gloss] speech-to-text reported ${result.durationMs} ms for ${units} reserved seconds`,
     );
   }
   immediate((tx) => {

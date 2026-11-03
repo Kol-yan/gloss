@@ -11,7 +11,7 @@ export async function GET() {
     getDb().prepare("SELECT 1").get();
     return jsonOk({ ok: true });
   } catch (error) {
-    console.error(`[glossy] health check failed: ${error instanceof Error ? error.name : "error"}`);
+    console.error(`[gloss] health check failed: ${error instanceof Error ? error.name : "error"}`);
     return jsonOk({ ok: false }, 503);
   }
 }

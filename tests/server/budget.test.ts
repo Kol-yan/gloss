@@ -149,7 +149,7 @@ describe("reserve", () => {
       new Promise<{ ok: number; budget: number; quota: number }>((resolve, reject) => {
         const child = spawn(
           process.execPath,
-          ["--import", "tsx", worker, temp.path, learner, "40", "10000", "1", tag],
+          ["--import", "tsx", worker, temp.path, learner, "40", "10000", "1", tag, T0.toISOString()],
           { cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"] },
         );
         let out = "";

@@ -78,6 +78,16 @@ describe("errorResponse", () => {
     expect(body).not.toContain("QuotaExceededError");
   });
 
+  it("logs only safe provider status or timeout metadata", async () => {
+    const log = vi.spyOn(console, "warn").mockImplementation(() => {});
+    errorResponse(new ModelHttpError(429, 80));
+    errorResponse(new ModelTimeoutError("timeout", 20_000));
+    expect(log.mock.calls).toEqual([
+      ["[gloss] model provider status:", 429],
+      ["[gloss] model request incomplete:", "timeout", 20_000],
+    ]);
+  });
+
   it("answers unexpected errors with a generic 500 and logs without the full text", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     const response = errorResponse(new Error("provider said: key sk-123 invalid"));

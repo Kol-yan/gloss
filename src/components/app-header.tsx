@@ -14,7 +14,7 @@ export function AppHeader() {
   const pathname = usePathname();
 
   return (
-    <header className="shrink-0 border-b border-line bg-paper/90 backdrop-blur">
+    <header className="relative z-40 shrink-0 border-b border-line bg-paper/90 backdrop-blur">
       <div className="mx-auto flex min-h-13 w-full max-w-6xl flex-wrap items-center justify-between gap-1 px-4">
         <Link href="/" className="text-lg font-bold tracking-tight text-ink" aria-label="gloss, go to the editor">
           gloss
