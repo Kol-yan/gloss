@@ -10,6 +10,11 @@ export const PROOFREAD_ROLE = { tier: "fast", maxTokens: 4096, temperature: 0 } 
   maxTokens: number;
   temperature: number;
 };
+export const DETECT_ROLE = { tier: "fast", maxTokens: 2048, temperature: 0 } as const satisfies {
+  tier: ModelTier;
+  maxTokens: number;
+  temperature: number;
+};
 export const BUILD_PRACTICE_ROLE = { tier: "fast", maxTokens: 4096, temperature: 0.7 } as const satisfies {
   tier: ModelTier;
   maxTokens: number;

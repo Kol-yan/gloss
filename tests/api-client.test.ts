@@ -7,7 +7,7 @@ const ME: MeResponse = {
   learner: { id: "l1", displayName: "Alex" },
   accessMode: "hosted",
   aiEnabled: true,
-  quotas: { proofread: { used: 1, limit: 20 }, evaluate: { used: 0, limit: 30 }, asrSeconds: { used: 0, limit: 600 } },
+  quotas: { proofread: { used: 1, limit: 20 }, detect: { used: 0, limit: 20 }, evaluate: { used: 0, limit: 30 }, asrSeconds: { used: 0, limit: 600 } },
 };
 const VISITOR_KEY = "example-openrouter-visitor-key";
 let stored: Map<string, string>;

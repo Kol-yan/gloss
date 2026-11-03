@@ -14,10 +14,12 @@ Browser                                   Server (Next.js route handlers)
 
 ## Principles
 
-- **Local first, cloud on request.** Rule-based checking runs in the browser. Cloud model calls happen only when the learner presses a button.
+- **Local first, cloud on request.** Stage 0 rule-based checking runs in the browser. The server supports detection of changed sentences after a typing pause; generation remains an explicit action.
 - **The model proposes, code decides.** Models return corrected sentences or replacement fragments; positions, diffs and validity checks are computed by deterministic code.
 - **Help is not knowledge.** An accepted suggestion is recorded as assisted use. Only an unprompted later attempt counts as the learner producing the expression.
 - **Every external call is paid for in advance.** A budget reservation is made before the call and settled after it.
+
+The detector API returns category probabilities for changed sentences and creates no suggestion. An explicit generator action requests a whole-sentence correction; the existing deterministic diff then builds the suggestions.
 
 ## Text and ranges
 
@@ -43,7 +45,7 @@ object, and enrollment is rate limited.
 
 Two independent limits protect the operator's API credits:
 
-1. **Per-learner daily quotas** by kind: `proofread` and `evaluate` (operations) and `asrSeconds`. Limits come from the learner's quota profile.
+1. **Per-learner daily quotas** by kind: `proofread`, `detect` and `evaluate` (operations) and `asrSeconds`. Detector and generator operations count separately; each profile's `detect` limit matches its existing `proofread` limit.
 2. **A daily spend ceiling** for the whole instance (`DAILY_BUDGET_USD`).
 
 Before a model call, `reserve()` runs in one `BEGIN IMMEDIATE` transaction: it checks the kill switch, the learner quota and `reserved + actual + maxCost <= ceiling`, then inserts a reservation. `maxCost` is an upper bound from the input size, the role's `max_tokens` and the configured price. After the call, `settle()` records the actual cost from reported usage. If the outcome is unknown (timeout, dropped connection), the reservation stays counted, because the provider may have done the work. Retries are new reservations.
@@ -88,16 +90,20 @@ Money is stored in micro-dollars (integers). Dates are UTC ISO strings; "today" 
 | `POST /join/{token}/continue` | Redeem invite, start session |
 | `GET /api/health` | Liveness: the database opens and migrations are applied |
 | `GET /api/me` | Learner, quotas, whether cloud features are available |
+| `POST /api/detect` | Classify changed sentences for correction, clarity and word choice |
 | `POST /api/proofread` | Cloud proofreading of the current text |
 | `POST /api/suggestions/{id}` | Record accepted, rejected or stale |
 
 Request and response schemas are in `src/shared/contracts.ts`. Errors use `{ error: { code, message } }` with a short learner-safe message.
 
+`POST /api/detect` accepts 1–8 hashed sentences with at most 6,000 UTF-16 text units total and optional local-rule ranges. Its response contains probabilities only; `detect_runs` retains a fingerprint and decisions, not sentence text. Detector calls use their own quota, equal to the profile's existing proofreading limit. `/api/me` reports hosted AI disabled when the owner OpenRouter key is missing or malformed; BYOK availability still uses the visitor's browser-held key and the global kill switch.
+
 ## Models
 
 Text jobs run on one of two tiers. A role (a kind of job) fixes its tier, an
 explicit `max_tokens` and a price used for the cost upper bound. Chat roles
-reserve 4096 output tokens, including reasoning. The input reservation uses a
+reserve 4096 output tokens, including reasoning; the detector role reserves
+2048. The input reservation uses a
 conservative UTF-8 byte bound rather than an average English token ratio. A
 model without a known price is never called. There is no automatic fallback to
 another provider or tier: a job whose tier cannot be served is refused.
@@ -109,6 +115,7 @@ another provider or tier: a job whose tier cannot be served is refused.
 
 | Role | Tier |
 |---|---|
+| Sentence detection | fast |
 | Proofreading | fast |
 | Practice situations | fast |
 | Evaluation of learner answers | smart |

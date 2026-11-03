@@ -99,8 +99,8 @@ describe("fast-tier configuration", () => {
 
 describe("quota profiles", () => {
   it("matches the documented limits", () => {
-    expect(QUOTA_PROFILES.pilot).toEqual({ proofread: 20, evaluate: 12, asrSeconds: 180 });
-    expect(QUOTA_PROFILES.judge).toEqual({ proofread: 30, evaluate: 30, asrSeconds: 300 });
-    expect(quotaLimits("owner")).toEqual({ proofread: 200, evaluate: 100, asrSeconds: 1800 });
+    expect(QUOTA_PROFILES.pilot).toEqual({ proofread: 20, detect: 20, evaluate: 12, asrSeconds: 180 });
+    expect(QUOTA_PROFILES.judge).toEqual({ proofread: 30, detect: 30, evaluate: 30, asrSeconds: 300 });
+    expect(quotaLimits("owner")).toEqual({ proofread: 200, detect: 200, evaluate: 100, asrSeconds: 1800 });
   });
 });

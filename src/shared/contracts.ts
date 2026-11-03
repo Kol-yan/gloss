@@ -5,6 +5,9 @@ import { z } from "zod";
 import { MAX_IPA_LENGTH } from "@/lib/pronunciation";
 
 export const MAX_TEXT_LENGTH = 6000;
+export const MAX_DETECT_SENTENCES = 8;
+export const MAX_DETECT_TOTAL_TEXT_LENGTH = 6000;
+export const MAX_DETECT_LOCAL_RANGES = 32;
 
 // "error" must be fixed, "style" is optional polish, "expression" is a
 // personal vocabulary suggestion. A correct sentence never gets an "error".
@@ -45,7 +48,26 @@ export const ProofreadRequest = z.object({
 });
 export type ProofreadRequest = z.infer<typeof ProofreadRequest>;
 
-export const QuotaKind = z.enum(["proofread", "evaluate", "asrSeconds"]);
+export const DetectLocalRange = z.object({
+  start: z.number().int().nonnegative(),
+  end: z.number().int().positive(),
+}).strict().refine((range) => range.end > range.start);
+export type DetectLocalRange = z.infer<typeof DetectLocalRange>;
+
+export const DetectSentenceRequest = z.object({
+  hash: z.string().regex(/^[a-f0-9]{64}$/),
+  text: z.string().min(1),
+  localRanges: z.array(DetectLocalRange).max(MAX_DETECT_LOCAL_RANGES).optional(),
+}).strict();
+export type DetectSentenceRequest = z.infer<typeof DetectSentenceRequest>;
+
+export const DetectRequest = z.object({
+  requestId: z.uuid(),
+  sentences: z.array(DetectSentenceRequest).min(1).max(MAX_DETECT_SENTENCES),
+}).strict();
+export type DetectRequest = z.infer<typeof DetectRequest>;
+
+export const QuotaKind = z.enum(["proofread", "detect", "evaluate", "asrSeconds"]);
 export type QuotaKind = z.infer<typeof QuotaKind>;
 
 export const QuotaState = z.object({
@@ -62,6 +84,21 @@ export const ProofreadResponse = z.object({
   quota: QuotaState,
 });
 export type ProofreadResponse = z.infer<typeof ProofreadResponse>;
+
+export const DetectSentenceResult = z.object({
+  hash: z.string().regex(/^[a-f0-9]{64}$/),
+  needs_correction: z.number().min(0).max(1),
+  needs_clarity: z.number().min(0).max(1),
+  needs_word_choice: z.number().min(0).max(1),
+}).strict();
+export type DetectSentenceResult = z.infer<typeof DetectSentenceResult>;
+
+export const DetectResponse = z.object({
+  requestId: z.uuid(),
+  sentences: z.array(DetectSentenceResult).min(1).max(MAX_DETECT_SENTENCES),
+  quota: QuotaState,
+}).strict();
+export type DetectResponse = z.infer<typeof DetectResponse>;
 
 export const SuggestionDecision = z.enum(["accepted", "rejected", "stale"]);
 export type SuggestionDecision = z.infer<typeof SuggestionDecision>;
@@ -83,8 +120,8 @@ export type SuggestionDecisionResponse = z.infer<typeof SuggestionDecisionRespon
 export const MeResponse = z.object({
   learner: z.object({ id: z.string(), displayName: z.string() }),
   accessMode: z.enum(["hosted", "byok"]),
-  // False when the kill switch is off or today's budget is spent. Local
-  // checking keeps working either way.
+  // False when the kill switch is off, the hosted budget is spent or its
+  // fast-tier key is unavailable. Local checking keeps working either way.
   aiEnabled: z.boolean(),
   quotas: z.record(QuotaKind, QuotaState),
 });

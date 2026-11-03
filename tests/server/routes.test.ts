@@ -30,12 +30,13 @@ const saved: Record<string, string | undefined> = {};
 
 beforeAll(() => {
   dir = mkdtempSync(path.join(tmpdir(), "glossy-routes-"));
-  for (const key of ["GLOSSY_DATABASE_PATH", "DAILY_BUDGET_USD", "AI_ENABLED"]) {
+  for (const key of ["GLOSSY_DATABASE_PATH", "DAILY_BUDGET_USD", "AI_ENABLED", "OPENROUTER_API_KEY"]) {
     saved[key] = process.env[key];
   }
   process.env.GLOSSY_DATABASE_PATH = path.join(dir, "routes.db");
   process.env.DAILY_BUDGET_USD = "1";
   process.env.AI_ENABLED = "true";
+  process.env.OPENROUTER_API_KEY = "sk-or-v1-" + "a".repeat(16);
 });
 
 afterAll(() => {
@@ -49,6 +50,7 @@ afterAll(() => {
 
 beforeEach(() => {
   sessionCookie = undefined;
+  getDb().prepare("DELETE FROM usage_reservations").run();
   setAiEnabled(true);
 });
 
@@ -89,9 +91,14 @@ describe("GET /api/me", () => {
     expect(body.aiEnabled).toBe(true);
     expect(body.quotas).toEqual({
       proofread: { used: 0, limit: 20 },
+      detect: { used: 0, limit: 20 },
       evaluate: { used: 0, limit: 12 },
       asrSeconds: { used: 0, limit: 180 },
     });
+
+    reserve({ learnerId: body.learner.id, kind: "detect", requestId: "detect-1", units: 1, maxCostMicros: 1000 });
+    body = MeResponse.parse(await (await me()).json());
+    expect(body.quotas.detect).toEqual({ used: 1, limit: 20 });
 
     reserve({
       learnerId: body.learner.id,
@@ -125,5 +132,22 @@ describe("GET /api/me", () => {
       maxCostMicros: 1_000_000 - Number(spent?.n ?? 0),
     });
     expect(MeResponse.parse(await (await me()).json()).aiEnabled).toBe(false);
+  });
+
+  it("disables hosted AI when the owner OpenRouter key is missing or invalid", async () => {
+    const joined = await joinRequest(newInvite(1, "pilot"));
+    sessionCookie = joined.cookies.get("glossy_session")?.value;
+    const validKey = process.env.OPENROUTER_API_KEY;
+    try {
+      delete process.env.OPENROUTER_API_KEY;
+      expect(MeResponse.parse(await (await me()).json()).aiEnabled).toBe(false);
+      process.env.OPENROUTER_API_KEY = "invalid";
+      expect(MeResponse.parse(await (await me()).json()).aiEnabled).toBe(false);
+      process.env.OPENROUTER_API_KEY = validKey!;
+      expect(MeResponse.parse(await (await me()).json()).aiEnabled).toBe(true);
+    } finally {
+      if (validKey === undefined) delete process.env.OPENROUTER_API_KEY;
+      else process.env.OPENROUTER_API_KEY = validKey;
+    }
   });
 });

@@ -56,7 +56,7 @@ export interface ReserveInput {
   learnerId: string;
   kind: QuotaKind;
   requestId: string;
-  // Operations for proofread/evaluate, whole seconds for asrSeconds.
+  // Operations for proofread/detect/evaluate, whole seconds for asrSeconds.
   units: number;
   // Upper bound on the call's cost in micro-dollars.
   maxCostMicros: number;
@@ -256,6 +256,10 @@ export function getQuotaUsage(
     proofread: {
       used: unitsUsed(db, learner.id, "proofread", start, end),
       limit: limits.proofread,
+    },
+    detect: {
+      used: unitsUsed(db, learner.id, "detect", start, end),
+      limit: limits.detect,
     },
     evaluate: {
       used: unitsUsed(db, learner.id, "evaluate", start, end),

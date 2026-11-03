@@ -93,6 +93,16 @@ describe("public BYOK access", () => {
   it("keeps BYOK available when the operator budget is spent, while honoring the kill switch", async () => {
     await enroll();
     process.env.DAILY_BUDGET_USD = "0";
+    const ownerKey = process.env.OPENROUTER_API_KEY;
+    try {
+      delete process.env.OPENROUTER_API_KEY;
+      expect(MeResponse.parse(await (await meRoute()).json()).aiEnabled).toBe(true);
+      process.env.OPENROUTER_API_KEY = "invalid";
+      expect(MeResponse.parse(await (await meRoute()).json()).aiEnabled).toBe(true);
+    } finally {
+      if (ownerKey === undefined) delete process.env.OPENROUTER_API_KEY;
+      else process.env.OPENROUTER_API_KEY = ownerKey;
+    }
     expect(MeResponse.parse(await (await meRoute()).json()).aiEnabled).toBe(true);
     setAiEnabled(false);
     expect(MeResponse.parse(await (await meRoute()).json()).aiEnabled).toBe(false);

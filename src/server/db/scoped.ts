@@ -5,6 +5,7 @@ import { getDb } from "./connection";
 // LearnerScope so the learner filter cannot be forgotten.
 export const LEARNER_OWNED_TABLES = [
   "check_runs",
+  "detect_runs",
   "suggestions",
   "usage_reservations",
   "sessions",
