@@ -1,9 +1,9 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
-import { closeDb, getDb, immediate, migrate, openDatabase } from "@/server/db";
+import { closeDb, defaultMigrationsDir, getDb, immediate, migrate, openDatabase } from "@/server/db";
 import { createTempDb, type TempDb } from "./helpers/db";
 
 let temp: TempDb | undefined;
@@ -51,15 +51,66 @@ describe("openDatabase", () => {
 
   it("applies migrations once and is idempotent on reopen", () => {
     temp = createTempDb();
-    const applied = temp.db.prepare("SELECT name FROM schema_migrations").all();
-    expect(applied.map((row) => row.name)).toEqual([
+    const applied = temp.db.prepare("SELECT name FROM schema_migrations ORDER BY rowid").all();
+    const names = applied.map((row) => row.name);
+    // The original schema is unchanged; later migrations only add to it.
+    expect(names.slice(0, 6)).toEqual([
       "0001_init.sql", "0002_practice.sql", "0003_stale_work.sql",
       "0004_task_generation_claims.sql", "0005_byok_funding.sql",
       "0006_word_pronunciation.sql",
     ]);
+    expect(names.length).toBeGreaterThan(6);
     const again = openDatabase(temp.path);
     expect(migrate(again)).toEqual([]);
     again.close();
+  });
+
+  it("adds the routing audit columns on a fresh database", () => {
+    temp = createTempDb();
+    const columns = temp.db.prepare("PRAGMA table_info(check_runs)").all();
+    const types = Object.fromEntries(columns.map((row) => [String(row.name), String(row.type)]));
+    expect(types.serving_provider).toBe("TEXT");
+    // Money stays in whole micro-dollars.
+    expect(types.settled_cost_micros).toBe("INTEGER");
+  });
+
+  it("upgrades a pre-existing database and keeps its check runs", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "glossy-upgrade-"));
+    const oldMigrations = path.join(dir, "m");
+    mkdirSync(oldMigrations);
+    const source = defaultMigrationsDir();
+    // Build a database that predates the routing audit migration, with data.
+    for (const file of readdirSync(source).filter((name) => /^000[1-6]_.*\.sql$/.test(name))) {
+      copyFileSync(path.join(source, file), path.join(oldMigrations, file));
+    }
+    const file = path.join(dir, "existing.db");
+    const db = new DatabaseSync(file);
+    try {
+      migrate(db, oldMigrations);
+      const now = new Date().toISOString();
+      db.prepare("INSERT INTO learners (id, display_name, quota_profile, created_at) VALUES ('old', 'Old', 'pilot', ?)").run(now);
+      db.prepare(
+        `INSERT INTO check_runs (id, learner_id, request_id, text_hash, text_length, provider, model, status, created_at)
+         VALUES ('run-old', 'old', 'req-old', 'h', 5, 'openrouter', 'openai/gpt-oss-120b', 'ok', ?)`,
+      ).run(now);
+
+      const applied = migrate(db, source);
+      expect(applied.length).toBeGreaterThan(0);
+
+      const row = db.prepare("SELECT * FROM check_runs WHERE id = 'run-old'").get() as Record<string, unknown>;
+      expect(row).toMatchObject({
+        id: "run-old",
+        provider: "openrouter",
+        model: "openai/gpt-oss-120b",
+        status: "ok",
+      });
+      // Auditing was not available when the row was written.
+      expect(row.serving_provider).toBeNull();
+      expect(row.settled_cost_micros).toBeNull();
+    } finally {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

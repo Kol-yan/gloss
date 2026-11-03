@@ -160,11 +160,21 @@ describe("public BYOK access", () => {
       expect(init.headers.Authorization).toBe(`Bearer ${visitorKey}`);
     }
     // Visitors get the fast model for proofreading and situations, Muse Spark for evaluation.
-    const options = { max_tokens: 4096, usage: { include: true },
-      provider: { allow_fallbacks: false, require_parameters: true, data_collection: "deny" } };
-    expect(sentBody(0)).toMatchObject({ model: "openai/gpt-oss-120b", reasoning: { effort: "low" }, ...options });
-    expect(sentBody(1)).toMatchObject({ model: "openai/gpt-oss-120b", reasoning: { effort: "low" }, ...options });
-    expect(sentBody(2)).toMatchObject({ model: "meta/muse-spark-1.3", reasoning_effort: "low", ...options });
+    const options = { max_tokens: 4096, usage: { include: true } };
+    const fastProvider = {
+      require_parameters: true,
+      allow_fallbacks: true,
+      data_collection: "deny",
+      sort: "throughput",
+      max_price: { prompt: 0.16, completion: 0.65 },
+    };
+    const smartProvider = { require_parameters: true, data_collection: "deny" };
+    expect(sentBody(0)).toMatchObject({ model: "openai/gpt-oss-120b", reasoning: { effort: "low" },
+      ...options, provider: fastProvider });
+    expect(sentBody(1)).toMatchObject({ model: "openai/gpt-oss-120b", reasoning: { effort: "low" },
+      ...options, provider: fastProvider });
+    expect(sentBody(2)).toMatchObject({ model: "meta/muse-spark-1.3", reasoning_effort: "low",
+      ...options, provider: smartProvider });
     expect(sentBody(2)).not.toHaveProperty("reasoning");
     const form = fetchMock.mock.calls[3][1].body as FormData;
     expect(form.get("model")).toBe("meta/muse-voice-transcribe-1.0");

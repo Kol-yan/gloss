@@ -128,8 +128,14 @@ describe("routing of operator-funded jobs", () => {
       temperature: 0,
       reasoning: { effort: "low" },
       usage: { include: true },
-      // The quickest capable provider: price-balanced routing picked one that took over a minute.
-      provider: { require_parameters: true, allow_fallbacks: false, data_collection: "deny", sort: "latency" },
+      // Plain model IDs use defaults aligned with the owner's OpenRouter preset.
+      provider: {
+        require_parameters: true,
+        allow_fallbacks: true,
+        data_collection: "deny",
+        sort: "throughput",
+        max_price: { prompt: 0.16, completion: 0.65 },
+      },
       response_format: { type: "json_schema", json_schema: { name: "proofread_sentences", strict: true } },
     });
     expect(sentBody(0)).not.toHaveProperty("reasoning_effort");
@@ -389,8 +395,8 @@ describe("routing of visitor-funded (BYOK) jobs", () => {
       provider: { require_parameters: true } });
     expect(sentBody(1)).toMatchObject({ model: "openai/gpt-oss-120b", reasoning: { effort: "low" } });
     expect(sentBody(2)).toMatchObject({ model: "meta/muse-spark-1.3", reasoning_effort: "low" });
-    // Latency sorting is for the fast tier only.
-    expect(sentBody(0).provider).toMatchObject({ sort: "latency" });
+    // The fast tier uses throughput defaults; smart model routing stays independent.
+    expect(sentBody(0).provider).toMatchObject({ sort: "throughput" });
     expect(sentBody(2).provider).not.toHaveProperty("sort");
     expect(JSON.stringify(fetchMock.mock.calls)).not.toContain(OWNER_OPENROUTER_KEY);
   });

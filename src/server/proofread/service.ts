@@ -148,11 +148,12 @@ export async function proofread(
 
   const output = parseProofreadOutput(result.content);
   if (!output) {
-    const error = new ModelOutputError("invalid_output", result.usage, result.latencyMs);
+    const error = new ModelOutputError("invalid_output", result.usage, result.latencyMs, result.servingProvider);
     closeFailedRun(bookkeeping, error, result.latencyMs);
     throw error;
   }
   const suggestions = resolveProofread(sentences, output, mode);
+  const settledCostMicros = settledTextCostMicros(route.price, result.usage, maxCostMicros);
 
   immediate((tx) => {
     const insert = tx.prepare(
@@ -177,9 +178,16 @@ export async function proofread(
         s.ipa ?? null,
       );
     }
-    updateRun(tx, runId, learner.id, "ok", result.latencyMs);
-    settle(reservation.id, settledTextCostMicros(route.price, result.usage, maxCostMicros), { db: tx, now });
+    updateRun(tx, runId, learner.id, "ok", result.latencyMs, result.servingProvider, settledCostMicros);
+    settle(reservation.id, settledCostMicros, { db: tx, now });
   }, db);
+
+  console.info("[gloss] proofread served", JSON.stringify({
+    provider: result.servingProvider ?? "unknown",
+    model: route.model,
+    latencyMs: result.latencyMs,
+    settledCostMicros,
+  }));
 
   return {
     checkRunId: runId,
@@ -208,10 +216,11 @@ function closeFailedRun(b: Bookkeeping, error: unknown, latencyMs: number): void
     const deps = { db: tx, now: b.now };
     if (error instanceof ModelHttpError) {
       settle(b.reservation.id, 0, deps);
-      updateRun(tx, b.runId, b.learnerId, "failed", latencyMs);
+      updateRun(tx, b.runId, b.learnerId, "failed", latencyMs, undefined, 0);
     } else if (error instanceof ModelOutputError) {
-      settle(b.reservation.id, settledTextCostMicros(b.price, error.usage, b.maxCostMicros), deps);
-      updateRun(tx, b.runId, b.learnerId, "failed", latencyMs);
+      const settledCostMicros = settledTextCostMicros(b.price, error.usage, b.maxCostMicros);
+      settle(b.reservation.id, settledCostMicros, deps);
+      updateRun(tx, b.runId, b.learnerId, "failed", latencyMs, error.servingProvider, settledCostMicros);
     } else {
       // ModelTimeoutError or anything unexpected: assume the provider may have
       // done the work.
@@ -228,10 +237,13 @@ function updateRun(
   learnerId: string,
   status: "ok" | "failed" | "unknown",
   latencyMs: number,
+  servingProvider?: string,
+  settledCostMicros?: number,
 ): void {
   db.prepare(
-    "UPDATE check_runs SET status = ?, latency_ms = ? WHERE id = ? AND learner_id = ?",
-  ).run(status, latencyMs, runId, learnerId);
+    `UPDATE check_runs SET status = ?, latency_ms = ?, serving_provider = ?, settled_cost_micros = ?
+     WHERE id = ? AND learner_id = ?`,
+  ).run(status, latencyMs, servingProvider ?? null, settledCostMicros ?? null, runId, learnerId);
 }
 
 function storedSuggestions(db: DatabaseSync, learnerId: string, runId: string): Suggestion[] {

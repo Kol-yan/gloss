@@ -43,6 +43,7 @@ describe("GET /api/health", () => {
       "0004_task_generation_claims.sql",
       "0005_byok_funding.sql",
       "0006_word_pronunciation.sql",
+      "0007_check_run_routing.sql",
     ]);
   });
 

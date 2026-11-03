@@ -112,11 +112,13 @@ function modelReply(
   corrections: unknown[],
   improvements: unknown[] = [],
   usage: Record<string, unknown> | null = { prompt_tokens: 1000, completion_tokens: 200 },
+  extra: Record<string, unknown> = {},
 ) {
   return new Response(
     JSON.stringify({
       choices: [{ message: { content: JSON.stringify({ corrections, improvements }) }, finish_reason: "stop" }],
       ...(usage ? { usage } : {}),
+      ...extra,
     }),
     { status: 200 },
   );
@@ -289,6 +291,56 @@ describe("POST /api/proofread", () => {
     expect(sent.response_format.type).toBe("json_schema");
     expect(sent.response_format.json_schema.strict).toBe(true);
     expect(sent.response_format.json_schema.schema.additionalProperties).toBe(false);
+  });
+
+  it("sends only require_parameters for a preset model and lets the preset route", async () => {
+    login();
+    const preset = "@preset/gpt-oss-120b-balanced";
+    process.env.OPENROUTER_FAST_MODEL = preset;
+    fetchMock.mockResolvedValueOnce(modelReply([]));
+    await post({ requestId: requestId(), text: "All good here." });
+
+    const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(sent.model).toBe(preset);
+    // A preset already decides sort, price and fallbacks; the app only adds
+    // the structured-output requirement it cannot express in the preset.
+    expect(sent.provider).toEqual({ require_parameters: true });
+  });
+
+  it("uses throughput routing and the preset's price ceiling for a plain fast model", async () => {
+    login();
+    process.env.OPENROUTER_FAST_MODEL = "openai/gpt-oss-120b";
+    fetchMock.mockResolvedValueOnce(modelReply([]));
+    await post({ requestId: requestId(), text: "All good here." });
+
+    const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(sent.model).toBe("openai/gpt-oss-120b");
+    expect(sent.provider).toEqual({
+      require_parameters: true,
+      allow_fallbacks: true,
+      data_collection: "deny",
+      sort: "throughput",
+      max_price: { prompt: 0.16, completion: 0.65 },
+    });
+  });
+
+  it("stores the serving provider and the settled cost on the check run", async () => {
+    login();
+    const id = requestId();
+    fetchMock.mockResolvedValueOnce(
+      modelReply([], [], { prompt_tokens: 1000, completion_tokens: 200, cost: 0.000123 }, { provider: "Nebius" }),
+    );
+    const body = ProofreadResponse.parse(await json(await post({ requestId: id, text: "All good here." })));
+
+    // The response's `provider` is the provider that actually served the call,
+    // separate from the funding provider ("openrouter") on the same row.
+    expect(runFor(id)).toMatchObject({
+      id: body.checkRunId,
+      provider: "openrouter",
+      serving_provider: "Nebius",
+      settled_cost_micros: 123,
+    });
+    expect(reservationFor(id)).toMatchObject({ status: "settled", actual_cost_micros: 123 });
   });
 
   it("reserves a cost upper bound before the call and keeps the actual cost below it", async () => {

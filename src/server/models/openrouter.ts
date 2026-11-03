@@ -29,6 +29,14 @@ function money(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
+function providerName(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const name = value.trim();
+  return name.length > 0 && name.length <= 100 && !/[\u0000-\u001f\u007f]/.test(name)
+    ? name
+    : undefined;
+}
+
 // OpenRouter reports the cost of the call in USD when asked for usage
 // accounting. For an account that brings its own provider key, `cost` covers
 // only OpenRouter's share, so the upstream share is added; without it the true
@@ -69,6 +77,17 @@ export async function openRouterChat(
   const reasoning = route.tier === "fast"
     ? { reasoning: { effort: "low" } }
     : input.reasoningEffort ? { reasoning_effort: input.reasoningEffort } : {};
+  const provider = route.tier === "fast"
+    ? route.model.startsWith("@preset/")
+      ? { require_parameters: true }
+      : {
+        require_parameters: true,
+        allow_fallbacks: true,
+        data_collection: "deny",
+        sort: "throughput",
+        max_price: { prompt: 0.16, completion: 0.65 },
+      }
+    : { require_parameters: true, data_collection: "deny" };
   const { bodyText, latencyMs } = await sendProviderRequest(`${BASE_URL}/chat/completions`, {
     method: "POST",
     headers: { ...headers(route.apiKey, config), "Content-Type": "application/json" },
@@ -81,29 +100,25 @@ export async function openRouterChat(
       response_format: { type: "json_schema", json_schema: {
         name: input.jsonSchema.name, strict: true, schema: input.jsonSchema.schema,
       } },
-      // Ask for the billed cost, and only route to providers that honour every
-      // parameter above (in particular structured output). Left to its default
-      // price-balanced choice, OpenRouter sent gpt-oss-120b calls to a provider
-      // that took 36 to 73 seconds, past the timeout; the fast tier picks the
-      // quickest provider instead. The cost bound covers every listed provider.
+      // Ask OpenRouter to include usage cost and keep providers that support
+      // every request parameter. Fast model presets supply their own routing
+      // policy; plain model IDs use defaults matching the owner preset.
       usage: { include: true },
-      provider: {
-        allow_fallbacks: false,
-        require_parameters: true,
-        data_collection: "deny",
-        ...(route.tier === "fast" ? { sort: "latency" } : {}),
-      },
+      provider,
     }),
   }, { timeoutMs: DEFAULT_TIMEOUT_MS, signal: input.signal });
   const json = parseEnvelope(bodyText, latencyMs);
+  const servingProvider = providerName(json.provider);
   const usage = usageFrom(json.usage);
   const choice = record(Array.isArray(json.choices) ? json.choices[0] : undefined);
-  if (choice.finish_reason === "length") throw new ModelOutputError("truncated", usage, latencyMs);
+  if (choice.finish_reason === "length") {
+    throw new ModelOutputError("truncated", usage, latencyMs, servingProvider);
+  }
   const content = record(choice.message).content;
   const text = typeof content === "string" ? content : Array.isArray(content)
     ? content.map(part => typeof record(part).text === "string" ? record(part).text : "").join("") : "";
-  if (!text.trim()) throw new ModelOutputError("empty_content", usage, latencyMs);
-  return { content: text, usage, latencyMs };
+  if (!text.trim()) throw new ModelOutputError("empty_content", usage, latencyMs, servingProvider);
+  return { content: text, usage, latencyMs, servingProvider };
 }
 
 export async function openRouterTranscribe(

@@ -70,7 +70,8 @@ invites             token_hash, label, quota_profile, max_uses, uses, expires_at
 sessions            token_hash, learner_id, created_at, expires_at
 settings            key, value                      -- e.g. ai_enabled
 check_runs          id, learner_id, request_id UNIQUE(learner_id, request_id), text_hash,
-                    text_length, provider, model, status, latency_ms, created_at
+                    text_length, provider, model, status, latency_ms, created_at,
+                    serving_provider, settled_cost_micros
 suggestions         id, check_run_id, learner_id, start, end, original, replacement,
                     category, reason, meaning_change, status, decided_at
 usage_reservations  id, learner_id, kind, request_id UNIQUE(learner_id, kind, request_id),
@@ -115,19 +116,24 @@ another provider or tier: a job whose tier cannot be served is refused.
 
 The fast tier asks OpenRouter for a strict `json_schema` response, `reasoning`
 effort `low`, an explicit `max_tokens`, `provider.require_parameters` (so routing
-never lands on a provider without structured output), no provider fallbacks,
-`provider.sort: "latency"` and `usage.include`. Latency sorting matters: with
-OpenRouter's default price-balanced routing, a proofreading call took 36 to 73
-seconds on the cheapest provider and would hit the 20 second timeout; sorted by
-latency it takes about half a second and costs under a tenth of a cent. The reservation uses a price
-bound: `OPENROUTER_FAST_PRICE_IN_PER_M` and `OPENROUTER_FAST_PRICE_OUT_PER_M`, or
-the default, which is twice the highest per-token price any provider listed for
-gpt-oss-120b in November 2026. A preset hides its provider, so a preset uses the
-same bound unless both prices are set; any other model needs both prices or it
-has no bound and is refused. When the call finishes, the reservation settles at
-the `usage.cost` OpenRouter reports, or at the reported tokens times the bound's
-price when no cost is reported. A missing `OPENROUTER_API_KEY` answers
-`ai_disabled` for fast jobs; Meta is never used instead.
+never lands on a provider without structured output), and `usage.include`. For a
+model preset, the request adds only `provider.require_parameters` and leaves
+routing to the preset. For a plain fast model ID, the request explicitly uses
+throughput sorting, a prompt/completion `max_price` of 0.16/0.65, denied data
+collection, provider fallbacks enabled, and `require_parameters`. The reservation
+uses a price bound: `OPENROUTER_FAST_PRICE_IN_PER_M` and
+`OPENROUTER_FAST_PRICE_OUT_PER_M`, or the default, which is twice the highest
+per-token price any provider listed for gpt-oss-120b in November 2026. A preset
+hides its provider, so a preset uses the same bound unless both prices are set;
+any other model needs both prices or it has no bound and is refused. When the
+call finishes, the reservation settles at the `usage.cost` OpenRouter reports,
+or at the reported tokens times the bound's price when no cost is reported. A
+missing `OPENROUTER_API_KEY` answers `ai_disabled` for fast jobs; Meta is never
+used instead.
+
+Successful proofreading rows also retain OpenRouter's returned serving provider
+and the settled cost in micro-dollars. The audit log records provider, model,
+latency and settled cost without logging learner text.
 
 Model output is validated against a JSON schema. Learner text is passed as data inside clear delimiters; models have no tools and cannot change the rubric.
 

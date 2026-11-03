@@ -39,6 +39,7 @@ export class ModelOutputError extends Error {
     readonly reason: string,
     readonly usage: TokenUsage | null,
     readonly latencyMs: number,
+    readonly servingProvider?: string,
   ) {
     super(`Model output rejected (${reason})`);
     this.name = "ModelOutputError";

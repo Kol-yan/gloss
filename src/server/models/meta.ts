@@ -42,6 +42,8 @@ export interface MetaChatResult {
   // Null when the provider did not report usage in a shape we recognise.
   usage: TokenUsage | null;
   latencyMs: number;
+  // OpenRouter reports which upstream provider served the request.
+  servingProvider?: string;
 }
 
 export interface MetaChatOptions {
