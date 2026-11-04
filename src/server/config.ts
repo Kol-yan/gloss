@@ -70,6 +70,7 @@ const EnvSchema = z.object({
     blankAsUndefined,
     z.url({ protocol: /^https?$/ }).default("http://localhost:3000"),
   ),
+  GLOSSY_MODEL_MOCK: z.preprocess(blankAsUndefined, z.stringbool().default(false)),
 });
 
 export interface AppConfig {
@@ -93,6 +94,9 @@ export interface AppConfig {
   databasePath: string;
   // Base URL without a trailing slash.
   publicUrl: string;
+  // Test-only: simulated model providers answer instead of the real ones (see
+  // models/mock-provider.ts). Off unless GLOSSY_MODEL_MOCK=true.
+  modelMock: boolean;
 }
 
 export class ConfigError extends Error {
@@ -131,6 +135,7 @@ export function loadConfig(env: Record<string, string | undefined>): AppConfig {
     dailyBudgetMicros: Math.round(v.DAILY_BUDGET_USD * 1_000_000),
     databasePath: v.GLOSSY_DATABASE_PATH,
     publicUrl: v.GLOSSY_PUBLIC_URL.replace(/\/+$/, ""),
+    modelMock: v.GLOSSY_MODEL_MOCK,
   };
 }
 

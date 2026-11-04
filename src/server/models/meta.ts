@@ -10,6 +10,7 @@ import {
   ModelTimeoutError,
   type TokenUsage,
 } from "./errors";
+import { mockProviderFetch } from "./mock-provider";
 import { textCostMicros, textPrice, type TextPrice } from "./prices";
 
 export const MIN_MAX_TOKENS = 2048;
@@ -71,7 +72,8 @@ export async function metaChat(
   input: MetaChatInput,
   options: MetaChatOptions = {},
 ): Promise<MetaChatResult> {
-  const { apiKey, baseUrl } = (options.config ?? getConfig()).meta;
+  const config = options.config ?? getConfig();
+  const { apiKey, baseUrl } = config.meta;
   if (!apiKey) throw new ModelNotConfiguredError();
   // No price, no call.
   textPrice(input.model);
@@ -98,7 +100,7 @@ export async function metaChat(
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify(body),
     },
-    { timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS, signal: input.signal },
+    { timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS, signal: input.signal, config },
   );
 
   let json: unknown;
@@ -124,17 +126,19 @@ export async function metaChat(
 export async function sendProviderRequest(
   url: string,
   init: RequestInit,
-  options: { timeoutMs: number; signal?: AbortSignal },
+  options: { timeoutMs: number; signal?: AbortSignal; config: AppConfig },
 ): Promise<{ bodyText: string; latencyMs: number }> {
   const timeout = AbortSignal.timeout(options.timeoutMs);
   const signal = options.signal ? AbortSignal.any([timeout, options.signal]) : timeout;
   const started = performance.now();
   const elapsed = () => Math.round(performance.now() - started);
+  // End-to-end tests swap only the network call, so everything around it runs as in production.
+  const send = options.config.modelMock ? mockProviderFetch : fetch;
 
   let status: number;
   let bodyText = "";
   try {
-    const response = await fetch(url, { ...init, signal });
+    const response = await send(url, { ...init, signal });
     status = response.status;
     if (response.ok) bodyText = await response.text();
     else await response.body?.cancel().catch(() => undefined);

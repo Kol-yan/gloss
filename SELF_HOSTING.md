@@ -25,6 +25,7 @@ cp .env.example .env.production
 | `GLOSSY_PUBLIC_URL` | The address people open, for example `https://gloss.li`. Used for invite links and to accept form posts from your own site only. |
 | `DAILY_BUDGET_USD` | Hard spending ceiling for the whole instance per UTC day. |
 | `AI_ENABLED` | `false` switches every cloud call off. |
+| `GLOSSY_MODEL_MOCK` | Test only. `true` answers every model call with simulated output for the end-to-end tests. Leave it unset. |
 
 `compose.yaml` fixes `GLOSSY_DATABASE_PATH`, `PORT` and `NODE_ENV`; do not change them there.
 

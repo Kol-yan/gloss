@@ -33,7 +33,8 @@ export async function metaTranscribe(
   input: MetaTranscribeInput,
   options: MetaTranscribeOptions = {},
 ): Promise<MetaTranscribeResult> {
-  const { apiKey, baseUrl } = (options.config ?? getConfig()).meta;
+  const config = options.config ?? getConfig();
+  const { apiKey, baseUrl } = config.meta;
   if (!apiKey) throw new ModelNotConfiguredError();
   // No price, no call.
   asrPrice(input.model);
@@ -62,7 +63,7 @@ export async function metaTranscribe(
       headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" },
       body: form,
     },
-    { timeoutMs: options.timeoutMs ?? ASR_TIMEOUT_MS, signal: input.signal },
+    { timeoutMs: options.timeoutMs ?? ASR_TIMEOUT_MS, signal: input.signal, config },
   );
 
   let json: unknown;

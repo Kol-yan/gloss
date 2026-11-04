@@ -106,7 +106,7 @@ export async function openRouterChat(
       usage: { include: true },
       provider,
     }),
-  }, { timeoutMs: input.timeoutMs ?? DEFAULT_TIMEOUT_MS, signal: input.signal });
+  }, { timeoutMs: input.timeoutMs ?? DEFAULT_TIMEOUT_MS, signal: input.signal, config });
   const json = parseEnvelope(bodyText, latencyMs);
   const servingProvider = providerName(json.provider);
   const usage = usageFrom(json.usage);
@@ -134,7 +134,7 @@ export async function openRouterTranscribe(
   form.set("file", new Blob([input.audio as Uint8Array<ArrayBuffer>], { type: "audio/wav" }), "answer.wav");
   const { bodyText, latencyMs } = await sendProviderRequest(`${BASE_URL}/audio/transcriptions`, {
     method: "POST", headers: headers(apiKey, config), body: form,
-  }, { timeoutMs: ASR_TIMEOUT_MS, signal: input.signal });
+  }, { timeoutMs: ASR_TIMEOUT_MS, signal: input.signal, config });
   const json = parseEnvelope(bodyText, latencyMs);
   if (typeof json.text !== "string") throw new ModelOutputError("no_transcript", null, latencyMs);
   const duration = json.duration;

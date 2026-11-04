@@ -148,6 +148,11 @@ latency and settled cost without logging learner text.
 
 Model output is validated against a JSON schema. Learner text is passed as data inside clear delimiters; models have no tools and cannot change the rubric.
 
+For end-to-end tests only, `GLOSSY_MODEL_MOCK=true` replaces the network call in
+`sendProviderRequest` with deterministic simulated providers
+(`src/server/models/mock-provider.ts`). Routing, reservations, parsing and error
+handling still run. It is off by default.
+
 BYOK uses OpenRouter with the visitor's key for both tiers. The adapters request
 providers that deny data collection; this routing preference is not a claim of
 independently verified zero retention. There is no fallback to operator-funded
