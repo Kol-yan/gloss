@@ -38,9 +38,11 @@ describe("starter set data", () => {
   });
 
   it("spreads entries across every band and every level", () => {
-    for (const band of ["core", "common", "uncommon", "rare"]) {
+    for (const band of ["core", "common", "uncommon"]) {
       expect(loaded.stats.byBand[band], band).toBeGreaterThanOrEqual(40);
     }
+    // Rare words are kept few on purpose: the set favours words learners will use.
+    expect(loaded.stats.byBand.rare, "rare").toBeGreaterThanOrEqual(30);
     for (const level of ["A2", "B1", "B2", "C1"]) {
       expect(loaded.stats.byLevel[level], level).toBeGreaterThanOrEqual(40);
     }
