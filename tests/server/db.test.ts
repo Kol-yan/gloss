@@ -46,6 +46,8 @@ describe("openDatabase", () => {
         "settings",
         "suggestions",
         "usage_reservations",
+        "word_practice_events",
+        "word_progress",
       ].sort(),
     );
     db.close();
@@ -62,6 +64,8 @@ describe("openDatabase", () => {
       "0006_word_pronunciation.sql", "0007_check_run_routing.sql",
       "0008_sentence_detection.sql",
       "0009_writing_evidence.sql",
+      "0010_word_engine.sql",
+      "0011_word_real_use.sql",
     ]);
     const again = openDatabase(temp.path);
     expect(migrate(again)).toEqual([]);
@@ -99,7 +103,10 @@ describe("openDatabase", () => {
         INSERT INTO evidence_events (id, learner_id, expression_id, kind, hint_used, transcript_edited, created_at)
           VALUES ('old', 'writer', 'expression', 'assisted_use', 1, 1, '2026-11-03');`);
       const before = db.prepare("SELECT * FROM evidence_events WHERE id = 'old'").get();
-      expect(migrate(db, source)).toEqual(["0009_writing_evidence.sql"]);
+      // The engine tables arrive after the writing-evidence upgrade.
+      const applied = migrate(db, source);
+      expect(applied).toContain("0009_writing_evidence.sql");
+      expect(applied).toContain("0010_word_engine.sql");
       expect(db.prepare("SELECT * FROM evidence_events WHERE id = 'old'").get()).toEqual({ ...before, document_id: null });
       db.exec(`INSERT INTO evidence_events (id, learner_id, expression_id, kind, document_id, created_at)
         VALUES ('independent', 'writer', 'expression', 'independent_writing', 'document', '2026-11-03')`);
@@ -158,7 +165,12 @@ describe("openDatabase", () => {
       }
 
       const applied = migrate(db, source);
-      expect(applied).toEqual(["0008_sentence_detection.sql", "0009_writing_evidence.sql"]);
+      expect(applied).toEqual([
+        "0008_sentence_detection.sql",
+        "0009_writing_evidence.sql",
+        "0010_word_engine.sql",
+      "0011_word_real_use.sql",
+      ]);
 
       const row = db.prepare("SELECT * FROM check_runs WHERE id = 'run-old'").get() as Record<string, unknown>;
       expect(row).toMatchObject({
@@ -244,6 +256,8 @@ describe("openDatabase", () => {
         "0007_check_run_routing.sql",
         "0008_sentence_detection.sql",
         "0009_writing_evidence.sql",
+        "0010_word_engine.sql",
+      "0011_word_real_use.sql",
       ]);
       const row = db.prepare("SELECT * FROM check_runs WHERE id = 'pre-routing-run'").get() as Record<string, unknown>;
       expect(row).toMatchObject({

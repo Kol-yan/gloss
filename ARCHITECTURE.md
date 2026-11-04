@@ -266,17 +266,13 @@ used only to order and explain words, never shown to the learner as a score. A
 licensed frequency list could later replace the curated table behind the same
 loader and band names.
 
-**Estimating a band for added words (provisional, not implemented yet).** A word
-that arrives later from the learner (My words), from Word check or from a model
-has no curated band. The later integration task is expected to derive one with
-the estimate below and store it with the word. Nothing in this task or in the
-current code base implements that estimate: there is no inline closed list, no
-runtime estimator, no database column and no migration for it, and the starter
-loader (`src/server/learning/starter/`) only checks bands that are already
-written in the data. The estimate uses no corpus and no network call, needs no
-data file and no third-party licence, and is provisional: it is a rough order of
-magnitude, never shown to the learner as a score, and the owner can override any
-band with a curated value.
+**Estimating a band for added words (provisional).** A word that arrives from
+the learner (My words), from Word check or from a model has no curated band. The
+estimate below is implemented in `src/server/learning/priority/intake.ts` and
+used for every word without a curated band; a curated band always wins. It uses
+no corpus and no network call, needs no data file and no third-party licence,
+and is provisional: it is a rough order of magnitude, never shown to the learner
+as a score, and the owner can override any band with a curated value.
 
 The rule is a single pass with no ambiguity. Define the input as the normalized
 text (lower case, trimmed, inner whitespace collapsed to one space), an optional
@@ -318,10 +314,61 @@ case 3 -> `uncommon`. Tags do not affect cases 1-3, and case 4 never returns
 `rare`.
 
 This estimate is coarse: it separates very common short words from long words
-with few daily tags and nothing more. It is one provisional default for the
-later integration task, it is not part of the B2 starter set, and the same rule
+with few daily tags and nothing more. It is the provisional default for words
+without a curated band, it is not part of the B2 starter set, and the same rule
 can be swapped for a licensed frequency table later behind the same band names
 without changing the stored band vocabulary.
+
+## Word engine: statuses, priority and the session
+
+`src/server/learning/priority/` ranks the words a learner should practise next
+and updates them when they answer. The pure rules live in `rules.ts` (status and
+ladder transitions) and `scheduler.ts` (priority and the session mix); the
+database code is confined to `engine.ts`, so most tests need no database.
+
+A word is a saved expression, a starter entry or a Word check word. Statuses:
+Learning, Ready to activate (known but not used), Active and Hidden. Active is
+reached after 2 uses in the learner's own writing, which outweigh any exercise,
+or after 3 correct unassisted productive answers. Real use is synced from the
+Learning tab's independent-writing evidence per distinct document, so the same
+document is never counted twice; it is never recorded from practice. Evidence is
+collected over every expression whose text matches the word, so writing recorded
+under a saved id and under a starter id of the same text counts once as the one
+word. Two errors
+in a row move a word one step down (Ready to Learning, Active to Ready); the
+error streak then restarts, and the demotion resets the productive credit so the
+same stale answers cannot reactivate the word. Reactions: Already know makes the
+word Active with a rare check (14 days at most), Not relevant hides it, Too hard
+moves it one rung down and brings it back tomorrow, Too easy jumps the word to
+productive work. Rungs 1-6 are recognition, choice by meaning, gap fill, recall
+from memory, use in a situation and speaking; rung 1 is the entry rung, and a
+correct recognition lifts the word to rung 2. Hinted answers are assisted work:
+they can move the status to Ready but do not lift the rung and are not
+productive credit.
+
+The order combines frequency band (curated for starter entries, the documented
+estimate for other words), what the learner did (saved or added, Word check
+answers, "too easy", repeated errors) and progress. Edge words (Ready) come
+first. A session of 8 is 3 activate, 3 learn and 2 keep fresh. At most 3 words
+are started as brand-new per day; the number drops to 1 when six or more
+reviews are due or the recent answer share is below half (over four answers).
+A word takes one of the day's places when it is first shown, so a second
+session the same day does not start more. The daily three brand-new words
+include Word check "new" answers, which spend their place at Word check time.
+The learner sees one short reason such as "Common word - you know it but don't
+use it yet", never a score.
+
+Word origin and frequency-band source are tracked separately later; today a
+saved word matching a starter entry keeps the starter source.
+
+`db/migrations/0010_word_engine.sql` stores per-learner word state
+(`word_progress`) and answers (`word_practice_events`). Statuses, bands and the
+rung are integers or short strings with CHECK constraints; every row carries
+`learner_id` and a foreign key on the learner.
+`db/migrations/0011_word_real_use.sql` adds `real_use_documents`,
+`real_use_days`, `real_use_last_at` and `word_check_answer` to `word_progress`;
+the first two mirror distinct evidence documents and days, the last keeps the
+Word check answer that decides whether a word is brand new.
 
 ## Word pronunciation
 

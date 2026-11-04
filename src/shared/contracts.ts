@@ -292,6 +292,28 @@ export type WritingEvidenceRequest = z.infer<typeof WritingEvidenceRequest>;
 export const WritingEvidenceResponse = z.object({ expressionIds: z.array(z.string()) }).strict();
 
 // ---------------------------------------------------------------------------
+// Word engine
+//
+// Passive vocabulary becomes active vocabulary. Statuses describe where a word
+// is on that path; the learner sees the labels, never a priority score.
+
+export const WordStatus = z.enum(["learning", "ready", "active", "hidden"]);
+export type WordStatus = z.infer<typeof WordStatus>;
+
+// "activate" moves a known-but-unused word to active use, "learn" works on a
+// new word, "keep" refreshes an active one.
+export const SessionSlot = z.enum(["activate", "learn", "keep"]);
+export type SessionSlot = z.infer<typeof SessionSlot>;
+
+export const FrequencyBand = z.enum(["core", "common", "uncommon", "rare"]);
+export type FrequencyBand = z.infer<typeof FrequencyBand>;
+
+// Reactions in the answer view. "already_know" retires a word to Active with a
+// rare check, "not_relevant" hides it, "too_hard" moves it down the ladder.
+export const WordReaction = z.enum(["already_know", "too_easy", "not_relevant", "too_hard"]);
+export type WordReaction = z.infer<typeof WordReaction>;
+
+// ---------------------------------------------------------------------------
 
 export const ApiErrorCode = z.enum([
   "unauthorized",
