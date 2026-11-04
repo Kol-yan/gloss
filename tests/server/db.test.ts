@@ -46,6 +46,7 @@ describe("openDatabase", () => {
         "settings",
         "suggestions",
         "usage_reservations",
+        "word_check_entries",
         "word_practice_events",
         "word_progress",
       ].sort(),
@@ -66,6 +67,7 @@ describe("openDatabase", () => {
       "0009_writing_evidence.sql",
       "0010_word_engine.sql",
       "0011_word_real_use.sql",
+      "0012_onboarding_level.sql",
     ]);
     const again = openDatabase(temp.path);
     expect(migrate(again)).toEqual([]);
@@ -170,6 +172,7 @@ describe("openDatabase", () => {
         "0009_writing_evidence.sql",
         "0010_word_engine.sql",
       "0011_word_real_use.sql",
+      "0012_onboarding_level.sql",
       ]);
 
       const row = db.prepare("SELECT * FROM check_runs WHERE id = 'run-old'").get() as Record<string, unknown>;
@@ -258,6 +261,7 @@ describe("openDatabase", () => {
         "0009_writing_evidence.sql",
         "0010_word_engine.sql",
       "0011_word_real_use.sql",
+      "0012_onboarding_level.sql",
       ]);
       const row = db.prepare("SELECT * FROM check_runs WHERE id = 'pre-routing-run'").get() as Record<string, unknown>;
       expect(row).toMatchObject({

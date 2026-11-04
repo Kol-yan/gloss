@@ -314,6 +314,91 @@ export const WordReaction = z.enum(["already_know", "too_easy", "not_relevant", 
 export type WordReaction = z.infer<typeof WordReaction>;
 
 // ---------------------------------------------------------------------------
+// Onboarding
+//
+// The CEFR level the learner is working from. It comes from the Level step and
+// is refined by Word check answers; the Goals and topics step has no API.
+export const CefrLevel = z.enum(["A2", "B1", "B2", "C1"]);
+export type CefrLevel = z.infer<typeof CefrLevel>;
+
+// How many starter entries one Word check round asks about. They are picked
+// around the learner's level to find the edge between the words they know but
+// do not use and the words they have not met.
+export const WORD_CHECK_SIZE = 24;
+
+// "use" is known vocabulary: it is not added to My words, it refines the level
+// and keeps future rounds from asking again. "know_unused" is the edge and
+// becomes Ready to activate; "not_sure" and "new" are Learning.
+export const WordCheckAnswer = z.enum(["use", "know_unused", "not_sure", "new"]);
+export type WordCheckAnswer = z.infer<typeof WordCheckAnswer>;
+
+// `answer` is what this learner already recorded for the entry in this round,
+// or null while it is still open. A reload shows a finished or half-finished
+// round instead of asking the same words again.
+export const WordCheckEntry = z
+  .object({
+    id: z.string(),
+    text: z.string(),
+    level: CefrLevel,
+    definition: z.string(),
+    answer: WordCheckAnswer.nullable(),
+  })
+  .strict();
+export type WordCheckEntry = z.infer<typeof WordCheckEntry>;
+
+// GET /api/onboarding/word-check
+//
+// `entries` holds the open entries of the round plus the ones answered in this
+// round, each with its answer, so the page can show progress; no word already
+// answered in the round is open again. `completed` says whether every entry of
+// the round has an answer, `answered` how many have one, and `roundSize` how
+// many entries the round has (24 unless the starter set could not fill it).
+export const WordCheckResponse = z
+  .object({
+    entries: z.array(WordCheckEntry).min(1).max(WORD_CHECK_SIZE),
+    roundSize: z.number().int().min(1).max(WORD_CHECK_SIZE),
+    answered: z.number().int().nonnegative(),
+    completed: z.boolean(),
+    // The stored level estimate, or null before the first answers.
+    level: CefrLevel.nullable(),
+  })
+  .strict();
+export type WordCheckResponse = z.infer<typeof WordCheckResponse>;
+
+// POST /api/onboarding/word-check
+export const WordCheckAnswerInput = z
+  .object({ id: z.string().min(1).max(100), answer: WordCheckAnswer })
+  .strict();
+export type WordCheckAnswerInput = z.infer<typeof WordCheckAnswerInput>;
+
+export const WordCheckAnswersRequest = z
+  .object({ answers: z.array(WordCheckAnswerInput).min(1).max(WORD_CHECK_SIZE) })
+  .strict();
+export type WordCheckAnswersRequest = z.infer<typeof WordCheckAnswersRequest>;
+
+// `counts.active` is the "use" answers, "ready" the "know but don't use" ones
+// and `learning` the rest; they add up to `answered`.
+export const WordCheckAnswersResponse = z
+  .object({
+    level: CefrLevel,
+    answered: z.number().int().nonnegative(),
+    counts: z
+      .object({
+        active: z.number().int().nonnegative(),
+        ready: z.number().int().nonnegative(),
+        learning: z.number().int().nonnegative(),
+      })
+      .strict(),
+  })
+  .strict();
+export type WordCheckAnswersResponse = z.infer<typeof WordCheckAnswersResponse>;
+
+// POST /api/onboarding/level - the starting level chosen on the Level step.
+// Validated here and again by the learners table CHECK constraint.
+export const OnboardingLevelRequest = z.object({ level: CefrLevel }).strict();
+export type OnboardingLevelRequest = z.infer<typeof OnboardingLevelRequest>;
+
+// ---------------------------------------------------------------------------
 
 export const ApiErrorCode = z.enum([
   "unauthorized",

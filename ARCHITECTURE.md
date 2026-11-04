@@ -94,6 +94,9 @@ Money is stored in micro-dollars (integers). Dates are UTC ISO strings; "today" 
 | `POST /api/proofread` | Cloud proofreading of the current text |
 | `POST /api/learning` | On-request opportunities to use saved expressions |
 | `POST /api/expressions/writing` | Record deterministic, unassisted real-writing matches |
+| `POST /api/onboarding/level` | Store the CEFR level chosen on the Level step |
+| `GET /api/onboarding/word-check` | The Word check round with its served answers and the stored level |
+| `POST /api/onboarding/word-check` | Store Word check answers and the level estimate |
 | `POST /api/suggestions/{id}` | Record accepted, rejected or stale |
 
 Request and response schemas are in `src/shared/contracts.ts`. Errors use `{ error: { code, message } }` with a short learner-safe message.
@@ -369,6 +372,81 @@ rung are integers or short strings with CHECK constraints; every row carries
 `real_use_days`, `real_use_last_at` and `word_check_answer` to `word_progress`;
 the first two mirror distinct evidence documents and days, the last keeps the
 Word check answer that decides whether a word is brand new.
+`db/migrations/0012_onboarding_level.sql` adds `learners.level`, the Word check
+level estimate, plus `word_progress.level` (the starter level a word was served
+at) and the `word_check_entries` table of rounds described below.
+
+## Onboarding: level and Word check
+
+Onboarding has a Welcome step, a Level step, Word check, the Word check result,
+Your tools and Ready. The owner removed the Goals and topics screen (Nov 3), so
+there is no topics API and nothing reads a topic choice; personal relevance
+comes from Word check answers and the learner's own writing and saved words.
+`learners.level` (`A2`, `B1`, `B2`, `C1`; NULL before the first estimate) is
+the single stored level. Two writers feed it, and the rule is:
+
+1. **The Level step sets the starting point.** `POST /api/onboarding/level`
+   accepts `{ level }` with one of A2-C1 and writes `learners.level`. The first
+   Word check round is built around that choice. It has no GET: the stored
+   level travels in the Word check response.
+2. **Word check answers refine it.** Every `POST /api/onboarding/word-check`
+   recomputes `learners.level` from all answers so far (see the estimate
+   below) and overwrites the choice. The explicit choice is therefore only the
+   starting point: once the learner has answered, the estimate wins, and a
+   later visit to the Level step sets a new starting point for the next round.
+
+A round is frozen once served: a level chosen after the first `GET` moves the
+next round, never the current one, so the ids the page already holds keep
+answering the same words.
+
+**Word check API.** `GET /api/onboarding/word-check` serves a round of 24
+curated starter entries built around the stored level (or `B1` when it is
+NULL). The round is eight entries from the level below, eight from the
+learner's level and eight from the level above; at A2 it is sixteen A2 and
+eight B1, at C1 eight B2 and sixteen C1. A level can run short after a long
+history, so the round is filled from any remaining entries and may be smaller
+than 24. Words the learner already answered in any round, and words they
+already keep, are not offered again; ties prefer the fewest showings, then the
+longest unshown, then alphabetical order, so the round is deterministic. The
+round is persisted in `word_check_entries` and reused for the rest of the UTC
+day.
+
+The response is `{ entries, roundSize, answered, completed, level }`. Every
+entry carries `answer`: the answer already recorded for it in this round, or
+null while it is still open. So a reload never asks an answered word again - a
+finished round comes back with `completed: true` and every entry answered, a
+partial one with `answered` up to 24 and only the open entries null. Every row
+carries `learner_id`; nothing is shared between learners.
+
+`POST /api/onboarding/word-check` accepts `{ answers: [{ id, answer }] }` with
+1 to 24 answers, each id taken from a round this learner was served; any id
+from another learner or an invented one rejects the whole request before
+anything is written, and the same id twice is rejected. The answer mapping is
+fixed:
+
+| Answer | Meaning | Stored |
+|---|---|---|
+| `use` | I use it | Known vocabulary: no My words row and never in a practice session; the round row keeps the answer for the estimate and to avoid re-asking |
+| `know_unused` | I know it, I don't use it | Ready to activate (`word_progress.status = 'ready'`) |
+| `not_sure` | I'm not sure | Learning |
+| `new` | New to me | Learning, and it takes one of the day's three brand-new places |
+
+A word the learner already keeps (a saved expression or a starter word) keeps
+its own state; the answer records the level evidence but never demotes it. The
+response is the new level, the number of answers and counts of `active`
+(the "use" answers: known vocabulary, not the Active status of a word),
+`ready` and `learning`. A repeated POST is idempotent: the word rows are keyed
+by the learner's normalized text and keep their first answer, so no word,
+brand-new place or count changes.
+
+**Level estimate.** Each answered word is one line drawn from its curated
+level: `use` adds one level, `know_unused` adds nothing, `not_sure` subtracts
+one and `new` subtracts two. The estimate is the mean over every word the
+learner has answered, rounded down and clamped to A2-C1; with no answers it is
+B1. It is cumulative, so a later round refines an earlier estimate without a
+separate history. The rule is deliberately coarse: it separates adjacent
+levels and nothing more. It never flatters a learner (a mean of 1.9 is B1) and
+is documented here so the product can change it in one place.
 
 ## Word pronunciation
 

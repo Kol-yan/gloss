@@ -53,7 +53,7 @@ describe("word engine migrations", () => {
       .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'word_%' ORDER BY name")
       .all()
       .map((row) => String(row.name));
-    expect(tables).toEqual(["word_practice_events", "word_progress"]);
+    expect(tables).toEqual(["word_check_entries", "word_practice_events", "word_progress"]);
     const columns = temp.db
       .prepare("PRAGMA table_info(word_progress)")
       .all()
@@ -89,7 +89,11 @@ describe("word engine migrations", () => {
         VALUES ('expression', '${learner}', 'sug', 'bottleneck', 'A delay.', 'new', '2026-11-01')`);
       const before = db.prepare("SELECT * FROM expressions WHERE id = 'expression'").get();
 
-      expect(migrate(db, source)).toEqual(["0010_word_engine.sql", "0011_word_real_use.sql"]);
+      expect(migrate(db, source)).toEqual([
+        "0010_word_engine.sql",
+        "0011_word_real_use.sql",
+        "0012_onboarding_level.sql",
+      ]);
       expect(db.prepare("SELECT * FROM expressions WHERE id = 'expression'").get()).toEqual(before);
       expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
 
@@ -138,7 +142,7 @@ describe("word engine migrations", () => {
           VALUES ('e${index}', 'old', 'expression', 'independent_writing', '${documentId}', '${iso}')`);
       }
 
-      expect(migrate(db, source)).toEqual(["0011_word_real_use.sql"]);
+      expect(migrate(db, source)).toEqual(["0011_word_real_use.sql", "0012_onboarding_level.sql"]);
       expect(pickSessionWords("old", 8, { db, now: NOW })).toEqual([]);
       expect(
         db.prepare("SELECT status, real_use_count FROM word_progress WHERE expression_id = 'expression'").get(),

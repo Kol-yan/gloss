@@ -21,6 +21,8 @@ export interface WordCheckOutcome {
 export function wordCheckOutcome(answer: WordCheckAnswer): WordCheckOutcome {
   switch (answer) {
     case "use":
+      // Known vocabulary, not active use: no row at all. The "status" is only
+      // how a result screen groups the answers.
       return { add: false, status: "active", source: null };
     case "know_unused":
       return { add: true, status: "ready", source: "word_check" };
