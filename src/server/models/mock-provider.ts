@@ -107,6 +107,8 @@ function answerFor(schema: string, user: string, system: string): unknown {
       return proofread(user, system);
     case "practice_situation":
       return { situation: MOCK_SITUATION };
+    case "practice_exercise_pool":
+      return practicePool(user);
     case "attempt_evaluation":
       return evaluate(user);
     case "dictation_cleanup":
@@ -114,6 +116,41 @@ function answerFor(schema: string, user: string, system: string): unknown {
     default:
       return null;
   }
+}
+
+// The exercise pool asks for eight exercises for one expression: two on each
+// of the four rungs. The nonce in the request keeps repeated generations
+// distinct, as the real prompt asks for variation.
+function practicePool(user: string) {
+  const expression = user.match(/<expression>([^<]*)<\/expression>/)?.[1] ?? "resolve";
+  const meaning = user.match(/<meaning>([^<]*)<\/meaning>/)?.[1] ?? "to find a solution to a problem";
+  const nonce = (user.match(/Variation nonce: ([0-9a-f-]+)/)?.[1] ?? "0").slice(0, 8);
+  const lexical = ["resolve", "review", "remind", "reject"];
+  const meanings = [meaning, "to read something again", "to tell someone about a task", "to decide against something"];
+  const make = (rung: number, sentence: string, prompt: string, options: string[] | null, answer: string, hint: string) => ({
+    rung, sentence: `${sentence} (batch ${nonce})`, prompt, options, answer, hint,
+    example: `Example for batch ${nonce}: We used the expression in a short update.`,
+  });
+  return {
+    exercises: [
+      make(1, `The team agreed to ${expression} the billing issue before Friday.`, "What does the highlighted expression mean?",
+        meanings, meaning, "It is about ending a problem."),
+      make(1, `She helped ${expression} the scheduling conflict in one call.`, "What does the highlighted expression mean?",
+        [...meanings].reverse(), meaning, "It is about ending a problem."),
+      make(2, `We need to settle the billing issue before Friday.`, `Which expression means: ${meaning}?`,
+        lexical, expression, "The expression begins with r."),
+      make(2, `The two leads will settle the scheduling conflict in one call.`, `Which expression means: ${meaning}?`,
+        [...lexical].reverse(), expression, "The expression begins with r."),
+      make(3, `We need to ___ the billing issue before Friday.`, "Choose the best expression for the gap.",
+        lexical, expression, "The expression begins with r."),
+      make(3, `The two leads will ___ the scheduling conflict in one call.`, "Choose the best expression for the gap.",
+        [...lexical].reverse(), expression, "The expression begins with r."),
+      make(4, "A problem with billing is holding up the launch.", `Which expression means: ${meaning}?`,
+        null, expression, "Recall the verb that starts with r."),
+      make(4, "A schedule clash is stopping both teams from starting.", `Which expression means: ${meaning}?`,
+        null, expression, "Recall the verb that starts with r."),
+    ],
+  };
 }
 
 // The user message is an instruction line followed by the sentences as JSON.

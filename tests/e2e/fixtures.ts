@@ -50,35 +50,44 @@ export class Editor {
     await this.text.fill(text);
   }
 
+  // Switching tabs asks the simulator for the sentence analysis, so cards for
+  // the flagged sentences appear without pressing Check with AI.
+  async openAiTab(): Promise<void> {
+    await this.page.getByRole("tab", { name: /^AI/ }).click();
+  }
+
   // A cloud suggestion card in the rail, found by the words it changes.
   aiCard(original: string): Locator {
     return this.rail
       .locator("li[data-suggestion-id]")
-      .filter({ hasText: "AI check" })
       .filter({ has: this.page.getByRole("button", { name: new RegExp(`^Apply: ${original} to `) }) });
-  }
-
-  // A sentence the detector flagged, found by a word in it.
-  flagCard(word: string): Locator {
-    return this.rail.locator("li[data-flag-card]").filter({ hasText: word });
   }
 }
 
-// Accepts the simulated "fix → resolve" expression and adds it to practice.
-// Starting practice opens the first written task.
+// Accepts the simulated "fix → resolve" expression, saves it, and opens the
+// practice session the new engine prepares for it.
 export async function saveExpression(editor: Editor): Promise<void> {
   await editor.write(SAMPLE_TEXT);
-  // Let the automatic scan finish first, so its badges cannot arrive after the check.
-  await expect(editor.flagCard("fix")).toBeVisible();
-  await editor.checkButton.click();
-  await editor.aiCard("fix").getByRole("button", { name: /^Apply: / }).click();
+  // The AI tab starts the analysis of the sentences the detector flagged.
+  await editor.openAiTab();
+  const expression = editor.aiCard("fix");
+  await expect(expression).toBeVisible();
+  await expression.getByRole("button", { name: /^Apply: / }).click();
 
+  // Accepting an expression offers the practice question in the Learning tab.
+  await editor.page.getByRole("tab", { name: /^Learning/ }).click();
   const offer = editor.rail.getByRole("region", { name: "Try using this yourself" });
   await expect(offer).toContainText("resolve");
   await expect(offer).toContainText("to find a solution to a problem");
   await offer.getByText("I know it but don't use it").click();
-  await offer.getByRole("button", { name: "Start practice" }).click();
-  await expect(editor.page).toHaveURL(/\/practice\?expression=/);
+  // The editor only saves the expression; practice starts from the practice page.
+  await offer.getByRole("button", { name: "Save expression" }).click();
+  await expect(editor.rail.getByRole("region", { name: "Practice ready" })).toBeVisible();
+
+  await editor.page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Practice" }).click();
+  await expect(editor.page).toHaveURL("/practice");
+  await expect(editor.page.getByRole("region", { name: "Practice session" })).toBeVisible();
+  await expect(editor.page.getByRole("button", { name: "Check answer" })).toBeVisible();
 }
 
 // What a provider might send back when it breaks. None of it may reach the page.

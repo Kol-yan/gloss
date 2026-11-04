@@ -40,16 +40,21 @@ for (const { kind, what } of FAILURES) {
   });
 }
 
-test("a practice answer whose check fails is not counted and shows no provider detail", async ({ editor, page }) => {
+test("a practice round whose preparation fails shows no provider detail", async ({ editor, page }) => {
   await saveExpression(editor);
-  await expect(page.getByRole("region", { name: "Task" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Practice session" })).toBeVisible();
 
-  await page.getByRole("textbox", { name: "Your answer" }).fill(`I would resolve it ${MOCK_FAILURE_MARKERS.http} today.`);
-  await page.getByRole("button", { name: "Submit" }).click();
+  // Regenerate the round with the provider broken: the UI must show its own
+  // short message and keep the raw provider text out of the page.
+  await page.route("**/api/practice/sessions", (route) => route.fulfill({
+    status: 500,
+    contentType: "application/json",
+    body: JSON.stringify({ error: { code: "model_unavailable", message: MOCK_RAW_ERROR_DETAIL } }),
+  }));
+  await page.goto("/practice");
 
-  const feedback = page.getByRole("region", { name: "Feedback" });
-  await expect(feedback).toContainText("Couldn't check");
-  await expect(feedback).toContainText("We could not check this answer just now. It is saved, so you can try again.");
+  const session = page.getByRole("region", { name: "Practice session" });
+  await expect(session).toContainText("We couldn't prepare practice.");
   await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
   await expectNoRawErrorText(page);
 });

@@ -1,15 +1,20 @@
 import { expect, test } from "@playwright/test";
 import { inviteUrl } from "./env";
-import { joinAsNewLearner } from "./fixtures";
 
-test("joins through an invite link and lands in the editor", async ({ page, context }) => {
-  // Without a session there is no editor, only the ways in.
+test("an invite link starts a workspace and a second visit only raises its allowance", async ({ page, context }) => {
+  // There is no gate screen any more: the editor is the first page, with local
+  // checking available even before a session exists.
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Choose how to try gloss" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Your text" })).toBeEditable();
 
-  await joinAsNewLearner(page);
-  const port = new URL(page.url()).port || "3000";
-  const session = (await context.cookies()).find((cookie) => cookie.name === `glossy_session_${port}`);
+  await page.goto(inviteUrl());
+  await expect(page.getByRole("heading", { name: "You are invited to gloss" })).toBeVisible();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page).toHaveURL("/");
+  await expect(page.getByText(/\d+ checks? left today/)).toBeVisible();
+
+  // The production server uses the plain cookie name; only development adds a port.
+  const session = (await context.cookies()).find((cookie) => cookie.name === "glossy_session");
   expect(session?.httpOnly).toBe(true);
 
   // Opening the link again in a signed-in browser does not spend another use.
@@ -19,11 +24,10 @@ test("joins through an invite link and lands in the editor", async ({ page, cont
   await expect(page.getByRole("textbox", { name: "Your text" })).toBeVisible();
 });
 
-test("an unknown invite link says it did not work", async ({ page }) => {
+test("an unknown invite link returns to the editor without a gate", async ({ page }) => {
   // Well formed, but never issued.
   await page.goto(`/join/${"A".repeat(43)}`);
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(page).toHaveURL("/?invite=invalid");
-  await expect(page.getByText("That invite link didn't work.")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Choose how to try gloss" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Your text" })).toBeEditable();
 });

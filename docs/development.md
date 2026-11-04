@@ -23,7 +23,8 @@ Fill in `.env.local`, then start the app:
 npm run dev
 ```
 
-Everyone needs an invite. Create one, open the printed `/join/…` link and press
+The first visit starts a guest session automatically in development. For a
+larger allowance, create an invite, open the printed `/join/…` link and press
 **Continue**:
 
 ```bash
@@ -48,9 +49,11 @@ served in production.
 | `OPENROUTER_API_KEY` | The operator's OpenRouter key: sentence detection, proofreading and practice situations. |
 | `OPENROUTER_FAST_MODEL` | Optional fast-tier model or preset. |
 | `OPENROUTER_FAST_PRICE_IN_PER_M`, `OPENROUTER_FAST_PRICE_OUT_PER_M` | Optional price bound for the fast model. Set both for any model other than the default. |
+| `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | Cloudflare Turnstile keys for guest enrollment; both are required in production. |
 | `BYOK_TRUST_PROXY_HEADERS` | Trust the proxy's client-IP header for visitor enrollment limits. Only behind a proxy that overwrites it. |
 | `AI_ENABLED` | Kill switch for every cloud model call. |
-| `DAILY_BUDGET_USD` | Daily spend ceiling for the whole instance. |
+| `DAILY_BUDGET_USD`, `PERIOD_BUDGET_USD` | Daily and period spend ceilings for the whole instance. |
+| `OWNER_FUNDED_UNTIL` | End of owner-funded demo access. |
 | `GLOSSY_DATABASE_PATH` | SQLite file. Use a persistent disk outside development. |
 | `GLOSSY_PUBLIC_URL` | Base URL printed in invite links and allowed to post the invite form. |
 
