@@ -149,6 +149,11 @@ backups are in [SELF_HOSTING.md](SELF_HOSTING.md).
 npm run lint && npm run typecheck && npm test && npm run build
 ```
 
+- End-to-end smoke tests drive headless Chromium against a production build, a
+  fresh temporary database and simulated model providers (`GLOSSY_MODEL_MOCK`),
+  so they need no keys and never call a provider. Install the browser once with
+  `npx playwright install chromium`, then run `npm run test:e2e`.
+
 - `npm test` runs the Vitest suite in `tests/` with provider calls stubbed, so
   it needs no keys.
 - The proofreading and evaluation prompts are pinned by hash. Changing one

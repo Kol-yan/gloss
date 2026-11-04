@@ -1,0 +1,102 @@
+import { expect, test as base, type Locator, type Page } from "@playwright/test";
+import { MOCK_RAW_ERROR_DETAIL } from "@/server/models/mock-provider";
+import { inviteUrl } from "./env";
+
+// Sentence 1 has a spelling mistake the simulated proofreader corrects; sentence 2
+// has a word it offers a more precise expression for (see models/mock-provider.ts).
+export const SAMPLE_TEXT = "I will recieve the report tomorrow. We need to fix the problem soon.";
+
+// Redeems the shared invite link, so every test works as a learner of its own:
+// no suggestions, quotas or saved expressions carry over between tests.
+export async function joinAsNewLearner(page: Page): Promise<void> {
+  await page.goto(inviteUrl());
+  await expect(page.getByRole("heading", { name: "You are invited to gloss" })).toBeVisible();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page).toHaveURL("/");
+  await expect(page.getByRole("textbox", { name: "Your text" })).toBeEditable();
+  // The quota line appears once the session is known on the page.
+  await expect(page.getByText(/\d+ checks? left today/)).toBeVisible();
+}
+
+export class Editor {
+  readonly text: Locator;
+  readonly rail: Locator;
+  readonly checkButton: Locator;
+
+  constructor(readonly page: Page) {
+    this.text = page.getByRole("textbox", { name: "Your text" });
+    this.rail = page.getByRole("complementary", { name: "Suggestions" });
+    this.checkButton = page.getByRole("button", { name: "Check with AI" });
+  }
+
+  async write(text: string): Promise<void> {
+    await this.text.fill(text);
+  }
+
+  // A cloud suggestion card in the rail, found by the words it changes.
+  aiCard(original: string): Locator {
+    return this.rail
+      .locator("li[data-suggestion-id]")
+      .filter({ hasText: "AI check" })
+      .filter({ has: this.page.getByRole("button", { name: new RegExp(`^Apply: ${original} to `) }) });
+  }
+
+  // A sentence the detector flagged, found by a word in it.
+  flagCard(word: string): Locator {
+    return this.rail.locator("li[data-flag-card]").filter({ hasText: word });
+  }
+}
+
+// Accepts the simulated "fix → resolve" expression and adds it to practice.
+// Starting practice opens the first written task.
+export async function saveExpression(editor: Editor): Promise<void> {
+  await editor.write(SAMPLE_TEXT);
+  // Let the automatic scan finish first, so its badges cannot arrive after the check.
+  await expect(editor.flagCard("fix")).toBeVisible();
+  await editor.checkButton.click();
+  await editor.aiCard("fix").getByRole("button", { name: /^Apply: / }).click();
+
+  const offer = editor.rail.getByRole("region", { name: "Try using this yourself" });
+  await expect(offer).toContainText("resolve");
+  await expect(offer).toContainText("to find a solution to a problem");
+  await offer.getByText("I know it but don't use it").click();
+  await offer.getByRole("button", { name: "Start practice" }).click();
+  await expect(editor.page).toHaveURL(/\/practice\?expression=/);
+}
+
+// What a provider might send back when it breaks. None of it may reach the page.
+const RAW_ERROR_PATTERNS: RegExp[] = [
+  new RegExp(escapeRegExp(MOCK_RAW_ERROR_DETAIL)),
+  /traceback/i,
+  /internal server error/i,
+  /\bHTTP \d{3}\b/,
+  /\b\w+Error\b/,
+  /provider answered/i,
+  /fetch failed/i,
+  /model_unavailable|invalid_output|envelope_not_json/,
+  /\bat \S+ \(/,
+  /<\/?(?:html|body)\b/i,
+  /\{\s*"error"/,
+];
+
+export async function expectNoRawErrorText(page: Page): Promise<void> {
+  const visible = await page.locator("body").innerText();
+  for (const pattern of RAW_ERROR_PATTERNS) expect(visible).not.toMatch(pattern);
+  // Not hidden in the markup either.
+  const markup = await page.content();
+  expect(markup).not.toContain(MOCK_RAW_ERROR_DETAIL);
+  expect(markup).not.toMatch(/traceback/i);
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+export const test = base.extend<{ editor: Editor }>({
+  editor: async ({ page }, provide) => {
+    await joinAsNewLearner(page);
+    await provide(new Editor(page));
+  },
+});
+
+export { expect };
