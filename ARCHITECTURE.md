@@ -94,6 +94,9 @@ Money is stored in micro-dollars (integers). Dates are UTC ISO strings; "today" 
 | `POST /api/proofread` | Cloud proofreading of the current text |
 | `POST /api/learning` | On-request opportunities to use saved expressions |
 | `POST /api/expressions/writing` | Record deterministic, unassisted real-writing matches |
+| `POST /api/onboarding/level` | Store the CEFR level chosen on the Level step |
+| `GET /api/onboarding/word-check` | The Word check round with its served answers and the stored level |
+| `POST /api/onboarding/word-check` | Store Word check answers and the level estimate |
 | `POST /api/suggestions/{id}` | Record accepted, rejected or stale |
 
 Request and response schemas are in `src/shared/contracts.ts`. Errors use `{ error: { code, message } }` with a short learner-safe message.
@@ -208,6 +211,242 @@ spans. Code verifies the expression, exact span and the existing meaning guard.
 The detector and proofreading prompt never receive the saved list. Opening an
 unchanged text reuses the in-memory Learning result, including an empty answer;
 editing while a request is pending cannot attach its answer to the wrong text.
+
+## Starter set and frequency bands
+
+The app ships a curated starter set of about 400 English entries: single words
+and common expressions, each with a frequency band, a CEFR level (A2 to C1), a
+definition of at most 12 words, one example sentence and up to three light topic
+tags. The entries live in `src/server/learning/starter/` as original hand-written
+data in four batches of 100. They are not taken from any published vocabulary
+list, and the definitions and examples are our own wording. The dataset is
+validated and ready; delivering the starter entries to a new learner depends on
+the later integration task and no production caller serves them yet.
+
+`loadStarterSet` (`src/server/learning/starter/schema.ts`) validates the set when
+it is first used: required fields, accepted bands, levels and tags, printable
+ASCII, a definition of 2 to 12 words that does not repeat the entry, an example
+sentence that contains the entry (base or inflected form), at most one entry per
+expression, and no two entries with the same stem. A broken edit fails the tests
+and the first request rather than reaching a learner.
+
+**Frequency source and licence.** We checked the licence of every candidate
+frequency list before writing data. None of the lists that carry real word
+frequencies is clean enough to embed here:
+
+| Candidate | Licence of the data | Result |
+| --- | --- | --- |
+| wordfreq (rspeer) | Code Apache-2.0, data CC BY-SA 4.0; data frozen since 2021 | Share-alike; would need a separate CC BY-SA data file |
+| hermitdave/FrequencyWords | CC BY-SA 4.0 | Share-alike |
+| SUBTLEX-US (Brysbaert & New) | CC BY-NC-SA 4.0 on the author's OSF page | Non-commercial and share-alike |
+| google-10000-english | Not an open licence; LDC terms, commercial use discouraged | Not clean |
+| Google Books Ngram exports | CC BY 3.0 | Clean, but needs building a table from very large exports |
+| Linguabase | CC0 1.0 | Clean, but ranks familiarity, not corpus frequency |
+
+CC BY-SA 4.0 is a one-way compatible licence for GPLv3 only, so a derived band
+table could not be relicensed under this repository's AGPL-3.0-only terms and
+would have to stay a separate share-alike file. The cheapest route to clean data
+(Google Ngram exports) needs processing of multi-gigabyte files, and Linguabase
+measures how familiar a word feels rather than how often it is written. We
+therefore do not embed any third-party list and no data file carries a
+third-party licence; `THIRD_PARTY_NOTICES.md` is unchanged.
+
+**How a band is assigned (curated).** Each entry is placed by hand into one
+band, using the following definition, applied in order:
+
+- `core` - function-like words and phrases met dozens of times a day in any
+  writing, including beginner material ("on time", "right now", "decide").
+- `common` - everyday vocabulary that a B1 learner meets most days, in general
+  or workplace writing ("suggest", "temporary", "make a decision").
+- `uncommon` - vocabulary that a B2 learner meets regularly but not daily, and
+  mostly in one register ("negotiate", "reluctant", "keep track of").
+- `rare` - lower-frequency but realistic words and idioms that a C1 learner
+  meets in careful writing or speech ("meticulous", "inevitable", "cut corners").
+
+Because the bands are curated, they are an editorial approximation of frequency,
+not a measured Zipf value. They are consistent within the starter set and are
+used only to order and explain words, never shown to the learner as a score. A
+licensed frequency list could later replace the curated table behind the same
+loader and band names.
+
+**Estimating a band for added words (provisional).** A word that arrives from
+the learner (My words), from Word check or from a model has no curated band. The
+estimate below is implemented in `src/server/learning/priority/intake.ts` and
+used for every word without a curated band; a curated band always wins. It uses
+no corpus and no network call, needs no data file and no third-party licence,
+and is provisional: it is a rough order of magnitude, never shown to the learner
+as a score, and the owner can override any band with a curated value.
+
+The rule is a single pass with no ambiguity. Define the input as the normalized
+text (lower case, trimmed, inner whitespace collapsed to one space), an optional
+set of tags drawn from the starter tag set (`work`, `time`, `people`,
+`communication`, `money`, `travel`, `study`, `technology`, `daily`, `emotion`),
+and the length `n` = number of ASCII letters in the normalized text. An input
+with no tags is estimated as if it had the empty tag set. Apply exactly one of
+the following cases, in this order, and stop at the first that matches:
+
+1. The normalized text equals one item of the enumerated single-word list below
+   (27 items, ASCII, lower case, compared after normalization). Result: `core`.
+2. The normalized text equals one item of the enumerated expression list below
+   (20 items, compared after normalization, so inner spacing does not matter).
+   Result: `core`.
+3. The normalized text contains at least one space. Result: `common` when the
+   tag set contains `daily` or `time`, otherwise `uncommon`.
+4. Otherwise (a single word, including unknown `ok`/`hi`-style short forms): base
+   score 2, plus 1 if the tag set contains `daily` or `time`, plus 1 if
+   `n <= 7`. Result by total score: 4 or more -> `core`; 3 -> `common`; 2 ->
+   `uncommon`; 1 or less is impossible for this branch.
+
+The enumerated lists (these are the exact, full lists; nothing outside them
+counts as a list hit):
+
+- single words: `a`, `an`, `and`, `are`, `at`, `be`, `but`, `by`, `can`, `do`,
+  `for`, `get`, `go`, `have`, `he`, `here`, `how`, `i`, `in`, `is`, `it`,
+  `look`, `make`, `me`, `my`, `no`, `not`.
+- expressions: `a lot`, `again`, `at home`, `best wishes`, `a bit`, `all right`,
+  `excuse me`, `good morning`, `good night`, `how are you`, `i think`, `in the
+  end`, `never mind`, `of course`, `on time`, `right now`, `see you`, `thank
+  you`, `the same`, `what about`.
+
+Worked examples: `back` with no tags -> case 4, `n` = 4, score 3 -> `common`.
+`ok` with no tags -> case 4, `n` = 2, score 3 -> `common`. `time` with the
+`time` tag -> case 4, `n` = 4, score 4 -> `core`. `deadline` with no tags ->
+case 4, `n` = 8, score 2 -> `uncommon`. `on time` -> case 2 -> `core`. `talk it
+over` with the `daily` tag -> case 3 -> `common`. `talk it over` with no tags ->
+case 3 -> `uncommon`. Tags do not affect cases 1-3, and case 4 never returns
+`rare`.
+
+This estimate is coarse: it separates very common short words from long words
+with few daily tags and nothing more. It is the provisional default for words
+without a curated band, it is not part of the B2 starter set, and the same rule
+can be swapped for a licensed frequency table later behind the same band names
+without changing the stored band vocabulary.
+
+## Word engine: statuses, priority and the session
+
+`src/server/learning/priority/` ranks the words a learner should practise next
+and updates them when they answer. The pure rules live in `rules.ts` (status and
+ladder transitions) and `scheduler.ts` (priority and the session mix); the
+database code is confined to `engine.ts`, so most tests need no database.
+
+A word is a saved expression, a starter entry or a Word check word. Statuses:
+Learning, Ready to activate (known but not used), Active and Hidden. Active is
+reached after 2 uses in the learner's own writing, which outweigh any exercise,
+or after 3 correct unassisted productive answers. Real use is synced from the
+Learning tab's independent-writing evidence per distinct document, so the same
+document is never counted twice; it is never recorded from practice. Evidence is
+collected over every expression whose text matches the word, so writing recorded
+under a saved id and under a starter id of the same text counts once as the one
+word. Two errors
+in a row move a word one step down (Ready to Learning, Active to Ready); the
+error streak then restarts, and the demotion resets the productive credit so the
+same stale answers cannot reactivate the word. Reactions: Already know makes the
+word Active with a rare check (14 days at most), Not relevant hides it, Too hard
+moves it one rung down and brings it back tomorrow, Too easy jumps the word to
+productive work. Rungs 1-6 are recognition, choice by meaning, gap fill, recall
+from memory, use in a situation and speaking; rung 1 is the entry rung, and a
+correct recognition lifts the word to rung 2. Hinted answers are assisted work:
+they can move the status to Ready but do not lift the rung and are not
+productive credit.
+
+The order combines frequency band (curated for starter entries, the documented
+estimate for other words), what the learner did (saved or added, Word check
+answers, "too easy", repeated errors) and progress. Edge words (Ready) come
+first. A session of 8 is 3 activate, 3 learn and 2 keep fresh. At most 3 words
+are started as brand-new per day; the number drops to 1 when six or more
+reviews are due or the recent answer share is below half (over four answers).
+A word takes one of the day's places when it is first shown, so a second
+session the same day does not start more. The daily three brand-new words
+include Word check "new" answers, which spend their place at Word check time.
+The learner sees one short reason such as "Common word - you know it but don't
+use it yet", never a score.
+
+Word origin and frequency-band source are tracked separately later; today a
+saved word matching a starter entry keeps the starter source.
+
+`db/migrations/0010_word_engine.sql` stores per-learner word state
+(`word_progress`) and answers (`word_practice_events`). Statuses, bands and the
+rung are integers or short strings with CHECK constraints; every row carries
+`learner_id` and a foreign key on the learner.
+`db/migrations/0011_word_real_use.sql` adds `real_use_documents`,
+`real_use_days`, `real_use_last_at` and `word_check_answer` to `word_progress`;
+the first two mirror distinct evidence documents and days, the last keeps the
+Word check answer that decides whether a word is brand new.
+`db/migrations/0012_onboarding_level.sql` adds `learners.level`, the Word check
+level estimate, plus `word_progress.level` (the starter level a word was served
+at) and the `word_check_entries` table of rounds described below.
+
+## Onboarding: level and Word check
+
+Onboarding has a Welcome step, a Level step, Word check, the Word check result,
+Your tools and Ready. The owner removed the Goals and topics screen (Nov 3), so
+there is no topics API and nothing reads a topic choice; personal relevance
+comes from Word check answers and the learner's own writing and saved words.
+`learners.level` (`A2`, `B1`, `B2`, `C1`; NULL before the first estimate) is
+the single stored level. Two writers feed it, and the rule is:
+
+1. **The Level step sets the starting point.** `POST /api/onboarding/level`
+   accepts `{ level }` with one of A2-C1 and writes `learners.level`. The first
+   Word check round is built around that choice. It has no GET: the stored
+   level travels in the Word check response.
+2. **Word check answers refine it.** Every `POST /api/onboarding/word-check`
+   recomputes `learners.level` from all answers so far (see the estimate
+   below) and overwrites the choice. The explicit choice is therefore only the
+   starting point: once the learner has answered, the estimate wins, and a
+   later visit to the Level step sets a new starting point for the next round.
+
+A round is frozen once served: a level chosen after the first `GET` moves the
+next round, never the current one, so the ids the page already holds keep
+answering the same words.
+
+**Word check API.** `GET /api/onboarding/word-check` serves a round of 24
+curated starter entries built around the stored level (or `B1` when it is
+NULL). The round is eight entries from the level below, eight from the
+learner's level and eight from the level above; at A2 it is sixteen A2 and
+eight B1, at C1 eight B2 and sixteen C1. A level can run short after a long
+history, so the round is filled from any remaining entries and may be smaller
+than 24. Words the learner already answered in any round, and words they
+already keep, are not offered again; ties prefer the fewest showings, then the
+longest unshown, then alphabetical order, so the round is deterministic. The
+round is persisted in `word_check_entries` and reused for the rest of the UTC
+day.
+
+The response is `{ entries, roundSize, answered, completed, level }`. Every
+entry carries `answer`: the answer already recorded for it in this round, or
+null while it is still open. So a reload never asks an answered word again - a
+finished round comes back with `completed: true` and every entry answered, a
+partial one with `answered` up to 24 and only the open entries null. Every row
+carries `learner_id`; nothing is shared between learners.
+
+`POST /api/onboarding/word-check` accepts `{ answers: [{ id, answer }] }` with
+1 to 24 answers, each id taken from a round this learner was served; any id
+from another learner or an invented one rejects the whole request before
+anything is written, and the same id twice is rejected. The answer mapping is
+fixed:
+
+| Answer | Meaning | Stored |
+|---|---|---|
+| `use` | I use it | Known vocabulary: no My words row and never in a practice session; the round row keeps the answer for the estimate and to avoid re-asking |
+| `know_unused` | I know it, I don't use it | Ready to activate (`word_progress.status = 'ready'`) |
+| `not_sure` | I'm not sure | Learning |
+| `new` | New to me | Learning, and it takes one of the day's three brand-new places |
+
+A word the learner already keeps (a saved expression or a starter word) keeps
+its own state; the answer records the level evidence but never demotes it. The
+response is the new level, the number of answers and counts of `active`
+(the "use" answers: known vocabulary, not the Active status of a word),
+`ready` and `learning`. A repeated POST is idempotent: the word rows are keyed
+by the learner's normalized text and keep their first answer, so no word,
+brand-new place or count changes.
+
+**Level estimate.** Each answered word is one line drawn from its curated
+level: `use` adds one level, `know_unused` adds nothing, `not_sure` subtracts
+one and `new` subtracts two. The estimate is the mean over every word the
+learner has answered, rounded down and clamped to A2-C1; with no answers it is
+B1. It is cumulative, so a later round refines an earlier estimate without a
+separate history. The rule is deliberately coarse: it separates adjacent
+levels and nothing more. It never flatters a learner (a mean of 1.9 is B1) and
+is documented here so the product can change it in one place.
 
 ## Word pronunciation
 
