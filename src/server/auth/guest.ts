@@ -14,8 +14,10 @@ export interface GuestRedemption {
   sessionExpiresAt: Date;
 }
 
-// Only the explicitly trusted Cloudflare header identifies a client. Unknown
-// clients share a hashed bucket so missing headers cannot bypass enrollment limits.
+// Client identity for the enrollment cap. Forwarded headers count only behind
+// a trusted proxy; everyone else shares one hashed bucket, which cannot be
+// reset by dropping a header. Owner-funded spend stays bounded by the global
+// ceilings either way, so the shared bucket is the fail-closed choice.
 export function guestClientIp(request: Request, config: AppConfig): string | null {
   const candidate = config.byokTrustProxyHeaders
     ? request.headers.get("cf-connecting-ip")?.trim()
@@ -53,7 +55,11 @@ export function createGuestSession(
       `SELECT COUNT(*) AS count FROM guest_enrollments
        WHERE ip_hash = ? AND created_at >= ? AND created_at < ?`,
     ).get(ipHash, dayStart, nextDay)?.count ?? 0);
-    if (count >= deps.config.guestDailyIpLimit) throw new RateLimitedError();
+    // The rejection names the wait until tomorrow, so a retrying browser can
+    // back off instead of failing the first visit for the rest of the day.
+    if (count >= deps.config.guestDailyIpLimit) {
+      throw new RateLimitedError(Math.max(1_000, Date.parse(nextDay) - now.getTime()));
+    }
 
     const learner = {
       id: newId(),

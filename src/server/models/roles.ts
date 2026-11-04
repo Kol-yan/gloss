@@ -31,13 +31,14 @@ export const PRACTICE_GENERATION_ROLE = { tier: "fast", maxTokens: 4096, tempera
   maxTokens: number;
   temperature: number;
 };
-// Tidies dictated speech: punctuation and fillers only, so little reasoning is needed.
-export const DICTATION_CLEANUP_ROLE = {
-  tier: "smart",
-  maxTokens: 2048,
-  reasoningEffort: "minimal",
-  temperature: 0,
-} as const satisfies { tier: ModelTier; maxTokens: number; reasoningEffort: string; temperature: number };
+// Tidies dictated speech: punctuation and fillers only, so little reasoning is
+// needed. Dictation is latency-sensitive: it always runs on the fast tier
+// (gpt-oss-120b), never on the slower smart model.
+export const DICTATION_CLEANUP_ROLE = { tier: "fast", maxTokens: 2048, temperature: 0 } as const satisfies {
+  tier: ModelTier;
+  maxTokens: number;
+  temperature: number;
+};
 export const EVALUATE_ATTEMPT_ROLE = {
   tier: "smart",
   maxTokens: 4096,

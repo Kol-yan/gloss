@@ -406,16 +406,21 @@ function unitsUsed(
   return Number(row?.used ?? 0);
 }
 
-// Hosted spend charged today. Settled rows count their actual cost, except an
-// actual of 0 (or missing), which is untrusted and counts max instead; open
-// and unknown rows always count max.
+// Hosted spend charged today. One row's charge: `recordProviderReportedCost`
+// writes the provider cost to both actual_cost_micros and
+// reported_cost_micros; the second is the source of truth, so the first must
+// not be added a second time. Only a provider report lowers a charge; an
+// untrusted actual of 0 (or missing) and every open or unknown row count max.
+const ROW_CHARGE = `CASE
+  WHEN reported_cost_micros > 0 THEN reported_cost_micros
+  WHEN status = 'settled' AND COALESCE(actual_cost_micros, 0) = max_cost_micros THEN max_cost_micros
+  WHEN status = 'settled' AND COALESCE(actual_cost_micros, 0) > 0 THEN COALESCE(actual_cost_micros, 0)
+  ELSE max_cost_micros END`;
+
 function spentMicros(db: DatabaseSync, start: string, end: string): number {
   const row = db
     .prepare(
-      `SELECT COALESCE(SUM(CASE WHEN status = 'settled'
-                                AND COALESCE(actual_cost_micros, 0) > 0
-                                THEN actual_cost_micros
-                                ELSE max_cost_micros END), 0) AS spent
+      `SELECT COALESCE(SUM(${ROW_CHARGE}), 0) AS spent
        FROM usage_reservations WHERE funding_source = 'hosted' AND created_at >= ? AND created_at < ?`,
     )
     .get(start, end);
@@ -429,10 +434,7 @@ function spentMicros(db: DatabaseSync, start: string, end: string): number {
 function periodSpentMicros(db: DatabaseSync): number {
   const row = db
     .prepare(
-      `SELECT COALESCE(SUM(CASE WHEN status = 'settled'
-                                AND COALESCE(actual_cost_micros, 0) > 0
-                                THEN actual_cost_micros
-                                ELSE max_cost_micros END), 0) AS spent
+      `SELECT COALESCE(SUM(${ROW_CHARGE}), 0) AS spent
        FROM usage_reservations WHERE funding_source = 'hosted'`,
     )
     .get();

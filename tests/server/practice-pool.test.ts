@@ -119,6 +119,30 @@ describe("practice exercise pool", () => {
     } finally { state.cleanup(); }
   });
 
+  // Real model replies are looser than the schema: they return the meaning
+  // instead of the target as the answer of a choice rung, write a gap where a
+  // rung 1 sentence should show the target, leave the example empty and add
+  // markdown emphasis. None of that may lose the whole round.
+  it("repairs a loose model bundle instead of rejecting the round", async () => {
+    const state = setup();
+    const loose = bundle("loose");
+    loose.exercises[2] = { ...loose.exercises[2], answer: MEANING };
+    loose.exercises[4] = { ...loose.exercises[4], sentence: "loose gap one: I cannot come today, but I can ___ for next week." };
+    loose.exercises[0] = { ...loose.exercises[0], sentence: `loose one: I had to **${TARGET}** this week.`, example: "" };
+    loose.exercises[6] = { ...loose.exercises[6], sentence: "loose recall one: Your friend invites you out, but you are busy.", options: [] as unknown as null } as never;
+    installResponse(loose);
+    try {
+      const rung1 = await takePoolExercise(state.learnerId, state.expressionId, 1, { db: state.db, now: AT, config: state.config });
+      const rung2 = await takePoolExercise(state.learnerId, state.expressionId, 2, { db: state.db, now: AT, config: state.config });
+      const rung3 = await takePoolExercise(state.learnerId, state.expressionId, 3, { db: state.db, now: AT, config: state.config });
+      expect(rung1.sentence).toContain(TARGET);
+      expect(rung1.sentence).not.toContain("**");
+      expect(rung2.answer).toBe(TARGET);
+      expect(rung3.answer).toBe(TARGET);
+      expect(rung3.sentence).toContain("___");
+    } finally { state.cleanup(); }
+  });
+
   it("generates once, reuses distinct rows, and reserves the explicit output budget", async () => {
     const state = setup();
     const fetchMock = installResponse(bundle());

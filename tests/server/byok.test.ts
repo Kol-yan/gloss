@@ -283,7 +283,8 @@ describe("visitor accounting and rate limits", () => {
 
   it("does not trust spoofed forwarding headers", () => {
     const limit = createEnrollmentLimiter();
-    for (let i = 0; i < 30; i++) {
+    // A handful of retries in one hour is fine; a flood is not.
+    for (let i = 0; i < 12; i++) {
       const r = request("/api/access/byok");
       r.headers.set("cf-connecting-ip", `192.0.2.${i + 1}`);
       limit(r, false, 1000);

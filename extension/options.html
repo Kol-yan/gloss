@@ -13,22 +13,25 @@
       <h1>Extension settings</h1>
 
       <form id="settings">
-        <fieldset id="controls" disabled>
-          <label for="app-origin">Your <span class="brand-word">gloss</span> server</label>
-          <input id="app-origin" name="appOrigin" type="url" value="http://localhost:3000" placeholder="http://localhost:3000" required autocomplete="url" aria-describedby="address-help status" />
-          <p id="address-help">An HTTPS address without a path, or HTTP on localhost or 127.0.0.1 for a local server. Saving asks your browser to let <span class="brand-word">gloss</span> reach this address.</p>
-          <div class="actions">
-            <button type="submit">Save address</button>
-            <button id="use-default" class="secondary" type="button">Use localhost:3000</button>
-            <button id="test" class="secondary" type="button">Check connection</button>
-          </div>
-        </fieldset>
+        <details class="advanced">
+          <summary>Advanced</summary>
+          <fieldset id="controls" disabled>
+            <label for="app-origin">Server address</label>
+            <input id="app-origin" name="appOrigin" type="url" placeholder="https://gloss.li" required autocomplete="off" spellcheck="false" aria-describedby="address-help status" />
+            <p id="address-help">An HTTPS address without a path, or HTTP on localhost or 127.0.0.1 for a local server. Saving asks your browser to let <span class="brand-word">gloss</span> reach this address.</p>
+            <div class="actions">
+              <button type="submit">Save address</button>
+              <button id="use-default" class="secondary" type="button">Use the default</button>
+              <button id="test" class="secondary" type="button">Check connection</button>
+            </div>
+          </fieldset>
+        </details>
         <p id="status" role="status" aria-live="polite">Loading settings…</p>
       </form>
 
       <section aria-labelledby="sign-in-title">
-        <h2 id="sign-in-title">Signing in</h2>
-        <p>The extension uses your <span class="brand-word">gloss</span> session in this browser. Open your invite link once in this browser, then come back here and check the connection.</p>
+        <h2 id="sign-in-title">Your workspace</h2>
+        <p>The extension uses your <span class="brand-word">gloss</span> session in this browser. If you have none yet, open <span class="brand-word">gloss</span> once and it starts one for you.</p>
       </section>
 
       <section aria-labelledby="checks-title">

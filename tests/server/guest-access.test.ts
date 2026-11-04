@@ -5,6 +5,7 @@ import { ApiError, MeResponse } from "@/shared/contracts";
 vi.mock("next/headers", async () => (await import("./helpers/app")).nextHeadersMock);
 
 import { GET as availabilityRoute, POST as guestRoute } from "@/app/api/access/guest/route";
+import { POST as desktopGuestRoute } from "@/app/api/access/guest/desktop/route";
 import { guestClientIpHash, createGuestSession } from "@/server/auth/guest";
 import { getSessionCookieName, SESSION_TTL_SECONDS } from "@/server/auth/sessions";
 import { getConfig } from "@/server/config";
@@ -185,6 +186,18 @@ describe("guest access", () => {
     });
   });
 
+  it("tells a capped browser when the allowance returns", async () => {
+    await withEnv({ BYOK_TRUST_PROXY_HEADERS: "true", GUEST_DAILY_IP_LIMIT: "1" }, async () => {
+      await guestRoute(request({}, 3000, "192.0.2.44"));
+      const capped = await guestRoute(request({}, 3000, "192.0.2.44"));
+      expect(capped.status).toBe(429);
+      const retryAfter = Number(capped.headers.get("retry-after"));
+      // Never a zero or negative wait, and never more than a day.
+      expect(retryAfter).toBeGreaterThan(0);
+      expect(retryAfter).toBeLessThanOrEqual(86_400);
+    });
+  });
+
   it("uses one fail-closed bucket when the proxy IP header is not trusted", () => {
     const config = getConfig();
     const first = guestClientIpHash(request({}, 3000, "192.0.2.1"), config);
@@ -199,5 +212,46 @@ describe("guest access", () => {
     for (let i = 0; i < 3; i++) createGuestSession(ipHash, { config, now: beforeMidnight });
     expect(() => createGuestSession(ipHash, { config, now: beforeMidnight })).toThrow(RateLimitedError);
     expect(() => createGuestSession(ipHash, { config, now: new Date("2026-11-04T00:00:00.000Z") })).not.toThrow();
+  });
+});
+
+describe("desktop guest access", () => {
+  beforeEach(() => {
+    session.cookie = undefined;
+    getDb().prepare("DELETE FROM sessions WHERE learner_id IN (SELECT id FROM learners WHERE quota_profile = 'guest')").run();
+    getDb().prepare("DELETE FROM guest_enrollments").run();
+    getDb().prepare("DELETE FROM learners WHERE quota_profile = 'guest'").run();
+  });
+
+  const desktopRequest = (ip?: string) => new Request("http://localhost:3000/api/access/guest/desktop", {
+    method: "POST",
+    body: "{}",
+    headers: {
+      "content-type": "application/json",
+      origin: "http://localhost:3000",
+      "sec-fetch-site": "same-origin",
+      ...(ip ? { "cf-connecting-ip": ip } : {}),
+    },
+  });
+
+  it("creates the same guest learner without Turnstile and keeps the IP limit", async () => {
+    const response = await desktopGuestRoute(desktopRequest("198.51.100.7")) as NextResponse;
+    expect(response.status).toBe(200);
+    const body = MeResponse.parse(await response.json());
+    expect(body).toMatchObject({ accessMode: "hosted", learner: { displayName: "Guest" } });
+    expect(response.cookies.get(getSessionCookieName(desktopRequest()))).toMatchObject({ name: "glossy_session_3000", httpOnly: true });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("still refuses a crossed origin and a non-empty body", async () => {
+    const crossSite = desktopRequest();
+    crossSite.headers.set("origin", "https://other.example");
+    crossSite.headers.set("sec-fetch-site", "cross-site");
+    expect((await desktopGuestRoute(crossSite)).status).toBe(403);
+    expect((await desktopGuestRoute(new Request("http://localhost:3000/api/access/guest/desktop", {
+      method: "POST",
+      body: JSON.stringify({ unexpected: true }),
+      headers: { "content-type": "application/json" },
+    }))).status).toBe(400);
   });
 });

@@ -4,7 +4,7 @@ import { DictationResponse } from "@/shared/contracts";
 vi.mock("next/headers", async () => (await import("./helpers/app")).nextHeadersMock);
 
 import { POST as dictateRoute } from "@/app/api/speech/dictate/route";
-import { DICTATION_CLEANUP_ROLE } from "@/server/models/roles";
+import { DICTATION_CLEANUP_ROLE, PROOFREAD_ROLE } from "@/server/models/roles";
 import { parseCleanup } from "@/server/dictation/service";
 import { chatReply, db, fetchMock, installApp, login, makeWav, sentBody, session } from "./helpers/app";
 
@@ -38,7 +38,7 @@ const reservations = (learnerId: string) =>
 const spoken = "um so we need to to move the meeting to friday you know";
 
 describe("POST /api/speech/dictate", () => {
-  it("transcribes with Meta, tidies the text with a Meta text model and stores no text", async () => {
+  it("transcribes with Meta, tidies the text on the fast tier and stores no text", async () => {
     const { learner } = login();
     fetchMock.mockResolvedValueOnce(asrReply(spoken));
     fetchMock.mockResolvedValueOnce(chatReply({ text: "So we need to move the meeting to Friday." }));
@@ -54,7 +54,8 @@ describe("POST /api/speech/dictate", () => {
     });
     expect(fetchMock.mock.calls[0][0]).toBe("https://meta.test/v1/asr/transcribe");
     const chat = sentBody(1);
-    expect(chat.model).toBe("muse-spark-1.3");
+    // Dictation is latency-sensitive: the clean-up never uses Muse Spark.
+    expect(chat.model).toBe("openai/gpt-oss-120b");
     expect(chat.max_tokens).toBe(DICTATION_CLEANUP_ROLE.maxTokens);
     expect(chat.messages[1].content).toContain(spoken);
     expect(reservations(learner.id)).toEqual([
@@ -102,6 +103,14 @@ describe("POST /api/speech/dictate", () => {
     session.cookie = undefined;
     expect((await upload(makeWav({ seconds: 2 }))).status).toBe(401);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("dictation clean-up role", () => {
+  it("stays on the fast tier with a bounded output budget", () => {
+    expect(DICTATION_CLEANUP_ROLE.tier).toBe("fast");
+    expect(DICTATION_CLEANUP_ROLE.maxTokens).toBeGreaterThanOrEqual(2048);
+    expect(DICTATION_CLEANUP_ROLE.maxTokens).toBeLessThanOrEqual(PROOFREAD_ROLE.maxTokens);
   });
 });
 

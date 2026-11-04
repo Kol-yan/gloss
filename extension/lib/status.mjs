@@ -4,7 +4,7 @@ const ACCOUNT_ERRORS = {
   settings: "Set your gloss server address in Settings.",
   not_allowed: "Allow gloss to reach your server in Settings.",
   unreachable: "Your gloss server is not answering. Check that it is running.",
-  signed_out: "Not signed in. Open gloss and sign in with your invite link.",
+  signed_out: "Open gloss to start writing.",
 };
 
 export function accountLines(status) {

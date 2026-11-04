@@ -40,12 +40,18 @@ function showChecks(checks) {
   $("checks-status").replaceChildren(brandFragment(checksLine(checks)));
 }
 
+// There is no sign-in screen anywhere: a browser without a gloss session gets
+// one from the site itself, so the popup offers a single way forward.
 async function loadAccount() {
-  const lines = accountLines(await send({ type: "status" }));
+  const status = await send({ type: "status" });
+  const lines = accountLines(status);
   $("account").replaceChildren(brandFragment(lines.text));
   $("account-note").replaceChildren(brandFragment(lines.note));
   $("account-note").hidden = !lines.note;
-  $("account-actions").hidden = !lines.openApp;
+  $("open-app-row").hidden = !lines.openApp;
+  // Without a workspace neither switch can do anything, so the popup stays
+  // down to the status line and one button.
+  $("controls-section").hidden = lines.openApp;
 }
 
 async function init() {
@@ -97,11 +103,9 @@ $("settings").addEventListener("click", async () => {
   }
 });
 
-for (const [id, target] of [["open-words", "words"], ["open-app", "app"]]) {
-  $(id).addEventListener("click", async () => {
-    await send({ type: "open", target });
-    window.close();
-  });
-}
+$("open-app").addEventListener("click", async () => {
+  await send({ type: "open", target: "app" });
+  window.close();
+});
 
 void init();

@@ -55,7 +55,9 @@ export async function POST(request: Request) {
       redemption = createGuestSession(ipHash, { config, now });
     } catch (error) {
       if (error instanceof RateLimitedError) {
-        return jsonError("rate_limited", 429, "Free guest access is limited for today. Add your own OpenRouter key in Settings to keep going.");
+        const response = jsonError("rate_limited", 429, "Free guest access is limited for today. Add your own OpenRouter key in Settings to keep going.");
+        response.headers.set("Retry-After", String(Math.ceil(error.retryAfterMs / 1_000)));
+        return response;
       }
       throw error;
     }

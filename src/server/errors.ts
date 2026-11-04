@@ -30,7 +30,7 @@ export class QuotaExceededError extends Error {
 }
 
 export class RateLimitedError extends Error {
-  constructor() {
+  constructor(readonly retryAfterMs = 0) {
     super("Request rate limit reached");
     this.name = "RateLimitedError";
   }

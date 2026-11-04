@@ -15,8 +15,13 @@ export function createEnrollmentLimiter() {
     const ip = forwarded && isIP(forwarded) ? forwarded : null;
     const identity = ip ? createHash("sha256").update(ip).digest("hex") : "shared";
     const current = buckets.get(identity);
-    const limit = ip ? 5 : 30;
-    if ((current?.count ?? 0) >= limit || (!current && buckets.size >= MAX_BUCKETS)) throw new RateLimitedError();
+    // One enrollment can arrive several times (a retry after a slow answer,
+    // parallel first-visit requests), so the burst bucket allows a handful.
+    // The durable per-IP cap in createGuestSession still bounds the day.
+    const limit = ip ? 5 : 12;
+    const retryAfterMs = current ? current.expires - now : WINDOW_MS;
+    if ((current?.count ?? 0) >= limit) throw new RateLimitedError(retryAfterMs);
+    if (!current && buckets.size >= MAX_BUCKETS) throw new RateLimitedError(WINDOW_MS);
     buckets.set(identity, { count: (current?.count ?? 0) + 1, expires: current?.expires ?? now + WINDOW_MS });
   };
 }

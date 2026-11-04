@@ -161,10 +161,9 @@ Firefox loads the same folder as a temporary add-on. See the
 
 Until a signed download is available, use the macOS build from the
 **Desktop app (macOS)** GitHub Actions workflow or build it from source.
-Move `gloss.app` to Applications and follow the desktop guide to sign in and
-allow Accessibility and microphone access when needed. The app has been built
-and tested on Linux; the macOS-specific paths are compiled but have not been
-run on a real Mac yet.
+Move `gloss.app` to Applications and allow Accessibility, microphone and
+Input Monitoring access when macOS asks. There is no sign-in: on first launch
+the app creates its own guest workspace on the server and keeps it.
 
 See the [Mac installation and build guide](desktop/README.md#run-it-on-macos).
 

@@ -237,7 +237,11 @@ describe("extension toasts and status lines", () => {
     expect(accountLines({ ok: true, name: "Ana", aiEnabled: true, byok: false, checks: { used: 25, limit: 20 } }).text)
       .toBe("Signed in as Ana · 0 of 20 checks left today");
     expect(accountLines({ ok: true, name: "", aiEnabled: true, byok: true, checks: null }).note).toContain("own key");
-    expect(accountLines({ ok: false, error: "signed_out" })).toMatchObject({ openApp: true });
+    // Signed out is never a dead end: one button opens the site, which starts
+    // a workspace, and no line ever asks for an invite.
+    const signedOut = accountLines({ ok: false, error: "signed_out" });
+    expect(signedOut).toMatchObject({ openApp: true });
+    expect(signedOut.text).not.toMatch(/invite|not signed in/i);
     expect(accountLines({ ok: false, error: "strange" }).text).toContain("not available");
     expect(highlightLine({ on: true, matches: 1, words: 3 })).toBe("1 of your words is marked on this page.");
     expect(highlightLine({ on: true, matches: 4, words: 3 })).toBe("4 of your words are marked on this page.");

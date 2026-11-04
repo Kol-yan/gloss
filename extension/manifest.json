@@ -1,18 +1,33 @@
 {
   "manifest_version": 3,
   "name": "gloss",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Save words to My words, see them on pages you read, and check your English in text fields.",
-  "permissions": ["contextMenus", "storage"],
-  "host_permissions": ["http://localhost/*"],
-  "optional_host_permissions": ["http://127.0.0.1/*", "https://*/*"],
+  "permissions": [
+    "contextMenus",
+    "storage"
+  ],
+  "host_permissions": [
+    "http://localhost/*",
+    "http://127.0.0.1/*",
+    "https://gloss.li/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*"
+  ],
   "background": {
     "service_worker": "background.js",
     "type": "module"
   },
   "action": {
     "default_title": "gloss",
-    "default_popup": "popup.html"
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
   },
   "options_ui": {
     "page": "options.html",
@@ -20,7 +35,10 @@
   },
   "content_scripts": [
     {
-      "matches": ["http://*/*", "https://*/*"],
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
       "js": [
         "content/words.js",
         "content/edits.js",
@@ -37,8 +55,17 @@
       "id": "{e29035ac-6fe1-400e-9267-aadecd6a5123}",
       "strict_min_version": "128.0",
       "data_collection_permissions": {
-        "required": ["websiteContent", "personalCommunications"]
+        "required": [
+          "websiteContent",
+          "personalCommunications"
+        ]
       }
     }
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
   }
 }

@@ -44,14 +44,18 @@ Firefox support is a follow-up: this manifest carries Chrome's
 
 ## Set up
 
-1. **Sign in**: open your gloss invite link in the same browser. The extension
-   uses that browser session; it never sees or stores a password or token.
-2. **Server address**: open the extension's settings (popup → **Settings**).
-   The default is `http://localhost:3000`. For another server, enter its
-   origin (HTTPS, or HTTP on `localhost`/`127.0.0.1`) and choose
-   **Save address**. The browser then asks to let gloss reach that address.
-3. Choose **Check connection**. It should say "Signed in as …" with the
-   number of checks left today.
+1. **Open gloss**: click the toolbar button and choose **Open gloss**, or
+   visit [gloss.li](https://gloss.li). The site starts a workspace for a new
+   visitor automatically; there is no sign-in screen. The popup shows
+   "Open gloss" whenever this browser has no gloss session yet.
+2. **Server address** (only for a self-hosted server): open the extension's
+   settings (popup → **Settings**) → **Advanced**. The default is
+   `https://gloss.li`; an unpacked development build defaults to
+   `http://localhost:3000`. Enter the origin (HTTPS, or HTTP on
+   `localhost`/`127.0.0.1`) and choose **Save address**. The browser then asks
+   to let gloss reach that address.
+3. Choose **Check connection** under the same panel. It should say
+   "Signed in as …" with the number of checks left today.
 
 Pages that were open before the extension was installed or updated need a
 reload before highlighting and checks work there.

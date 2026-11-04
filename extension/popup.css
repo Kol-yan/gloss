@@ -1,49 +1,69 @@
+/* Same light paper palette as the gloss website (src/app/globals.css). The
+   popup never follows the operating system's dark mode: it is a light card. */
 :root {
-  color-scheme: light dark;
+  color-scheme: only light;
   font-family: "Avenir Next", "Segoe UI", "Helvetica Neue", system-ui, sans-serif;
-  color: #203139;
-  background: #f4efe7;
+  --paper: #f4efe7;
+  --card: #fffdf9;
+  --ink: #203139;
+  --ink-muted: #51656e;
+  --line: #d6cec1;
+  --accent: #0d7a72;
+  --accent-strong: #0a665f;
+  --accent-soft: #d6efe8;
+  --on-accent: #ffffff;
+  color: var(--ink);
+  background: var(--paper);
 }
 
 * { box-sizing: border-box; }
-body { width: 330px; margin: 0; padding: 14px 16px 16px; font-size: 14px; line-height: 1.45; }
-header { display: flex; align-items: center; justify-content: space-between; }
-.brand { margin: 0; color: #0a665f; font-size: 18px; font-weight: 750; }
-.brand-word { color: #0a665f; font-weight: 600; }
-p { margin: 6px 0 0; }
-h2 { margin: 0 0 6px; font-size: 13px; font-weight: 700; letter-spacing: 0.02em; color: #51656e; text-transform: uppercase; }
-.account { font-weight: 600; }
-.note { color: #51656e; font-size: 13px; }
+body {
+  width: 320px;
+  margin: 0;
+  padding: 16px 18px 18px;
+  font-size: 14px;
+  line-height: 1.45;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.brand-lockup { display: inline-flex; align-items: center; gap: 9px; }
+.brand-tile { display: block; width: 28px; height: 28px; border-radius: 8px; }
+.brand-name { color: var(--accent); font-size: 24px; font-weight: 650; letter-spacing: -0.01em; }
+.brand-word { color: var(--accent); font-weight: 600; }
+
+p { margin: 0; }
+.account { margin-top: 14px; color: var(--ink); font-weight: 600; }
+.note { margin-top: 3px; color: var(--ink-muted); font-size: 13px; }
 .note:empty { display: none; }
-section { margin-top: 14px; border-top: 1px solid #d6cec1; padding-top: 12px; }
-.switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.switch-label { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
-label { font-size: 15px; font-weight: 650; }
-.site { color: #51656e; font-weight: 500; font-size: 13px; overflow-wrap: anywhere; }
-footer { margin-top: 14px; border-top: 1px solid #d6cec1; padding-top: 12px; }
-button { border: 1px solid transparent; border-radius: 24px; padding: 7px 14px; font: inherit; font-weight: 650; cursor: pointer; color: #fff; background: #0a665f; }
-button.secondary { border-color: #9caaa8; color: #203139; background: transparent; }
-button.link { border: 0; padding: 4px 6px; color: #0a665f; background: transparent; text-decoration: underline; }
-button:focus-visible, input:focus-visible { outline: 3px solid #0d7a72; outline-offset: 3px; }
+
+.open-row { margin-top: 12px; }
+.open-row[hidden] { display: none; }
+
+section[aria-label="Extension controls"] { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+section[aria-label="Extension controls"][hidden] { display: none; }
+.switch-row { display: flex; align-items: center; gap: 12px; }
+.switch-row.separated { margin-top: 14px; }
+.switch-row label { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; }
+.switch-site { color: var(--ink-muted); font-size: 12px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 110px; }
+.switch-site:empty { display: none; }
+
+button { border: 1px solid transparent; border-radius: 999px; padding: 8px 16px; font: inherit; font-weight: 650; cursor: pointer; }
+button.primary { width: 100%; color: var(--on-accent); background: var(--accent); }
+button.primary:hover { background: var(--accent-strong); }
+button.link { border: 0; padding: 4px 6px; color: var(--accent-strong); background: transparent; text-decoration: underline; text-underline-offset: 3px; }
+button:focus-visible, input:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
 
 input[role="switch"] {
-  appearance: none; flex: none; position: relative; width: 42px; height: 24px; margin: 0;
-  border-radius: 12px; background: #9caaa8; cursor: pointer; transition: background 0.15s;
+  appearance: none; flex: none; position: relative; width: 40px; height: 23px; margin: 0;
+  border-radius: 12px; background: #b9c2c0; cursor: pointer; transition: background 0.15s;
 }
 input[role="switch"]::after {
-  content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px;
-  border-radius: 50%; background: #fff; transition: transform 0.15s;
+  content: ""; position: absolute; top: 3px; left: 3px; width: 17px; height: 17px;
+  border-radius: 50%; background: #ffffff; transition: transform 0.15s;
+  box-shadow: 0 1px 2px rgb(32 49 57 / 0.25);
 }
-input[role="switch"]:checked { background: #0a665f; }
-input[role="switch"]:checked::after { transform: translateX(18px); }
-input[role="switch"]:disabled { cursor: default; opacity: 0.5; }
-
-@media (prefers-color-scheme: dark) {
-  :root { color: #e9efed; background: #18272c; }
-  .brand, .brand-word, button.link { color: #8fd9cf; }
-  .note, .site, h2 { color: #c0cdcc; }
-  section, footer { border-color: #526462; }
-  button.secondary { color: #e9efed; border-color: #809e9c; }
-  input[role="switch"] { background: #526462; }
-  input[role="switch"]:checked { background: #3fb8aa; }
-}
+input[role="switch"]:checked { background: var(--accent); }
+input[role="switch"]:checked::after { transform: translateX(17px); }
+input[role="switch"]:disabled { cursor: default; opacity: 0.45; }

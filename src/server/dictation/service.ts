@@ -1,8 +1,10 @@
 // Dictation: speech becomes text the learner can insert wherever they write.
-// A Meta speech model transcribes the audio; a Meta text model then fixes
+// A Meta speech model transcribes the audio; the fast text tier then fixes
 // punctuation and removes fillers without changing the learner's words, so
-// later checks still see the learner's own English. Neither the audio nor
-// the text is stored; only the spending ledger records the two calls.
+// later checks still see the learner's own English. Dictation is
+// latency-sensitive, so the clean-up never uses the slower smart model.
+// Neither the audio nor the text is stored; only the spending ledger records
+// the two calls. One line per request logs the two durations, never the text.
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import type { DictationResponse } from "@/shared/contracts";
@@ -108,6 +110,8 @@ export async function dictate(
     db,
   );
 
+  // Durations only, so a slow path can be found without logging any content.
+  const started = performance.now();
   let result;
   try {
     result = await transcribeWithAccess({ model, audio: info.canonical }, access, config, { reservation, db, now });
@@ -124,11 +128,20 @@ export async function dictate(
   }
   immediate((tx) => settle(reservation.id, maxCostMicros, { db: tx, now }), db);
 
+  const transcribeMs = Math.round(performance.now() - started);
   const rawText = result.text.trim();
   const durationSeconds = info.seconds;
-  if (!rawText) return { text: "", rawText: "", cleaned: false, durationSeconds };
+  if (!rawText) {
+    console.info(`[gloss] dictation timings transcribe=${transcribeMs}ms cleanup=skipped`);
+    return { text: "", rawText: "", cleaned: false, durationSeconds };
+  }
 
+  const cleanupStarted = performance.now();
+  // The host runs the demo guests on its own key, so their clean-up must not
+  // use the slower smart model: they always get the fast tier.
   const text = await cleanUp(learner.id, rawText, access, { config, db, now });
+  const cleanupMs = Math.round(performance.now() - cleanupStarted);
+  console.info(`[gloss] dictation timings transcribe=${transcribeMs}ms cleanup=${cleanupMs}ms cleaned=${text !== null}`);
   return text === null
     ? { text: rawText, rawText, cleaned: false, durationSeconds }
     : { text, rawText, cleaned: true, durationSeconds };
@@ -144,6 +157,8 @@ async function cleanUp(
 ): Promise<string | null> {
   const { config, db, now } = deps;
   try {
+    // The role's fast tier applies to both funding paths: a visitor's smart
+    // tier is Muse Spark, which is too slow for dictation.
     const route = resolveTextRoute(access, config, DICTATION_CLEANUP_ROLE.tier);
     const messages = buildCleanupMessages(transcript);
     const inputChars =
@@ -169,7 +184,6 @@ async function cleanUp(
         messages,
         jsonSchema: DICTATION_JSON_SCHEMA,
         maxTokens: DICTATION_CLEANUP_ROLE.maxTokens,
-        reasoningEffort: DICTATION_CLEANUP_ROLE.reasoningEffort,
         temperature: DICTATION_CLEANUP_ROLE.temperature,
       },
       parse: (content) => parseCleanup(content, transcript),
