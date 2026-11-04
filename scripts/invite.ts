@@ -1,12 +1,14 @@
 // Usage: npm run invite -- --label "Judges" --uses 5 --profile judge [--days 14]
 import { parseArgs } from "node:util";
+import { z } from "zod";
 import { createInvite } from "../src/server/auth/invites";
-import { getConfig, QuotaProfileNameSchema } from "../src/server/config";
+import { getConfig } from "../src/server/config";
 import { closeDb } from "../src/server/db";
 import { loadLocalEnv } from "./env";
 
 const USAGE =
   "Usage: npm run invite -- --label <name> --uses <n> --profile <pilot|judge|owner> [--days <d>]";
+const InviteProfileSchema = z.enum(["pilot", "judge", "owner"]);
 
 function fail(message: string): never {
   console.error(message);
@@ -27,7 +29,7 @@ function main() {
 
   const uses = Number(values.uses);
   const days = values.days === undefined ? undefined : Number(values.days);
-  const profile = QuotaProfileNameSchema.safeParse(values.profile);
+  const profile = InviteProfileSchema.safeParse(values.profile);
   if (!values.label || !Number.isInteger(uses) || uses < 1 || !profile.success) fail(USAGE);
   if (days !== undefined && !(Number.isFinite(days) && days > 0)) fail(USAGE);
 

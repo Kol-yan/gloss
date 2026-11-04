@@ -265,7 +265,7 @@ async function writeSituation(a: SituationArgs): Promise<{ situation: string; mo
       reservation = immediate((tx) => {
         assertGenerationOwner(tx, a.learnerId, a.requestId, a.generationId);
         const reserved = reserve(
-          { learnerId: a.learnerId, kind: "evaluate", requestId, units: 1, maxCostMicros },
+          { learnerId: a.learnerId, kind: "evaluate", role: "build_practice", requestId, units: 1, maxCostMicros },
           { db: tx, now: a.now, config: a.config },
         );
         // Another attempt with this request id is in flight (or died halfway).

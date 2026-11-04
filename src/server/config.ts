@@ -5,7 +5,7 @@ import { z } from "zod";
 import type { QuotaKind } from "@/shared/contracts";
 import { FAST_MODEL_DEFAULT } from "./models/prices";
 
-export const QUOTA_PROFILE_NAMES = ["pilot", "judge", "owner"] as const;
+export const QUOTA_PROFILE_NAMES = ["guest", "pilot", "judge", "owner"] as const;
 export type QuotaProfileName = (typeof QUOTA_PROFILE_NAMES)[number];
 export const QuotaProfileNameSchema = z.enum(QUOTA_PROFILE_NAMES);
 
@@ -14,6 +14,7 @@ export type QuotaLimits = Record<QuotaKind, number>;
 // Daily per-learner limits. proofread/detect/evaluate count operations;
 // asrSeconds counts seconds of audio. Detector and generator quotas are separate.
 export const QUOTA_PROFILES: Record<QuotaProfileName, QuotaLimits> = {
+  guest: { proofread: 30, detect: 30, evaluate: 3, asrSeconds: 300 },
   pilot: { proofread: 20, detect: 100, evaluate: 12, asrSeconds: 180 },
   judge: { proofread: 30, detect: 30, evaluate: 30, asrSeconds: 300 },
   owner: { proofread: 200, detect: 200, evaluate: 100, asrSeconds: 1800 },
@@ -57,6 +58,16 @@ const EnvSchema = z.object({
   OPENROUTER_FAST_PRICE_IN_PER_M: optionalPrice,
   OPENROUTER_FAST_PRICE_OUT_PER_M: optionalPrice,
   BYOK_TRUST_PROXY_HEADERS: z.preprocess(blankAsUndefined, z.stringbool().default(false)),
+  TURNSTILE_SITE_KEY: optionalText,
+  TURNSTILE_SECRET_KEY: optionalText,
+  TURNSTILE_ACTION: optionalText,
+  TURNSTILE_HOSTNAME: optionalText,
+  TELEGRAM_BOT_TOKEN: optionalText,
+  TELEGRAM_CHAT_ID: optionalText,
+  GUEST_DAILY_IP_LIMIT: z.preprocess(blankAsUndefined, z.coerce.number().int().min(1).max(3).default(3)),
+  GUEST_DAILY_PRACTICE_SESSIONS: z.preprocess(blankAsUndefined, z.coerce.number().int().min(0).max(3).default(3)),
+  MODEL_MAX_INPUT_CHARS: z.preprocess(blankAsUndefined, z.coerce.number().int().min(1).max(100_000).default(100_000)),
+  OWNER_FUNDED_UNTIL: z.preprocess(blankAsUndefined, z.iso.datetime({ offset: true }).default("2026-11-09T08:00:00Z")),
   AI_ENABLED: z.preprocess(blankAsUndefined, z.stringbool().default(true)),
   PRACTICE_GENERATION_TIER: z.preprocess(blankAsUndefined, z.enum(["fast", "smart"]).default("fast")),
   PRACTICE_GENERATION_MAX_COST_MICROS: z.preprocess(
@@ -67,6 +78,7 @@ const EnvSchema = z.object({
     blankAsUndefined,
     z.coerce.number().finite().min(0).max(100_000).default(5),
   ),
+  PERIOD_BUDGET_USD: z.preprocess(blankAsUndefined, z.coerce.number().finite().min(0).max(100_000).default(25)),
   GLOSSY_DATABASE_PATH: z.preprocess(
     blankAsUndefined,
     z.string().trim().default("./data/glossy.db"),
@@ -91,6 +103,13 @@ export interface AppConfig {
   };
   // Only enable behind a proxy that overwrites the client-IP header.
   byokTrustProxyHeaders: boolean;
+  turnstile: { siteKey?: string; secretKey?: string; action?: string; hostname?: string };
+  guestDailyIpLimit: number;
+  guestDailyPracticeSessions: number;
+  modelMaxInputChars: number;
+  ownerFundedUntil: string;
+  // Owner's existing Telegram bot; both values are needed to send an alert.
+  spendAlertTelegram?: { botToken: string; chatId: string };
   // Env-level kill switch. The runtime switch lives in the settings table.
   aiEnabled: boolean;
   practiceGenerationTier: "fast" | "smart";
@@ -98,6 +117,7 @@ export interface AppConfig {
   dailyBudgetUsd: number;
   // Integer micro-dollars; the unit all budget arithmetic uses.
   dailyBudgetMicros: number;
+  periodBudgetMicros: number;
   databasePath: string;
   // Base URL without a trailing slash.
   publicUrl: string;
@@ -137,11 +157,21 @@ export function loadConfig(env: Record<string, string | undefined>): AppConfig {
       fastPriceOutUsdPerM: v.OPENROUTER_FAST_PRICE_OUT_PER_M,
     },
     byokTrustProxyHeaders: v.BYOK_TRUST_PROXY_HEADERS,
+    turnstile: { siteKey: v.TURNSTILE_SITE_KEY, secretKey: v.TURNSTILE_SECRET_KEY,
+      action: v.TURNSTILE_ACTION, hostname: v.TURNSTILE_HOSTNAME },
+    guestDailyIpLimit: v.GUEST_DAILY_IP_LIMIT,
+    guestDailyPracticeSessions: v.GUEST_DAILY_PRACTICE_SESSIONS,
+    modelMaxInputChars: v.MODEL_MAX_INPUT_CHARS,
+    ownerFundedUntil: new Date(v.OWNER_FUNDED_UNTIL).toISOString(),
+    spendAlertTelegram: v.TELEGRAM_BOT_TOKEN && v.TELEGRAM_CHAT_ID
+      ? { botToken: v.TELEGRAM_BOT_TOKEN, chatId: v.TELEGRAM_CHAT_ID }
+      : undefined,
     aiEnabled: v.AI_ENABLED,
     practiceGenerationTier: v.PRACTICE_GENERATION_TIER,
     practiceGenerationMaxCostMicros: v.PRACTICE_GENERATION_MAX_COST_MICROS,
     dailyBudgetUsd: v.DAILY_BUDGET_USD,
     dailyBudgetMicros: Math.round(v.DAILY_BUDGET_USD * 1_000_000),
+    periodBudgetMicros: Math.round(v.PERIOD_BUDGET_USD * 1_000_000),
     databasePath: v.GLOSSY_DATABASE_PATH,
     publicUrl: v.GLOSSY_PUBLIC_URL.replace(/\/+$/, ""),
     modelMock: v.GLOSSY_MODEL_MOCK,

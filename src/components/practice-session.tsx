@@ -1,10 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
-import { InviteRequired } from "@/components/invite-required";
+import { useEffect, useId, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { AccessUnavailable, DemoSpentNotice } from "@/components/invite-required";
 import { VocabularyPronunciation } from "@/components/vocabulary-pronunciation";
-import { ProviderKeyForm } from "@/components/provider-access";
 import { Button } from "@/components/ui/button";
 import {
   getMe,
@@ -107,7 +106,7 @@ type Screen =
   | { name: "answer" }
   | { name: "end" }
   | { name: "invite" }
-  | { name: "error"; title: string; detail: string; retry: "prepare" | "next" | "answer" | "finish" };
+  | { name: "error"; title: string; detail: ReactNode; retry: "prepare" | "next" | "answer" | "finish" };
 
 type RetryAction = "prepare" | "next" | "answer" | "finish";
 type ActiveRun = { controller: AbortController; generation: number };
@@ -258,8 +257,13 @@ function initialState(fixture?: PracticeFixtureName): InitialState {
   };
 }
 
-function friendlyFailure(failure: ApiFailure, action: RetryAction): { title: string; detail: string } {
-  if (isQuota(failure)) return { title: "Today's practice limit is used.", detail: "Come back tomorrow." };
+function friendlyFailure(failure: ApiFailure, action: RetryAction): { title: string; detail: ReactNode } {
+  if (isQuota(failure) || failure.code === "budget_exhausted") {
+    return {
+      title: "The free demo is used up.",
+      detail: <>Add your own OpenRouter key in <Link href="/settings" className="font-semibold underline underline-offset-2">Settings</Link> to keep going.</>,
+    };
+  }
   if (isAiOff(failure)) return { title: "Practice is paused right now.", detail: "Please come back later." };
   if (failure.code === "network") return { title: "We couldn't reach gloss.", detail: "Check your connection, then try again." };
   if (failure.code === "not_found") return { title: "This practice has ended.", detail: "Start a new round." };
@@ -316,7 +320,7 @@ function PracticeSessionAccess() {
   if (!result) return <PracticeSessionLoading label="Checking your access." />;
 
   if (isApiFailure(result)) {
-    if (isUnauthorized(result)) return <div className={styles.invite}><InviteRequired onRetry={reload} /></div>;
+    if (isUnauthorized(result)) return <AccessUnavailable />;
     return (
       <div className={styles.viewport}>
         <section className={styles.window} aria-label="Practice session">
@@ -333,21 +337,15 @@ function PracticeSessionAccess() {
     );
   }
 
-  if (result.data.accessMode === "byok" && !access.hasKey) {
-    return (
-      <div className={styles.viewport}>
-        <section className={styles.window} aria-label="Practice access">
-          <div className={styles.accessScreen}>
-            <h1 className={styles.endTitle}>Add your key to begin.</h1>
-            <ProviderKeyForm compact onReady={reload} />
-          </div>
-        </section>
-      </div>
-    );
-  }
-
   const identity = `${result.data.learner.id}:${result.data.accessMode}:${access.sessionRevision}`;
-  return <PracticeSessionBody key={identity} client={livePracticeSessionClient} />;
+  return (
+    <div className="relative h-full">
+      {!result.data.aiEnabled && result.data.accessMode === "hosted" ? (
+        <div className="absolute left-4 right-24 top-2 z-40"><DemoSpentNotice className="mx-auto max-w-xl" /></div>
+      ) : null}
+      <PracticeSessionBody key={identity} client={livePracticeSessionClient} />
+    </div>
+  );
 }
 
 function PracticeSessionBody({ client, initialFixture }: PracticeSessionProps) {
@@ -414,6 +412,7 @@ function PracticeSessionBody({ client, initialFixture }: PracticeSessionProps) {
 
   const setFailure = (failure: ApiFailure, action: RetryAction) => {
     if (isUnauthorized(failure)) {
+      void getMe();
       setScreen({ name: "invite" });
       return;
     }
@@ -533,7 +532,7 @@ function PracticeSessionBody({ client, initialFixture }: PracticeSessionProps) {
       }, run ? { signal: run.controller.signal } : undefined);
       if (!isCurrentRun(run)) return;
       if (isApiFailure(result)) {
-        if (isUnauthorized(result)) setScreen({ name: "invite" });
+        if (isUnauthorized(result)) { void getMe(); setScreen({ name: "invite" }); }
         else setNotice(friendlyFailure(result, "answer").title);
         return;
       }
@@ -555,7 +554,7 @@ function PracticeSessionBody({ client, initialFixture }: PracticeSessionProps) {
       );
       if (!isCurrentRun(run)) return;
       if (isApiFailure(result)) {
-        if (isUnauthorized(result)) setScreen({ name: "invite" });
+        if (isUnauthorized(result)) { void getMe(); setScreen({ name: "invite" }); }
         else setNotice("We couldn't get a hint. Your answer is still yours to choose.");
         setHintPending(false);
         return;
@@ -578,7 +577,7 @@ function PracticeSessionBody({ client, initialFixture }: PracticeSessionProps) {
       );
       if (!isCurrentRun(run)) return;
       if (isApiFailure(result)) {
-        if (isUnauthorized(result)) setScreen({ name: "invite" });
+        if (isUnauthorized(result)) { void getMe(); setScreen({ name: "invite" }); }
         else setNotice("We couldn't save that response. You can keep going.");
         return;
       }
@@ -649,6 +648,7 @@ function PracticeSessionBody({ client, initialFixture }: PracticeSessionProps) {
       if (!isCurrentRun(run) || controller.signal.aborted) return;
       if (isApiFailure(result)) {
         if (isUnauthorized(result)) {
+          void getMe();
           setScreen({ name: "invite" });
           return;
         }
@@ -732,10 +732,7 @@ function PracticeSessionBody({ client, initialFixture }: PracticeSessionProps) {
   };
 
   if (screen.name === "invite") {
-    return <div className={styles.invite}><InviteRequired onRetry={() => {
-      if (initialFixture || client) void startSession();
-      else void getMe().then((result) => { if (result.ok) void startSession(); });
-    }} /></div>;
+    return <div className={styles.invite}><AccessUnavailable /></div>;
   }
 
   const total = Math.max(1, readiness.total || 8);

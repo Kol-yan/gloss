@@ -10,6 +10,11 @@ describe("loadConfig", () => {
     expect(config.databasePath).toBe("./data/glossy.db");
     expect(config.publicUrl).toBe("http://localhost:3000");
     expect(config.meta.apiKey).toBeUndefined();
+    expect(config.periodBudgetMicros).toBe(25_000_000);
+    expect(config.ownerFundedUntil).toBe("2026-11-09T08:00:00.000Z");
+    expect(config.modelMaxInputChars).toBe(100_000);
+    expect(config.guestDailyIpLimit).toBe(3);
+    expect(config.guestDailyPracticeSessions).toBe(3);
   });
 
   it("treats blank values as unset", () => {
@@ -43,6 +48,14 @@ describe("loadConfig", () => {
       expect((error as Error).message).toContain("GLOSSY_PUBLIC_URL");
       expect((error as Error).message).not.toContain("not-a-secret-url");
     }
+  });
+
+  it("fails closed on malformed demo limits and expiry", () => {
+    for (const env of [
+      { PERIOD_BUDGET_USD: "-1" }, { OWNER_FUNDED_UNTIL: "tomorrow" },
+      { MODEL_MAX_INPUT_CHARS: "100001" }, { GUEST_DAILY_IP_LIMIT: "4" },
+      { GUEST_DAILY_PRACTICE_SESSIONS: "4" },
+    ]) expect(() => loadConfig(env)).toThrow(ConfigError);
   });
 });
 
@@ -99,6 +112,7 @@ describe("fast-tier configuration", () => {
 
 describe("quota profiles", () => {
   it("matches the documented limits", () => {
+    expect(QUOTA_PROFILES.guest).toEqual({ proofread: 30, detect: 30, evaluate: 3, asrSeconds: 300 });
     expect(QUOTA_PROFILES.pilot).toEqual({ proofread: 20, detect: 100, evaluate: 12, asrSeconds: 180 });
     expect(QUOTA_PROFILES.judge).toEqual({ proofread: 30, detect: 30, evaluate: 30, asrSeconds: 300 });
     expect(quotaLimits("owner")).toEqual({ proofread: 200, detect: 200, evaluate: 100, asrSeconds: 1800 });

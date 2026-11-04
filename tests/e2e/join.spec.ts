@@ -8,13 +8,14 @@ test("joins through an invite link and lands in the editor", async ({ page, cont
   await expect(page.getByRole("heading", { name: "Choose how to try gloss" })).toBeVisible();
 
   await joinAsNewLearner(page);
-  const session = (await context.cookies()).find((cookie) => cookie.name === "glossy_session");
+  const port = new URL(page.url()).port || "3000";
+  const session = (await context.cookies()).find((cookie) => cookie.name === `glossy_session_${port}`);
   expect(session?.httpOnly).toBe(true);
 
   // Opening the link again in a signed-in browser does not spend another use.
   await page.goto(inviteUrl());
-  await expect(page.getByRole("heading", { name: "You are already signed in" })).toBeVisible();
-  await page.getByRole("link", { name: "Back to the editor" }).click();
+  await expect(page.getByRole("heading", { name: "Add this invite to your workspace" })).toBeVisible();
+  await page.getByRole("button", { name: "Continue" }).click();
   await expect(page.getByRole("textbox", { name: "Your text" })).toBeVisible();
 });
 

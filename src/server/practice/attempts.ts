@@ -124,6 +124,7 @@ export async function submitAttempt(
       {
         learnerId: learner.id,
         kind: "evaluate",
+        role: "evaluate_attempt",
         requestId: `${attemptId}:${newId()}`,
         units: 1,
         maxCostMicros,

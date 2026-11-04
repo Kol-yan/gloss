@@ -1,6 +1,7 @@
 import type { AppConfig } from "../config";
 import { ModelOutputError, type TokenUsage } from "./errors";
-import { DEFAULT_TIMEOUT_MS, MIN_MAX_TOKENS, sendProviderRequest, type MetaChatInput, type MetaChatResult } from "./meta";
+import { sendProviderRequest } from "../budget/provider-request";
+import { DEFAULT_TIMEOUT_MS, MIN_MAX_TOKENS, type MetaChatInput, type MetaChatResult } from "./meta";
 import { ASR_TIMEOUT_MS, type MetaTranscribeInput, type MetaTranscribeResult } from "./meta-asr";
 import { asrPrice } from "./prices";
 import { providerKey, type TextRoute } from "./access";
@@ -87,9 +88,17 @@ export async function openRouterChat(
         sort: "throughput",
         max_price: { prompt: 0.16, completion: 0.65 },
       }
-    : { require_parameters: true, data_collection: "deny" };
+      : {
+        require_parameters: true,
+        data_collection: "deny",
+        max_price: {
+          prompt: route.price.inputUsdPerMTok,
+          completion: route.price.outputUsdPerMTok,
+        },
+      };
   const { bodyText, latencyMs } = await sendProviderRequest(`${BASE_URL}/chat/completions`, {
     method: "POST",
+    redirect: "error",
     headers: { ...headers(route.apiKey, config), "Content-Type": "application/json" },
     body: JSON.stringify({
       model: input.model,
@@ -127,13 +136,16 @@ export async function openRouterTranscribe(
   config: AppConfig,
 ): Promise<MetaTranscribeResult> {
   asrPrice(input.model);
-  const form = new FormData();
-  form.set("model", input.model);
-  form.set("language", "en");
-  form.set("provider", JSON.stringify({ data_collection: "deny" }));
-  form.set("file", new Blob([input.audio as Uint8Array<ArrayBuffer>], { type: "audio/wav" }), "answer.wav");
   const { bodyText, latencyMs } = await sendProviderRequest(`${BASE_URL}/audio/transcriptions`, {
-    method: "POST", headers: headers(apiKey, config), body: form,
+    method: "POST",
+    redirect: "error",
+    headers: { ...headers(apiKey, config), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: input.model,
+      input_audio: { data: Buffer.from(input.audio).toString("base64"), format: "wav" },
+      language: "en",
+      provider: { data_collection: "deny" },
+    }),
   }, { timeoutMs: ASR_TIMEOUT_MS, signal: input.signal, config });
   const json = parseEnvelope(bodyText, latencyMs);
   if (typeof json.text !== "string") throw new ModelOutputError("no_transcript", null, latencyMs);

@@ -13,7 +13,7 @@ import { POST as attemptRoute } from "@/app/api/practice/attempts/[attemptId]/ro
 import { POST as speechRoute } from "@/app/api/speech/transcribe/route";
 import { createByokSession } from "@/server/auth/byok";
 import { createEnrollmentLimiter } from "@/server/auth/enrollment-rate";
-import { SESSION_COOKIE, findLearnerBySessionToken } from "@/server/auth/sessions";
+import { findLearnerBySessionToken, getSessionCookieName } from "@/server/auth/sessions";
 import { getBudgetStatus, reserve, setAiEnabled, settle } from "@/server/budget";
 import { RateLimitedError, QuotaExceededError } from "@/server/errors";
 import { PROVIDER_KEY_HEADER, resolveProviderAccess } from "@/server/models/access";
@@ -31,11 +31,13 @@ function request(path: string, body: unknown = {}, key: string | null = visitorK
   });
 }
 
+const meRequest = () => new Request("http://localhost:3000/api/me");
+
 async function enroll() {
   const response = await enrollRoute(request("/api/access/byok"));
   expect(response.status).toBe(200);
   const body = MeResponse.parse(await response.json());
-  session.cookie = (response as NextResponse).cookies.get(SESSION_COOKIE)?.value;
+  session.cookie = (response as NextResponse).cookies.get(getSessionCookieName(new Request("http://localhost/api/access/byok")))?.value;
   expect(session.cookie).toBeTruthy();
   return body;
 }
@@ -78,15 +80,26 @@ describe("public BYOK access", () => {
     expect(Number(db().prepare("SELECT COUNT(*) AS n FROM learners").get()?.n)).toBe(before);
   });
 
-  it("requires a valid-looking key and does not replace a hosted session", async () => {
+  it("requires a valid key and switches a hosted learner to BYOK in place", async () => {
     const absent = await enrollRoute(request("/api/access/byok", {}, null));
     expect(ApiError.parse(await absent.json()).error.code).toBe("ai_disabled");
     const hosted = login();
+    seedExpression(hosted.learner.id);
+    session.cookie = hosted.sessionToken;
+    const missingKey = await enrollRoute(request("/api/access/byok", {}, null));
+    expect(ApiError.parse(await missingKey.json()).error.code).toBe("ai_disabled");
+    expect(db().prepare("SELECT funding_source FROM learners WHERE id = ?").get(hosted.learner.id))
+      .toEqual({ funding_source: "hosted" });
+
     const response = await enrollRoute(request("/api/access/byok"));
     expect(MeResponse.parse(await response.json())).toMatchObject({
-      accessMode: "hosted", learner: { id: hosted.learner.id },
+      accessMode: "byok", learner: { id: hosted.learner.id },
     });
     expect(session.cookie).toBe(hosted.sessionToken);
+    expect(db().prepare("SELECT funding_source, quota_profile FROM learners WHERE id = ?").get(hosted.learner.id))
+      .toEqual({ funding_source: "byok", quota_profile: "judge" });
+    expect(db().prepare("SELECT COUNT(*) AS n FROM expressions WHERE learner_id = ?").get(hosted.learner.id))
+      .toEqual({ n: 1 });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -96,16 +109,16 @@ describe("public BYOK access", () => {
     const ownerKey = process.env.OPENROUTER_API_KEY;
     try {
       delete process.env.OPENROUTER_API_KEY;
-      expect(MeResponse.parse(await (await meRoute()).json()).aiEnabled).toBe(true);
+      expect(MeResponse.parse(await (await meRoute(meRequest())).json()).aiEnabled).toBe(true);
       process.env.OPENROUTER_API_KEY = "invalid";
-      expect(MeResponse.parse(await (await meRoute()).json()).aiEnabled).toBe(true);
+      expect(MeResponse.parse(await (await meRoute(meRequest())).json()).aiEnabled).toBe(true);
     } finally {
       if (ownerKey === undefined) delete process.env.OPENROUTER_API_KEY;
       else process.env.OPENROUTER_API_KEY = ownerKey;
     }
-    expect(MeResponse.parse(await (await meRoute()).json()).aiEnabled).toBe(true);
+    expect(MeResponse.parse(await (await meRoute(meRequest())).json()).aiEnabled).toBe(true);
     setAiEnabled(false);
-    expect(MeResponse.parse(await (await meRoute()).json()).aiEnabled).toBe(false);
+    expect(MeResponse.parse(await (await meRoute(meRequest())).json()).aiEnabled).toBe(false);
     fetchMock.mockResolvedValueOnce(proofreadReply([]));
     const response = await proofreadRoute(request("/api/proofread", { requestId: requestId(), text: "A short sentence." }));
     expect(ApiError.parse(await response.json()).error.code).toBe("ai_disabled");
@@ -139,11 +152,11 @@ describe("public BYOK access", () => {
     const response = await proofreadRoute(request("/api/proofread", { requestId: requestId(), text: "A short sentence." }));
     expect(response.status).toBe(200);
     expect(fetchMock.mock.calls[0][0]).toBe("https://openrouter.ai/api/v1/chat/completions");
-    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe(`Bearer ${OWNER_OPENROUTER_KEY}`);
+    expect(new Headers(fetchMock.mock.calls[0][1].headers).get("authorization")).toBe(`Bearer ${OWNER_OPENROUTER_KEY}`);
     expect(JSON.stringify(fetchMock.mock.calls)).not.toContain(visitorKey);
   });
 
-  it("uses the visitor key for proofreading, tasks, evaluation and multipart speech", async () => {
+  it("uses the visitor key for proofreading, tasks, evaluation and JSON speech", async () => {
     const body = await enroll();
     const initialOwnerSpend = getBudgetStatus().spentMicros;
     process.env.DAILY_BUDGET_USD = "0";
@@ -167,7 +180,7 @@ describe("public BYOK access", () => {
     expect(fetchMock).toHaveBeenCalledTimes(4);
     for (const [url, init] of fetchMock.mock.calls) {
       expect(url).toMatch(/^https:\/\/openrouter\.ai\/api\/v1\//);
-      expect(init.headers.Authorization).toBe(`Bearer ${visitorKey}`);
+      expect(new Headers(init.headers).get("authorization")).toBe(`Bearer ${visitorKey}`);
     }
     // Visitors get the fast model for proofreading and situations, Muse Spark for evaluation.
     const options = { max_tokens: 4096, usage: { include: true } };
@@ -186,10 +199,15 @@ describe("public BYOK access", () => {
     expect(sentBody(2)).toMatchObject({ model: "meta/muse-spark-1.3", reasoning_effort: "low",
       ...options, provider: smartProvider });
     expect(sentBody(2)).not.toHaveProperty("reasoning");
-    const form = fetchMock.mock.calls[3][1].body as FormData;
-    expect(form.get("model")).toBe("meta/muse-voice-transcribe-1.0");
-    expect(form.get("file")).toBeInstanceOf(Blob);
-    expect(form.get("audio")).toBeNull();
+    const speechInit = fetchMock.mock.calls[3][1];
+    expect(new Headers(speechInit.headers).get("content-type")).toBe("application/json");
+    const speechBody = JSON.parse(speechInit.body);
+    expect(speechBody).toMatchObject({
+      model: "meta/muse-voice-transcribe-1.0",
+      input_audio: { format: "wav", data: Buffer.from(makeWav()).toString("base64") },
+      language: "en",
+      provider: { data_collection: "deny" },
+    });
     expect(getBudgetStatus().spentMicros).toBe(initialOwnerSpend);
     const reservations = db().prepare("SELECT * FROM usage_reservations WHERE learner_id = ?").all(body.learner.id);
     expect(reservations).toHaveLength(4);

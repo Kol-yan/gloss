@@ -4,6 +4,7 @@ import { ModelHttpError, ModelOutputError, ModelTimeoutError } from "@/server/mo
 import { metaChat, type MetaChatInput } from "@/server/models/meta";
 import { metaTranscribe } from "@/server/models/meta-asr";
 import { MOCK_FAILURE_MARKERS, MOCK_SITUATION, MOCK_TRANSCRIPT } from "@/server/models/mock-provider";
+import { makeTestWav, runBudgetedModelCall } from "./helpers/budgeted-model-call";
 
 const mocked = loadConfig({ META_API_KEY: "placeholder", GLOSSY_MODEL_MOCK: "true" });
 
@@ -32,10 +33,11 @@ describe("GLOSSY_MODEL_MOCK", () => {
 
   it("answers model calls without any network request", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const chat = await metaChat(situationInput, { config: mocked });
+    const chat = await runBudgetedModelCall(situationInput, mocked, () => metaChat(situationInput, { config: mocked }));
     expect(JSON.parse(chat.content)).toEqual({ situation: MOCK_SITUATION });
 
-    const speech = await metaTranscribe({ model: "muse-voice-transcribe-1.0", audio: new Uint8Array(4) }, { config: mocked });
+    const input = { model: "muse-voice-transcribe-1.0", audio: makeTestWav() };
+    const speech = await runBudgetedModelCall(input, mocked, () => metaTranscribe(input, { config: mocked }));
     expect(speech.text).toBe(MOCK_TRANSCRIPT);
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -45,9 +47,13 @@ describe("GLOSSY_MODEL_MOCK", () => {
       ...situationInput,
       messages: [{ role: "user", content: `An answer with ${marker} in it.` }],
     });
-    await expect(metaChat(asking(MOCK_FAILURE_MARKERS.http), { config: mocked })).rejects.toBeInstanceOf(ModelHttpError);
-    await expect(metaChat(asking(MOCK_FAILURE_MARKERS.network), { config: mocked })).rejects.toBeInstanceOf(ModelTimeoutError);
-    await expect(metaChat(asking(MOCK_FAILURE_MARKERS.output), { config: mocked })).rejects.toBeInstanceOf(ModelOutputError);
+    for (const marker of [MOCK_FAILURE_MARKERS.http, MOCK_FAILURE_MARKERS.network, MOCK_FAILURE_MARKERS.output]) {
+      const input = asking(marker);
+      const result = runBudgetedModelCall(input, mocked, () => metaChat(input, { config: mocked }));
+      if (marker === MOCK_FAILURE_MARKERS.http) await expect(result).rejects.toBeInstanceOf(ModelHttpError);
+      else if (marker === MOCK_FAILURE_MARKERS.network) await expect(result).rejects.toBeInstanceOf(ModelTimeoutError);
+      else await expect(result).rejects.toBeInstanceOf(ModelOutputError);
+    }
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -56,7 +62,8 @@ describe("GLOSSY_MODEL_MOCK", () => {
       Response.json({ choices: [{ finish_reason: "stop", message: { content: '{"situation":"real"}' } }] }),
     );
     const config = loadConfig({ META_API_KEY: "placeholder" });
-    await expect(metaChat(situationInput, { config })).resolves.toMatchObject({ content: '{"situation":"real"}' });
+    await expect(runBudgetedModelCall(situationInput, config, () => metaChat(situationInput, { config })))
+      .resolves.toMatchObject({ content: '{"situation":"real"}' });
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 });

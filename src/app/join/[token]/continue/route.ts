@@ -1,9 +1,9 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { redeemInvite } from "@/server/auth/invites";
+import { redeemInvite, redeemInviteForSession } from "@/server/auth/invites";
 import { isSameOriginPost } from "@/server/auth/origin";
 import {
-  SESSION_COOKIE,
+  getSessionCookieName,
   SESSION_TTL_SECONDS,
   findLearnerBySessionToken,
 } from "@/server/auth/sessions";
@@ -30,8 +30,29 @@ export async function POST(request: Request, context: { params: Promise<{ token:
   if (!isSameOriginPost(request)) return jsonError("invalid_request", 403);
 
   const { token } = await context.params;
+  const cookieName = getSessionCookieName(request);
   const store = await cookies();
-  if (findLearnerBySessionToken(store.get(SESSION_COOKIE)?.value)) return see("/");
+  const sessionToken = store.get(cookieName)?.value;
+  try {
+    const upgrade = redeemInviteForSession(token, sessionToken);
+    if (upgrade && sessionToken) {
+      const response = see("/");
+      response.cookies.set({
+        name: cookieName,
+        value: sessionToken,
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        path: "/",
+        maxAge: SESSION_TTL_SECONDS,
+      });
+      return response;
+    }
+  } catch (error) {
+    if (error instanceof InvalidInviteError) return see("/?invite=invalid");
+    throw error;
+  }
+  if (findLearnerBySessionToken(sessionToken)) return see("/");
 
   let redemption;
   try {
@@ -43,7 +64,7 @@ export async function POST(request: Request, context: { params: Promise<{ token:
 
   const response = see("/");
   response.cookies.set({
-    name: SESSION_COOKIE,
+    name: cookieName,
     value: redemption.sessionToken,
     httpOnly: true,
     sameSite: "lax",

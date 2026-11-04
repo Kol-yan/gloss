@@ -35,13 +35,13 @@ const DEFAULT_STATUS: Record<ApiErrorCode, number> = {
 };
 
 const MESSAGES: Record<ApiErrorCode, string> = {
-  unauthorized: "Please open your invite link to sign in.",
+  unauthorized: "Open Settings to add your own OpenRouter key and keep going.",
   not_found: "We could not find that.",
   invalid_request: "That request was not valid.",
   conflict: "That changed in the meantime. Please try again.",
-  quota_exceeded: "You have used today's allowance for this feature. It resets at midnight UTC.",
+  quota_exceeded: "Today's free demo is used up. Add your own OpenRouter key in Settings to keep going.",
   rate_limited: "Please wait a moment before trying again.",
-  budget_exhausted: "Cloud checking is paused for today. Local checking still works.",
+  budget_exhausted: "The free demo is used up. Add your own OpenRouter key in Settings to keep going.",
   ai_disabled: "Cloud checking is switched off right now. Local checking still works.",
   model_unavailable: "The cloud checker is not available right now. Please try again.",
   internal: "Something went wrong on our side. Please try again.",

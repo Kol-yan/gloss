@@ -8,6 +8,7 @@ type AccessSnapshot = {
   hasKey: boolean;
   storageNotice: string | null;
   sessionRevision: number;
+  learnerRevision: number;
 };
 
 const INITIAL: AccessSnapshot = {
@@ -16,11 +17,13 @@ const INITIAL: AccessSnapshot = {
   hasKey: false,
   storageNotice: null,
   sessionRevision: 0,
+  learnerRevision: 0,
 };
 
 let snapshot = INITIAL;
 let providerKey = "";
 let initialized = false;
+let lastLearnerId: string | null = null;
 const listeners = new Set<() => void>();
 
 function publish(next: AccessSnapshot) {
@@ -65,11 +68,14 @@ export function getServerAccessSnapshot() {
 export function setCurrentSession(session: MeResponse | null) {
   const identityChanged = snapshot.session?.learner.id !== session?.learner.id
     || snapshot.session?.accessMode !== session?.accessMode;
+  const learnerChanged = Boolean(session && lastLearnerId && lastLearnerId !== session.learner.id);
+  if (session) lastLearnerId = session.learner.id;
   publish({
     ...snapshot,
     session,
     checked: true,
     sessionRevision: snapshot.sessionRevision + (identityChanged ? 1 : 0),
+    learnerRevision: snapshot.learnerRevision + (learnerChanged ? 1 : 0),
   });
 }
 

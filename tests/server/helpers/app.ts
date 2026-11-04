@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, vi } from "vitest";
 import { createInvite, redeemInvite } from "@/server/auth/invites";
+import { getSessionCookieName } from "@/server/auth/sessions";
 import { setAiEnabled } from "@/server/budget";
 import { closeDb, getDb } from "@/server/db";
 import { newId } from "@/server/ids";
@@ -19,8 +20,11 @@ export const session: { cookie?: string } = {};
 export const nextHeadersMock = {
   cookies: async () => ({
     get: (name: string) =>
-      name === "glossy_session" && session.cookie ? { name, value: session.cookie } : undefined,
+      name === getSessionCookieName(undefined, "localhost:3000") && session.cookie
+        ? { name, value: session.cookie }
+        : undefined,
   }),
+  headers: async () => new Headers({ host: "localhost:3000" }),
 };
 
 export const fetchMock = vi.fn();
@@ -38,6 +42,7 @@ export const ENV = {
   OPENROUTER_FAST_MODEL: "openai/gpt-oss-120b",
   DAILY_BUDGET_USD: "5",
   AI_ENABLED: "true",
+  OWNER_FUNDED_UNTIL: "2099-01-01T00:00:00Z",
 };
 
 // Optional settings that a test may set; each test starts without them.

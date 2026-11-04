@@ -1,8 +1,10 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createInvite, redeemInvite } from "@/server/auth/invites";
 import {
   findLearnerBySessionToken,
+  getSessionCookieName,
   requireLearnerFromToken,
+  renewSessionExpiry,
   SESSION_TTL_MS,
 } from "@/server/auth/sessions";
 import { hashToken } from "@/server/auth/tokens";
@@ -99,7 +101,7 @@ describe("invites", () => {
 });
 
 describe("sessions", () => {
-  it("lasts 30 days and then stops resolving", () => {
+  it("lasts 365 days and then stops resolving", () => {
     const { sessionToken, sessionExpiresAt } = redeemInvite(invite({ maxUses: 1 }).token, {
       db: temp.db,
       now: T0,
@@ -112,6 +114,33 @@ describe("sessions", () => {
     expect(() =>
       requireLearnerFromToken(sessionToken, { db: temp.db, now: at(SESSION_TTL_MS + 1) }),
     ).toThrow(UnauthorizedError);
+  });
+
+  it("slides a live session expiry forward by 365 days", () => {
+    const { sessionToken } = redeemInvite(invite({ maxUses: 1 }).token, { db: temp.db, now: T0 });
+    const renewedAt = at(SESSION_TTL_MS / 2);
+    const expiresAt = renewSessionExpiry(sessionToken, { db: temp.db, now: renewedAt });
+    expect(expiresAt).toEqual(at(SESSION_TTL_MS * 1.5));
+    expect(temp.db.prepare("SELECT expires_at FROM sessions WHERE token_hash = ?")
+      .get(hashToken(sessionToken))).toEqual({ expires_at: expiresAt?.toISOString() });
+    expect(findLearnerBySessionToken(sessionToken, { db: temp.db, now: at(SESSION_TTL_MS) }))
+      .not.toBeNull();
+    expect(renewSessionExpiry(sessionToken, { db: temp.db, now: at(SESSION_TTL_MS * 1.5) }))
+      .toBeNull();
+  });
+
+  it("scopes development cookie names by the actual request port", () => {
+    expect(getSessionCookieName(new Request("http://localhost:3741/api/me")))
+      .toBe("glossy_session_3741");
+    expect(getSessionCookieName(undefined, "localhost:4872"))
+      .toBe("glossy_session_4872");
+    vi.stubEnv("NODE_ENV", "production");
+    try {
+      expect(getSessionCookieName(new Request("http://localhost:3741/api/me")))
+        .toBe("glossy_session");
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("rejects missing, malformed and unknown tokens", () => {

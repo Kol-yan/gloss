@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { normalizeText } from "../src/lib/text";
 import { getConfig } from "../src/server/config";
 import { resolveTextRoute } from "../src/server/models/access";
-import { chatWithRoute } from "../src/server/models/dispatch";
+import type { MetaChatResult } from "../src/server/models/meta";
 import {
   ModelHttpError,
   ModelNotConfiguredError,
@@ -393,57 +393,13 @@ function usd(micros: number): string {
   return (micros / 1_000_000).toFixed(6);
 }
 
-function sanitize(value: string, secrets: string[]): string {
-  let clean = value
-    .replace(/\bsk-or-v1-[A-Za-z0-9_-]{16,512}\b/g, "[REDACTED]")
-    .replace(/(Bearer\s+)[A-Za-z0-9._~+/-]+=*/gi, "$1[REDACTED]");
-  for (const secret of secrets) if (secret.length >= 8) clean = clean.split(secret).join("[REDACTED]");
-  return clean;
-}
-
-function stripReasoningFields(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(stripReasoningFields);
-  if (!isRecord(value)) return value;
-  return Object.fromEntries(Object.entries(value).flatMap(([key, child]) => {
-    if (/reasoning/i.test(key)) return [];
-    return [[key, key === "usage" ? child : stripReasoningFields(child)]];
-  }));
-}
-
-function sanitizeResponseText(value: string, secrets: string[]): string {
-  const clean = sanitize(value, secrets);
-  try {
-    return JSON.stringify(stripReasoningFields(JSON.parse(clean) as unknown));
-  } catch {
-    return clean;
-  }
-}
-
-async function requestBodyText(input: RequestInfo | URL, init?: RequestInit): Promise<string | null> {
-  if (typeof init?.body === "string") return init.body;
-  if (input instanceof Request) return input.clone().text();
-  return null;
-}
-
-async function captureFetch<T>(run: () => Promise<T>, secrets: string[]): Promise<{
+async function captureFetch<T>(run: () => Promise<T>): Promise<{
   ok: boolean;
   value?: T;
   error?: unknown;
   capture: FetchCapture;
 }> {
-  const originalFetch = globalThis.fetch;
   const capture: FetchCapture = { requestBody: null, responseStatus: null, responseText: null };
-  const responseReads: Promise<void>[] = [];
-  const wrappedFetch: typeof fetch = async (input, init) => {
-    const body = await requestBodyText(input, init);
-    if (body !== null) capture.requestBody = sanitize(body, secrets);
-    const response = await originalFetch(input, init);
-    capture.responseStatus = response.status;
-    const read = response.clone().text().then((text) => { capture.responseText = sanitizeResponseText(text, secrets); }).catch(() => undefined);
-    responseReads.push(read);
-    return response;
-  };
-  globalThis.fetch = wrappedFetch;
   let value: T | undefined;
   let error: unknown;
   let ok = false;
@@ -452,9 +408,6 @@ async function captureFetch<T>(run: () => Promise<T>, secrets: string[]): Promis
     ok = true;
   } catch (caught) {
     error = caught;
-  } finally {
-    globalThis.fetch = originalFetch;
-    await Promise.all(responseReads);
   }
   return { ok, value, error, capture };
 }
@@ -687,6 +640,15 @@ export async function main(argv = process.argv.slice(2), dependencies: MainDepen
     corpus = { ...corpus, cases: corpus.cases.filter((item) => options.only?.includes(item.id)) };
   }
 
+  if (options.live) {
+    if (options.refusal) {
+      log(`refused: ${options.refusal}`);
+      return 2;
+    }
+    log("refused: live evaluation requires a persisted application budget reservation");
+    return 2;
+  }
+
   let model: string;
   let boundPrice: TextPrice;
   let config;
@@ -740,8 +702,6 @@ export async function main(argv = process.argv.slice(2), dependencies: MainDepen
     reportError("runner failed: smart-tier route could not be resolved");
     return 1;
   }
-  const secrets = [config.meta.apiKey ?? "", config.openRouter.apiKey ?? ""].filter(Boolean);
-
   const prepared = prepareRows(corpus.cases, options.cues, route.model, route.price);
   const runs: RowRun[] = [];
   const evidence: CallEvidence[] = [];
@@ -762,15 +722,9 @@ export async function main(argv = process.argv.slice(2), dependencies: MainDepen
     }
 
     const started = performance.now();
-    const captured = await captureFetch(() => chatWithRoute({
-      model: route.model,
-      messages: entry.messages,
-      jsonSchema: EVALUATION_JSON_SCHEMA,
-      maxTokens: EVALUATE_ATTEMPT_ROLE.maxTokens,
-      reasoningEffort: EVALUATE_ATTEMPT_ROLE.reasoningEffort,
-      temperature: EVALUATE_ATTEMPT_ROLE.temperature,
-      timeoutMs: BENCH_TIMEOUT_MS,
-    }, route, config), secrets);
+    const captured = await captureFetch<MetaChatResult>(async () => {
+      throw new Error("Live evaluation requires a persisted application budget reservation");
+    });
     const wallLatencyMs = Math.round(performance.now() - started);
     const summary = responseSummary(captured.capture.responseText);
     const reportedCost = reportedUsd(summary);

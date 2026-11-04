@@ -23,8 +23,8 @@ installApp();
 const EXPRESSION = "unlikely to happen";
 const CLEAN = "You are in a meeting and a client asks whether the delay could repeat next month.";
 
-// 1000 input * 0.70 + 200 output * 1.90 micro-dollars: the usage chatReply reports.
-const FAST_COST = 1080;
+// Token counts without a monetary cost retain the full max reservation;
+// only a positive provider-reported cost via the transport lowers it.
 
 const create = (body: unknown) => postJson(taskRoute, body);
 const situation = (text: string) => chatReply({ situation: text });
@@ -78,11 +78,13 @@ describe("POST /api/practice/tasks", () => {
       model: "openai/gpt-oss-120b",
     });
 
-    // One "evaluate" operation reserved and settled at the reported usage:
-    // 1000 * 0.70 + 200 * 1.90 = 1080 micro-dollars at the fast tier's price bound.
+    // One "evaluate" operation reserved and settled at the full max: the
+    // stub reports token counts without a monetary cost, which retains max.
     expect(reservationsFor(id)).toEqual([
-      expect.objectContaining({ kind: "evaluate", units: 1, status: "settled", actual_cost_micros: FAST_COST }),
+      expect.objectContaining({ kind: "evaluate", units: 1, status: "settled" }),
     ]);
+    const created_reservation = reservationsFor(id)[0] as { max_cost_micros: number; actual_cost_micros: number };
+    expect(created_reservation.actual_cost_micros).toBe(created_reservation.max_cost_micros);
     const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(sent.max_tokens).toBeGreaterThanOrEqual(2048);
     expect(sent.response_format.json_schema.strict).toBe(true);
@@ -345,7 +347,7 @@ describe("POST /api/practice/tasks", () => {
   });
 
   it.each([
-    ["unusable output", () => chatReply("not json at all"), 502, FAST_COST],
+    ["unusable output", () => chatReply("not json at all"), 502, "max"],
     ["provider refusal", () => new Response("down", { status: 500 }), 503, 0],
   ] as const)("retries the same request after settled %s", async (_name, failed, status, cost) => {
     const { expressionId } = setup();
@@ -354,16 +356,20 @@ describe("POST /api/practice/tasks", () => {
     fetchMock.mockResolvedValueOnce(failed()).mockResolvedValueOnce(situation(CLEAN));
 
     expect((await create(body)).status).toBe(status);
-    expect(reservationsFor(id)).toEqual([
-      expect.objectContaining({ status: "settled", actual_cost_micros: cost }),
-    ]);
+    const first = reservationsFor(id) as { status: string; max_cost_micros: number; actual_cost_micros: number }[];
+    expect(first).toHaveLength(1);
+    expect(first[0].status).toBe("settled");
+    if (cost === "max") expect(first[0].actual_cost_micros).toBe(first[0].max_cost_micros);
+    else expect(first[0].actual_cost_micros).toBe(cost);
     const retried = await create(body);
     expect(retried.status).toBe(200);
     const task = PracticeTask.parse(await retried.json());
-    expect(reservationsFor(id)).toEqual([
-      expect.objectContaining({ status: "settled", actual_cost_micros: cost }),
-      expect.objectContaining({ status: "settled", actual_cost_micros: FAST_COST }),
-    ]);
+    const both = reservationsFor(id) as { status: string; max_cost_micros: number; actual_cost_micros: number }[];
+    expect(both).toHaveLength(2);
+    if (cost === "max") expect(both[0].actual_cost_micros).toBe(both[0].max_cost_micros);
+    else expect(both[0].actual_cost_micros).toBe(cost);
+    expect(both[1].status).toBe("settled");
+    expect(both[1].actual_cost_micros).toBe(both[1].max_cost_micros);
     expect(await (await create(body)).json()).toEqual(task);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
@@ -384,24 +390,28 @@ describe("POST /api/practice/tasks", () => {
     const { learner, expressionId } = setup();
     const id = requestId();
     const prior = reserve({ learnerId: learner.id, kind: "evaluate", requestId: id, units: 1, maxCostMicros: 5000 });
+    // A raw settle number without transport-reported cost proof cannot lower
+    // the bound: the full max is retained.
     settle(prior.id, 2100);
     fetchMock.mockResolvedValueOnce(situation(CLEAN));
 
     const response = await create({ requestId: id, expressionId, kind: "written" });
     expect(response.status).toBe(200);
     expect(reservationsFor(id)).toHaveLength(2);
-    expect(reservationsFor(id)[0]).toMatchObject({ id: prior.id, status: "settled", actual_cost_micros: 2100 });
+    expect(reservationsFor(id)[0]).toMatchObject({ id: prior.id, status: "settled", actual_cost_micros: 5000 });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("answers 502 and settles the reservation when the output is unusable", async () => {
+  it("answers 502 and settles the reservation at the full max when the output is unusable", async () => {
     const { expressionId } = setup();
     fetchMock.mockResolvedValueOnce(chatReply("not json at all"));
     const id = requestId();
     const response = await create({ requestId: id, expressionId, kind: "written" });
     expect(response.status).toBe(502);
     expect(ApiError.parse(await response.json()).error.code).toBe("model_unavailable");
-    expect(reservationsFor(id)).toEqual([expect.objectContaining({ status: "settled", actual_cost_micros: FAST_COST })]);
+    const [only] = reservationsFor(id) as { status: string; max_cost_micros: number; actual_cost_micros: number }[];
+    expect(only.status).toBe("settled");
+    expect(only.actual_cost_micros).toBe(only.max_cost_micros);
     expect(db().prepare("SELECT COUNT(*) AS n FROM practice_tasks WHERE request_id = ?").get(id)).toEqual({ n: 0 });
   });
 

@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import type { ReactNode } from "react";
 import { buttonClasses } from "@/components/ui/button";
 import { startRecording, type RecordingSession } from "@/features/speech/recorder";
 import { MAX_RECORDING_MS, MIN_RECORDING_MS } from "@/features/speech/types";
@@ -8,7 +10,7 @@ import { recordingToWav } from "@/features/speech/wav";
 import type { Dictate } from "./types";
 
 type View =
-  | { kind: "idle"; message?: string }
+  | { kind: "idle"; message?: ReactNode }
   | { kind: "starting" }
   | { kind: "recording"; elapsedMs: number }
   | { kind: "working" };
@@ -58,9 +60,9 @@ export function DictateButton({
       if (!result.ok) {
         const message =
           result.reason === "quota"
-            ? "Today's voice minutes are used up."
+            ? <>The free demo voice minutes are used up. Add your own OpenRouter key in <Link href="/settings" className="font-semibold underline underline-offset-2">Settings</Link> to keep going.</>
             : result.reason === "unavailable"
-              ? "Voice input is switched off for today."
+              ? <>Voice input is paused. Add your own OpenRouter key in <Link href="/settings" className="font-semibold underline underline-offset-2">Settings</Link> to keep going.</>
               : "Could not turn your speech into text. Try again.";
         setView({ kind: "idle", message });
         return;

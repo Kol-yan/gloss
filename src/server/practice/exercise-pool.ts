@@ -208,7 +208,7 @@ export async function takePoolExercise(
   try {
     const reservation = immediate((tx) => {
       assertLease(tx, learnerId, expressionId, generationId);
-      return reserve({ learnerId, kind: "detect", requestId: `practice-pool:${generationId}`, units: 1, maxCostMicros }, { db: tx, now, config: appConfig });
+      return reserve({ learnerId, kind: "detect", role: "practice_pool", requestId: `practice-pool:${generationId}`, units: 1, maxCostMicros }, { db: tx, now, config: appConfig });
     }, db);
     const { value } = await runReservedChat({
       db, now, config: appConfig, reservation, providerAccess: access, tier,

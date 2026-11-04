@@ -144,9 +144,11 @@ describe("POST /api/practice/attempts/[attemptId]", () => {
         attempt_id: attemptId,
       }),
     ]);
-    expect(reservationsFor(attemptId)).toEqual([
-      expect.objectContaining({ kind: "evaluate", units: 1, status: "settled", actual_cost_micros: 2100 }),
-    ]);
+    expect(reservationsFor(attemptId)).toHaveLength(1);
+    const [evaluation_reservation] = reservationsFor(attemptId) as { kind: string; units: number; status: string; max_cost_micros: number; actual_cost_micros: number }[];
+    expect(evaluation_reservation).toMatchObject({ kind: "evaluate", units: 1, status: "settled" });
+    // Token counts without a monetary cost retain the full max reservation.
+    expect(evaluation_reservation.actual_cost_micros).toBe(evaluation_reservation.max_cost_micros);
     const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(sent.max_tokens).toBeGreaterThanOrEqual(2048);
     expect(sent.response_format.json_schema.strict).toBe(true);

@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { normalizeText, splitSentences } from "../src/lib/text";
 import { getConfig } from "../src/server/config";
 import { resolveTextRoute } from "../src/server/models/access";
-import { chatWithRoute } from "../src/server/models/dispatch";
+import type { MetaChatResult } from "../src/server/models/meta";
 import {
   ModelHttpError,
   ModelNotConfiguredError,
@@ -485,31 +485,13 @@ function sanitizeResponseText(value: string): string {
   }
 }
 
-async function requestBodyText(input: RequestInfo | URL, init?: RequestInit): Promise<string | null> {
-  if (typeof init?.body === "string") return init.body;
-  if (input instanceof Request) return input.clone().text();
-  return null;
-}
-
 async function captureFetch<T>(run: () => Promise<T>): Promise<{
   ok: boolean;
   value?: T;
   error?: unknown;
   capture: FetchCapture;
 }> {
-  const originalFetch = globalThis.fetch;
   const capture: FetchCapture = { requestBody: null, responseStatus: null, responseText: null };
-  const responseReads: Promise<void>[] = [];
-  const wrappedFetch: typeof fetch = async (input, init) => {
-    const body = await requestBodyText(input, init);
-    if (body !== null) capture.requestBody = sanitize(body);
-    const response = await originalFetch(input, init);
-    capture.responseStatus = response.status;
-    const read = response.clone().text().then((text) => { capture.responseText = sanitizeResponseText(text); }).catch(() => undefined);
-    responseReads.push(read);
-    return response;
-  };
-  globalThis.fetch = wrappedFetch;
   let value: T | undefined;
   let error: unknown;
   let ok = false;
@@ -518,9 +500,6 @@ async function captureFetch<T>(run: () => Promise<T>): Promise<{
     ok = true;
   } catch (caught) {
     error = caught;
-  } finally {
-    globalThis.fetch = originalFetch;
-    await Promise.all(responseReads);
   }
   return { ok, value, error, capture };
 }
@@ -706,6 +685,11 @@ export async function main(argv = process.argv.slice(2), dependencies: MainDepen
     return 1;
   }
 
+  if (options.live) {
+    log("refused: live proofreading requires a persisted application budget reservation");
+    return 2;
+  }
+
   const defaults = corpus.cases.map((item) => prepareCase(item, FAST_MODEL_DEFAULT, FAST_PRICE_DEFAULT));
   const worstBoundMicros = defaults.reduce((sum, item) => sum + item.boundMicros, 0);
   log(`prompt_version=${PROOFREAD_PROMPT_VERSION}`);
@@ -769,16 +753,9 @@ export async function main(argv = process.argv.slice(2), dependencies: MainDepen
     }
 
     const started = performance.now();
-    const captured = await captureFetch(() => chatWithRoute({
-      model: route.model,
-      messages: entry.messages,
-      jsonSchema: PROOFREAD_JSON_SCHEMA,
-      maxTokens: PROOFREAD_ROLE.maxTokens,
-      temperature: PROOFREAD_ROLE.temperature,
-      // One long paragraph can take longer than the production cutoff; the
-      // bench measures quality, so give a slow provider more room.
-      timeoutMs: BENCH_TIMEOUT_MS,
-    }, route, config));
+    const captured = await captureFetch<MetaChatResult>(async () => {
+      throw new Error("Live proofreading requires a persisted application budget reservation");
+    });
     const wallLatencyMs = Math.round(performance.now() - started);
     const summary = responseSummary(captured.capture.responseText);
     const reportedCost = reportedUsd(summary);

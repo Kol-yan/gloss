@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createExpression, createTask, detect, enrollByok, getMe, listExpressions, newRequestId, proofread, recordDecision, signOut, submitAttempt, transcribe } from "@/features/api/client";
+import { bootstrapGuestAccess, createExpression, createTask, detect, enrollByok, getMe, listExpressions, newRequestId, proofread, recordDecision, signOut, submitAttempt, transcribe } from "@/features/api/client";
 import { forgetProviderKey, getAccessSnapshot, getRequestProviderKey, saveProviderKey, setCurrentSession, subscribeAccess } from "@/features/api/access-store";
 import type { MeResponse } from "@/shared/contracts";
 
@@ -43,9 +43,72 @@ describe("api client", () => {
   });
 
   it("maps API errors to their code", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(respond(401, { error: { code: "unauthorized", message: "Please open your invite link to sign in." } })));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(respond(401, { error: { code: "unauthorized", message: "Open Settings to add your own OpenRouter key and keep going." } })));
     const result = await getMe();
-    expect(result).toEqual({ ok: false, code: "unauthorized", message: "Please open your invite link to sign in." });
+    expect(result).toEqual({ ok: false, code: "unauthorized", message: "Open Settings to add your own OpenRouter key and keep going." });
+  });
+
+  it("creates only one guest when concurrent page bootstraps run", async () => {
+    setCurrentSession(null);
+    const fetchMock = vi.fn().mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === "/api/me") return respond(401, { error: { code: "unauthorized", message: "Open Settings to add your own OpenRouter key and keep going." } });
+      if (path === "/api/access/guest" && init?.method === "GET") return respond(200, { siteKey: null, available: true });
+      if (path === "/api/access/guest" && init?.method === "POST") return respond(200, ME);
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const results = await Promise.all([bootstrapGuestAccess(), bootstrapGuestAccess(), bootstrapGuestAccess()]);
+
+    expect(results).toEqual([{ kind: "ready" }, { kind: "ready" }, { kind: "ready" }]);
+    expect(fetchMock.mock.calls.map(([path, init]) => [path, init?.method ?? "GET"])).toEqual([
+      ["/api/me", "GET"], ["/api/access/guest", "GET"], ["/api/access/guest", "POST"],
+    ]);
+  });
+
+  it("returns the server Turnstile site key and optional action without creating a guest", async () => {
+    setCurrentSession(null);
+    const fetchMock = vi.fn().mockImplementation(async (path: string) => path === "/api/me"
+      ? respond(401, { error: { code: "unauthorized", message: "Open Settings to add your own OpenRouter key and keep going." } })
+      : respond(200, { siteKey: "public-site-key", available: true, action: "guest_access" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(bootstrapGuestAccess()).resolves.toEqual({ kind: "turnstile", siteKey: "public-site-key", action: "guest_access" });
+    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual(["/api/me", "/api/access/guest"]);
+  });
+
+  it("serializes key enrollment after an in-flight guest creation and keeps the upgraded learner", async () => {
+    setCurrentSession(null);
+    let resolveGuest!: (response: Response) => void;
+    let markGuestStarted!: () => void;
+    const guestResponse = new Promise<Response>((resolve) => { resolveGuest = resolve; });
+    const guestStarted = new Promise<void>((resolve) => { markGuestStarted = resolve; });
+    const fetchMock = vi.fn().mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === "/api/me") return respond(401, { error: { code: "unauthorized", message: "Open Settings to add your own OpenRouter key and keep going." } });
+      if (path === "/api/access/guest" && init?.method === "GET") return respond(200, { siteKey: null, available: true });
+      if (path === "/api/access/guest" && init?.method === "POST") {
+        markGuestStarted();
+        return guestResponse;
+      }
+      if (path === "/api/access/byok") return respond(200, { ...ME, accessMode: "byok" });
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const bootstrap = bootstrapGuestAccess();
+    await guestStarted;
+    const enrollment = enrollByok(VISITOR_KEY);
+    await Promise.resolve();
+    expect(fetchMock.mock.calls.map(([path]) => path)).not.toContain("/api/access/byok");
+
+    resolveGuest(respond(200, ME));
+    await expect(bootstrap).resolves.toEqual({ kind: "ready" });
+    expect(await enrollment).toMatchObject({ ok: true, data: { learner: { id: ME.learner.id }, accessMode: "byok" } });
+    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
+      "/api/me", "/api/access/guest", "/api/access/guest", "/api/access/byok",
+    ]);
+    expect(getAccessSnapshot().session).toMatchObject({ learner: { id: ME.learner.id }, accessMode: "byok" });
+    expect([...stored.values()]).toEqual([VISITOR_KEY]);
   });
 
   it("treats a response that breaks the contract as a failure", async () => {
@@ -191,6 +254,17 @@ describe("api client", () => {
     expect([...stored.values()]).toEqual([VISITOR_KEY]);
     expect(JSON.stringify(getAccessSnapshot())).not.toContain(VISITOR_KEY);
     expect(JSON.stringify(result)).not.toContain(VISITOR_KEY);
+  });
+
+  it("allows key enrollment when no guest session exists yet", async () => {
+    setCurrentSession(null);
+    const fetchMock = vi.fn().mockResolvedValue(respond(200, { ...ME, accessMode: "byok" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await enrollByok(VISITOR_KEY)).toMatchObject({ ok: true, data: { accessMode: "byok" } });
+    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual(["/api/access/byok"]);
+    expect(getAccessSnapshot().session?.accessMode).toBe("byok");
+    expect([...stored.values()]).toEqual([VISITOR_KEY]);
   });
 
   it("does not save a visitor key when enrollment preserves an existing hosted session", async () => {

@@ -26,19 +26,23 @@ export interface AsrPrice {
 // so the bound is twice the highest listed price of each kind. Presets hide
 // their provider, so they use the same bound unless the operator sets prices.
 export const FAST_MODEL_DEFAULT = "openai/gpt-oss-120b";
-export const FAST_PRICE_DEFAULT: TextPrice = {
+export const FAST_PRICE_DEFAULT: TextPrice = Object.freeze({
   kind: "text",
   inputUsdPerMTok: 0.7,
   outputUsdPerMTok: 1.9,
-};
+});
 
-export const MODEL_PRICES: Record<string, TextPrice | AsrPrice> = {
+const mutableModelPrices: Record<string, TextPrice | AsrPrice> = {
   "muse-spark-1.3": { kind: "text", inputUsdPerMTok: 1.25, outputUsdPerMTok: 4.25 },
   [FAST_MODEL_DEFAULT]: FAST_PRICE_DEFAULT,
   "muse-voice-transcribe-1.0": { kind: "asr", usdPerMinute: 0.003 },
   "meta/muse-spark-1.3": { kind: "text", inputUsdPerMTok: 1.25, outputUsdPerMTok: 4.25 },
   "meta/muse-voice-transcribe-1.0": { kind: "asr", usdPerMinute: 0.003 },
 };
+
+export const MODEL_PRICES: Record<string, TextPrice | AsrPrice> = Object.freeze(
+  Object.fromEntries(Object.entries(mutableModelPrices).map(([model, price]) => [model, Object.freeze(price)])),
+) as Record<string, TextPrice | AsrPrice>;
 
 export function textPrice(model: string): TextPrice {
   const price = Object.hasOwn(MODEL_PRICES, model) ? MODEL_PRICES[model] : undefined;
@@ -68,18 +72,32 @@ export function textCostMicros(
   return costAtPrice(price, inputTokens, outputTokens);
 }
 
+export function estimateMaxCostMicros(
+  model: string,
+  inputChars: number,
+  maxTokens: number,
+  price?: TextPrice,
+): number {
+  if (!Number.isSafeInteger(inputChars) || inputChars < 0 || !Number.isSafeInteger(maxTokens) || maxTokens < 1) {
+    throw new RangeError("inputChars and maxTokens must be non-negative safe integers");
+  }
+  const inputTokens = Math.ceil(inputChars * 3 + 600);
+  return Math.ceil(textCostMicros(model, inputTokens, maxTokens, price) * 1.25);
+}
+
 // What to record when a call is closed: the cost the provider reported, else
 // reported tokens times the price, else (no usage at all) the full upper bound.
 export function settledTextCostMicros(
-  price: TextPrice,
+  _price: TextPrice,
   usage: TokenUsage | null,
   maxCostMicros: number,
 ): number {
-  if (!usage) return maxCostMicros;
-  if (usage.costMicros !== undefined) return usage.costMicros;
-  return costAtPrice(price, usage.inputTokens, usage.outputTokens);
+  const reported = usage?.costMicros;
+  return typeof reported === "number" && Number.isSafeInteger(reported) && reported > 0
+    ? reported
+    : maxCostMicros;
 }
 
 export function asrCostMicros(model: string, seconds: number): number {
-  return Math.ceil((seconds / 60) * asrPrice(model).usdPerMinute * 1_000_000);
+  return Math.ceil((seconds / 60) * asrPrice(model).usdPerMinute * 1_000_000 * 1.25);
 }

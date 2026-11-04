@@ -3,24 +3,17 @@
 // another provider: a failed call is reported and the budget reservation
 // decides what it cost.
 import { getConfig, type AppConfig } from "../config";
+import { sendProviderRequest } from "../budget/provider-request";
 import {
-  ModelHttpError,
   ModelNotConfiguredError,
   ModelOutputError,
-  ModelTimeoutError,
   type TokenUsage,
 } from "./errors";
-import { mockProviderFetch } from "./mock-provider";
-import { textCostMicros, textPrice, type TextPrice } from "./prices";
+import { textPrice } from "./prices";
+export { estimateMaxCostMicros } from "./prices";
 
 export const MIN_MAX_TOKENS = 2048;
 export const DEFAULT_TIMEOUT_MS = 20_000;
-
-// A UTF-16 code unit needs at most three UTF-8 bytes. Reserving one token per
-// byte is conservative even for dense Unicode text; English averages are not
-// a cost bound. Callers include their schema in inputChars.
-const MAX_BYTES_PER_CODE_UNIT = 3;
-const INPUT_OVERHEAD_TOKENS = 600;
 
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
@@ -55,19 +48,6 @@ export interface MetaChatOptions {
   timeoutMs?: number;
 }
 
-// Upper bound on what one call can cost, in micro-dollars. Throws
-// UnknownModelError for a model without a price. A route passes its own price
-// when the model is configured rather than listed.
-export function estimateMaxCostMicros(
-  model: string,
-  inputChars: number,
-  maxTokens: number,
-  price?: TextPrice,
-): number {
-  const inputTokens = Math.ceil(inputChars * MAX_BYTES_PER_CODE_UNIT + INPUT_OVERHEAD_TOKENS);
-  return textCostMicros(model, inputTokens, maxTokens, price);
-}
-
 export async function metaChat(
   input: MetaChatInput,
   options: MetaChatOptions = {},
@@ -97,6 +77,7 @@ export async function metaChat(
     `${baseUrl}/chat/completions`,
     {
       method: "POST",
+      redirect: "error",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify(body),
     },
@@ -117,40 +98,6 @@ export async function metaChat(
   if (!content) throw new ModelOutputError("empty_content", usage, latencyMs);
 
   return { content, usage, latencyMs };
-}
-
-// Sends one provider request. Resolves with the body of a 2xx answer; throws
-// ModelHttpError for any other status (the body is never read into the error)
-// and ModelTimeoutError when the outcome is unknown (timeout, abort, dropped
-// connection).
-export async function sendProviderRequest(
-  url: string,
-  init: RequestInit,
-  options: { timeoutMs: number; signal?: AbortSignal; config: AppConfig },
-): Promise<{ bodyText: string; latencyMs: number }> {
-  const timeout = AbortSignal.timeout(options.timeoutMs);
-  const signal = options.signal ? AbortSignal.any([timeout, options.signal]) : timeout;
-  const started = performance.now();
-  const elapsed = () => Math.round(performance.now() - started);
-  // End-to-end tests swap only the network call, so everything around it runs as in production.
-  const send = options.config.modelMock ? mockProviderFetch : fetch;
-
-  let status: number;
-  let bodyText = "";
-  try {
-    const response = await send(url, { ...init, signal });
-    status = response.status;
-    if (response.ok) bodyText = await response.text();
-    else await response.body?.cancel().catch(() => undefined);
-  } catch {
-    // The provider may still have done the work, so the outcome is unknown.
-    const reason = timeout.aborted ? "timeout" : options.signal?.aborted ? "aborted" : "network";
-    throw new ModelTimeoutError(reason, elapsed());
-  }
-
-  const latencyMs = elapsed();
-  if (status < 200 || status >= 300) throw new ModelHttpError(status, latencyMs);
-  return { bodyText, latencyMs };
 }
 
 type Choice = { finish_reason?: unknown; message?: { content?: unknown } };
@@ -182,7 +129,16 @@ function readUsage(json: unknown): TokenUsage | null {
   if (!isRecord(json) || !isRecord(json.usage)) return null;
   const input = tokenCount(json.usage.prompt_tokens ?? json.usage.input_tokens);
   const output = tokenCount(json.usage.completion_tokens ?? json.usage.output_tokens);
-  return input === null || output === null ? null : { inputTokens: input, outputTokens: output };
+  if (input === null || output === null) return null;
+  const reportedUsd = typeof json.usage.cost === "number" && Number.isFinite(json.usage.cost) && json.usage.cost > 0
+    ? json.usage.cost
+    : undefined;
+  const reportedMicros = reportedUsd === undefined ? undefined : Math.ceil(Math.round(reportedUsd * 1e9) / 1e3);
+  return {
+    inputTokens: input,
+    outputTokens: output,
+    ...(reportedMicros && reportedMicros > 0 && Number.isSafeInteger(reportedMicros) ? { costMicros: reportedMicros } : {}),
+  };
 }
 
 function tokenCount(value: unknown): number | null {

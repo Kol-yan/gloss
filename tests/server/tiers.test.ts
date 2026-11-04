@@ -101,7 +101,7 @@ describe("routing of operator-funded jobs", () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ transcript: "hello", audioDurationMs: 2000 })));
     expect(TranscribeResponse.parse(await (await upload(voice.attemptId)).json()).text).toBe("hello");
 
-    const calls = fetchMock.mock.calls.map(([url, init]) => [url, init.headers.Authorization]);
+    const calls = fetchMock.mock.calls.map(([url, init]) => [url, (init.headers as Headers).get("authorization")]);
     expect(calls).toEqual([
       [OPENROUTER_CHAT, `Bearer ${OWNER_OPENROUTER_KEY}`],
       [OPENROUTER_CHAT, `Bearer ${OWNER_OPENROUTER_KEY}`],
@@ -144,46 +144,56 @@ describe("routing of operator-funded jobs", () => {
     timeout.mockRestore();
   });
 
-  it("uses a configured preset as the model id", async () => {
+  it("refuses a configured opaque preset even with arbitrary prices", async () => {
     start();
+    vi.spyOn(console, "error").mockImplementation(() => {});
     process.env.OPENROUTER_FAST_MODEL = PRESET;
-    fetchMock.mockResolvedValueOnce(proofreadReply([]));
-    expect((await check()).status).toBe(200);
-    expect(sentBody(0).model).toBe(PRESET);
-    expect(db().prepare("SELECT provider, model FROM check_runs WHERE learner_id = ?").get(current)).toEqual({ provider: "openrouter", model: PRESET });
+    process.env.OPENROUTER_FAST_PRICE_IN_PER_M = "2";
+    process.env.OPENROUTER_FAST_PRICE_OUT_PER_M = "10";
+    expect(ApiError.parse(await (await check()).json()).error.code).toBe("ai_disabled");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(count("usage_reservations")).toEqual({ n: 0 });
+    vi.restoreAllMocks();
   });
 
   it("reads the legacy OPENROUTER_PROOFREAD_MODEL as an alias, with the new name winning", async () => {
     start();
+    vi.spyOn(console, "error").mockImplementation(() => {});
     delete process.env.OPENROUTER_FAST_MODEL;
     process.env.OPENROUTER_PROOFREAD_MODEL = PRESET;
-    fetchMock.mockResolvedValueOnce(proofreadReply([]));
-    await check();
-    expect(sentBody(0).model).toBe(PRESET);
+    expect(ApiError.parse(await (await check()).json()).error.code).toBe("ai_disabled");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(count("usage_reservations")).toEqual({ n: 0 });
 
     process.env.OPENROUTER_FAST_MODEL = "openai/gpt-oss-120b:floor";
     fetchMock.mockResolvedValueOnce(proofreadReply([]));
     await check("Another text.");
-    expect(sentBody(1).model).toBe("openai/gpt-oss-120b:floor");
+    expect(sentBody(0).model).toBe("openai/gpt-oss-120b:floor");
+    vi.restoreAllMocks();
   });
 
-  it("reserves the same bound for a preset as for the default model, and a configured bound otherwise", async () => {
+  it("reserves a configured bound above the table floor for a known model, and retains the full bound without a reported cost", async () => {
     start();
     fetchMock.mockImplementation(async () => proofreadReply([]));
     await check("Same text.");
     const defaultBound = proofreadReservation().max_cost_micros;
 
     process.env.OPENROUTER_FAST_MODEL = PRESET;
-    await check("Same text.");
-    expect(proofreadReservation().max_cost_micros).toBe(defaultBound);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(ApiError.parse(await (await check("Same text.")).json()).error.code).toBe("ai_disabled");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    vi.restoreAllMocks();
 
-    // 1000 * 2 + 200 * 10 micro-dollars at the configured prices.
+    // Known model with configured prices above the table floor: the bound
+    // grows (1.25 safety margin) and token counts without a monetary cost
+    // retain the full max reservation.
+    process.env.OPENROUTER_FAST_MODEL = "openai/gpt-oss-120b";
     process.env.OPENROUTER_FAST_PRICE_IN_PER_M = "2";
     process.env.OPENROUTER_FAST_PRICE_OUT_PER_M = "10";
     await check("Same text.");
     const configured = proofreadReservation();
     expect(configured.max_cost_micros).toBeGreaterThan(defaultBound);
-    expect(configured.actual_cost_micros).toBe(4000);
+    expect(configured.actual_cost_micros).toBe(configured.max_cost_micros);
   });
 
   it("bounds the reservation by the fast price, input size and output budget", async () => {
@@ -196,35 +206,60 @@ describe("routing of operator-funded jobs", () => {
     expect(FAST_PRICE_DEFAULT).toMatchObject({ inputUsdPerMTok: 0.7, outputUsdPerMTok: 1.9 });
   });
 
-  it("refuses a model without a price, but not a preset, and accepts a model with both prices", async () => {
+  it("refuses opaque presets and unknown models even with arbitrary prices, and prices below the table floor", async () => {
     start();
     vi.spyOn(console, "error").mockImplementation(() => {});
     process.env.OPENROUTER_FAST_MODEL = "vendor/expensive-model";
     expect(ApiError.parse(await (await check()).json()).error.code).toBe("ai_disabled");
     process.env.OPENROUTER_FAST_PRICE_IN_PER_M = "1";
     expect(ApiError.parse(await (await check()).json()).error.code).toBe("ai_disabled");
+    process.env.OPENROUTER_FAST_PRICE_OUT_PER_M = "3";
+    expect(ApiError.parse(await (await check()).json()).error.code).toBe("ai_disabled");
     expect(fetchMock).not.toHaveBeenCalled();
     expect(count("usage_reservations")).toEqual({ n: 0 });
 
-    process.env.OPENROUTER_FAST_PRICE_OUT_PER_M = "3";
+    // Opaque presets cannot prove a bound even when the operator asserts prices.
+    process.env.OPENROUTER_FAST_MODEL = PRESET;
+    process.env.OPENROUTER_FAST_PRICE_IN_PER_M = "2";
+    process.env.OPENROUTER_FAST_PRICE_OUT_PER_M = "10";
+    expect(ApiError.parse(await (await check()).json()).error.code).toBe("ai_disabled");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(count("usage_reservations")).toEqual({ n: 0 });
+
+    // Known models cannot use configured prices below the table floor.
+    process.env.OPENROUTER_FAST_MODEL = "openai/gpt-oss-120b";
+    process.env.OPENROUTER_FAST_PRICE_IN_PER_M = "0.2";
+    process.env.OPENROUTER_FAST_PRICE_OUT_PER_M = "0.9";
+    expect(ApiError.parse(await (await check()).json()).error.code).toBe("ai_disabled");
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    // Configured prices at or above the floor are accepted.
+    process.env.OPENROUTER_FAST_PRICE_IN_PER_M = "2";
+    process.env.OPENROUTER_FAST_PRICE_OUT_PER_M = "10";
     fetchMock.mockResolvedValueOnce(proofreadReply([]));
     expect((await check()).status).toBe(200);
-    expect(sentBody(0).model).toBe("vendor/expensive-model");
+    expect(sentBody(0).model).toBe("openai/gpt-oss-120b");
     vi.restoreAllMocks();
   });
 });
 
 describe("settling the cost of a fast call", () => {
-  it("settles at the cost OpenRouter reports, rounded up to a micro-dollar", async () => {
+  it("settles at the cost OpenRouter reports, rounded up to a micro-dollar, and retains max for zero", async () => {
     start();
-    for (const [cost, micros] of [[0.000123, 123], [0.0001234, 124], [0, 0], [0.5, 500_000]] as const) {
+    for (const [cost, micros] of [[0.000123, 123], [0.0001234, 124], [0.005, 5000]] as const) {
       fetchMock.mockResolvedValueOnce(proofreadReply([], [], { prompt_tokens: 1000, completion_tokens: 200, cost }));
       expect((await check(`Text ${cost}.`)).status).toBe(200);
       expect(proofreadReservation()).toMatchObject({ status: "settled", actual_cost_micros: micros });
     }
+    // Zero or missing provider cost retains the full max reservation.
+    fetchMock.mockResolvedValueOnce(proofreadReply([], [], { prompt_tokens: 1000, completion_tokens: 200, cost: 0 }));
+    expect((await check(`Text zero.`)).status).toBe(200);
+    const retained = proofreadReservation();
+    expect(retained.status).toBe("settled");
+    expect(retained.actual_cost_micros).toBe(retained.max_cost_micros);
   });
 
-  it("falls back to tokens times the price when no usable cost is reported", async () => {
+  it("retains the full max reservation when no usable monetary cost is reported", async () => {
     start();
     const usages = [
       { prompt_tokens: 1000, completion_tokens: 200 },
@@ -237,7 +272,8 @@ describe("settling the cost of a fast call", () => {
     for (const [index, usage] of usages.entries()) {
       fetchMock.mockResolvedValueOnce(proofreadReply([], [], usage));
       await check(`Fallback ${index}.`);
-      expect(proofreadReservation().actual_cost_micros, JSON.stringify(usage)).toBe(1080);
+      const reservation = proofreadReservation();
+      expect(reservation.actual_cost_micros, JSON.stringify(usage)).toBe(reservation.max_cost_micros);
     }
   });
 
@@ -386,7 +422,7 @@ describe("routing of visitor-funded (BYOK) jobs", () => {
     );
     expect(response.status).toBe(200);
 
-    expect(fetchMock.mock.calls.map(([url, init]) => [url, init.headers.Authorization])).toEqual([
+    expect(fetchMock.mock.calls.map(([url, init]) => [url, (init.headers as Headers).get("authorization")])).toEqual([
       [OPENROUTER_CHAT, `Bearer ${visitorKey}`],
       [OPENROUTER_CHAT, `Bearer ${visitorKey}`],
       [OPENROUTER_CHAT, `Bearer ${visitorKey}`],
@@ -432,14 +468,22 @@ describe("resolveTextRoute", () => {
     });
   });
 
-  it("takes the fast model and price from configuration", () => {
+  it("takes the fast model and price from configuration above the table floor", () => {
     const route = resolveTextRoute(hosted, config({
-      OPENROUTER_FAST_MODEL: PRESET, OPENROUTER_FAST_PRICE_IN_PER_M: "0.2", OPENROUTER_FAST_PRICE_OUT_PER_M: "0.9",
+      OPENROUTER_FAST_MODEL: "openai/gpt-oss-120b", OPENROUTER_FAST_PRICE_IN_PER_M: "2", OPENROUTER_FAST_PRICE_OUT_PER_M: "10",
     }), "fast");
-    expect(route).toMatchObject({ model: PRESET, price: { inputUsdPerMTok: 0.2, outputUsdPerMTok: 0.9 } });
+    expect(route).toMatchObject({ model: "openai/gpt-oss-120b", price: { inputUsdPerMTok: 2, outputUsdPerMTok: 10 } });
     // One price alone keeps the default for the other.
-    expect(resolveTextRoute(hosted, config({ OPENROUTER_FAST_MODEL: PRESET, OPENROUTER_FAST_PRICE_IN_PER_M: "0.2" }), "fast").price)
-      .toMatchObject({ inputUsdPerMTok: 0.2, outputUsdPerMTok: 1.9 });
+    expect(resolveTextRoute(hosted, config({ OPENROUTER_FAST_MODEL: "openai/gpt-oss-120b", OPENROUTER_FAST_PRICE_IN_PER_M: "2" }), "fast").price)
+      .toMatchObject({ inputUsdPerMTok: 2, outputUsdPerMTok: 1.9 });
+    // Opaque presets cannot prove a bound even with explicit prices.
+    expect(() => resolveTextRoute(hosted, config({
+      OPENROUTER_FAST_MODEL: PRESET, OPENROUTER_FAST_PRICE_IN_PER_M: "2", OPENROUTER_FAST_PRICE_OUT_PER_M: "10",
+    }), "fast")).toThrow(UnknownModelError);
+    // Configured prices below the table floor are refused.
+    expect(() => resolveTextRoute(hosted, config({
+      OPENROUTER_FAST_MODEL: "openai/gpt-oss-120b", OPENROUTER_FAST_PRICE_IN_PER_M: "0.2", OPENROUTER_FAST_PRICE_OUT_PER_M: "0.9",
+    }), "fast")).toThrow(UnknownModelError);
   });
 
   it("refuses without a key, and an unpriced model, with the right errors", () => {

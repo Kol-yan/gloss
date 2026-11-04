@@ -5,8 +5,9 @@ import { setAiEnabled } from "@/server/budget";
 let sessionCookie: string | undefined;
 vi.mock("next/headers", () => ({
   cookies: async () => ({
-    get: (name: string) => name === "glossy_session" && sessionCookie ? { name, value: sessionCookie } : undefined,
+    get: (name: string) => name === "glossy_session_3000" && sessionCookie ? { name, value: sessionCookie } : undefined,
   }),
+  headers: async () => new Headers({ host: "localhost:3000" }),
 }));
 
 import { POST as detectRoute } from "@/app/api/detect/route";

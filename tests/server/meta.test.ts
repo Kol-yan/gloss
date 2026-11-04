@@ -8,6 +8,7 @@ import {
   UnknownModelError,
 } from "@/server/models/errors";
 import { metaChat, type MetaChatInput } from "@/server/models/meta";
+import { runBudgetedModelCall } from "./helpers/budgeted-model-call";
 
 const config = loadConfig({
   META_API_KEY: "secret-key",
@@ -21,6 +22,9 @@ const input: MetaChatInput = {
   maxTokens: 2048,
   temperature: 0,
 };
+
+const budgeted = (request: MetaChatInput, cfg = config) =>
+  runBudgetedModelCall(request, cfg, () => metaChat(request, { config: cfg }));
 
 const fetchMock = vi.fn();
 beforeEach(() => {
@@ -37,7 +41,7 @@ const ok = (content: unknown, extra: Record<string, unknown> = {}) =>
 describe("metaChat request", () => {
   it("posts an OpenAI-style strict json_schema request with bearer auth", async () => {
     fetchMock.mockResolvedValueOnce(ok('{"a":1}', { usage: { prompt_tokens: 10, completion_tokens: 5 } }));
-    const result = await metaChat(input, { config });
+    const result = await budgeted(input);
 
     expect(result).toMatchObject({ content: '{"a":1}', usage: { inputTokens: 10, outputTokens: 5 } });
     expect(result.latencyMs).toBeGreaterThanOrEqual(0);
@@ -45,10 +49,9 @@ describe("metaChat request", () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("https://meta.test/v1/chat/completions");
     expect(init.method).toBe("POST");
-    expect(init.headers).toMatchObject({
-      Authorization: "Bearer secret-key",
-      "Content-Type": "application/json",
-    });
+    const outboundHeaders = new Headers(init.headers);
+    expect(outboundHeaders.get("authorization")).toBe("Bearer secret-key");
+    expect(outboundHeaders.get("content-type")).toBe("application/json");
     expect(init.signal).toBeInstanceOf(AbortSignal);
     expect(JSON.parse(init.body)).toEqual({
       model: "muse-spark-1.3",
@@ -64,14 +67,15 @@ describe("metaChat request", () => {
 
   it("omits temperature when not given", async () => {
     fetchMock.mockResolvedValueOnce(ok("{}"));
-    await metaChat({ ...input, temperature: undefined }, { config });
+    await budgeted({ ...input, temperature: undefined });
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).not.toHaveProperty("temperature");
   });
 
   it("sends reasoning effort at the top level without reducing the output budget", async () => {
     fetchMock.mockResolvedValueOnce(ok("{}", { usage: { prompt_tokens: 10, completion_tokens: 1100,
       completion_tokens_details: { reasoning_tokens: 900 } } }));
-    const result = await metaChat({ ...input, maxTokens: 4096, reasoningEffort: "minimal" }, { config });
+    const request = { ...input, maxTokens: 4096, reasoningEffort: "minimal" as const };
+    const result = await budgeted(request);
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({
       max_tokens: 4096, reasoning_effort: "minimal",
     });
@@ -84,24 +88,29 @@ describe("metaChat request", () => {
     await expect(metaChat({ ...input, maxTokens: 1024 }, { config })).rejects.toThrow(RangeError);
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("refuses a valid adapter call when no reserved budget context is installed", async () => {
+    await expect(metaChat(input, { config })).rejects.toMatchObject({ name: "ProviderRequestBlockedError" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
 
 describe("metaChat usage", () => {
   it("accepts input/output token names", async () => {
     fetchMock.mockResolvedValueOnce(ok("{}", { usage: { input_tokens: 7, output_tokens: 3 } }));
-    expect((await metaChat(input, { config })).usage).toEqual({ inputTokens: 7, outputTokens: 3 });
+    expect((await budgeted(input)).usage).toEqual({ inputTokens: 7, outputTokens: 3 });
   });
 
   it("reports null for missing or malformed usage", async () => {
     for (const usage of [undefined, {}, { prompt_tokens: 5 }, { prompt_tokens: "5", completion_tokens: 1 }, { prompt_tokens: -1, completion_tokens: 1 }]) {
       fetchMock.mockResolvedValueOnce(ok("{}", usage === undefined ? {} : { usage }));
-      expect((await metaChat(input, { config })).usage).toBeNull();
+      expect((await budgeted(input)).usage).toBeNull();
     }
   });
 
   it("joins text parts when content is a list", async () => {
     fetchMock.mockResolvedValueOnce(ok([{ type: "text", text: '{"a"' }, { type: "text", text: ":1}" }]));
-    expect((await metaChat(input, { config })).content).toBe('{"a":1}');
+    expect((await budgeted(input)).content).toBe('{"a":1}');
   });
 });
 
@@ -109,7 +118,7 @@ describe("metaChat errors", () => {
   it("reports non-2xx answers as ModelHttpError without the body", async () => {
     for (const status of [400, 401, 429, 500, 503]) {
       fetchMock.mockResolvedValueOnce(new Response("secret provider detail", { status }));
-      const error = await metaChat(input, { config }).catch((e) => e);
+      const error = await budgeted(input).catch((e) => e);
       expect(error).toBeInstanceOf(ModelHttpError);
       expect(error.status).toBe(status);
       expect(error.message).not.toContain("secret");
@@ -118,7 +127,7 @@ describe("metaChat errors", () => {
 
   it("reports unusable answers as ModelOutputError and keeps usage for settling", async () => {
     fetchMock.mockResolvedValueOnce(new Response("<html>gateway</html>", { status: 200 }));
-    await expect(metaChat(input, { config })).rejects.toMatchObject({
+    await expect(budgeted(input)).rejects.toMatchObject({
       name: "ModelOutputError",
       reason: "envelope_not_json",
       usage: null,
@@ -129,20 +138,20 @@ describe("metaChat errors", () => {
         usage: { prompt_tokens: 100, completion_tokens: 2048 },
       }),
     );
-    await expect(metaChat(input, { config })).rejects.toMatchObject({
+    await expect(budgeted(input)).rejects.toMatchObject({
       reason: "truncated",
       usage: { inputTokens: 100, outputTokens: 2048 },
     });
 
     fetchMock.mockResolvedValueOnce(ok("   ", { usage: { prompt_tokens: 1, completion_tokens: 1 } }));
-    await expect(metaChat(input, { config })).rejects.toBeInstanceOf(ModelOutputError);
+    await expect(budgeted(input)).rejects.toBeInstanceOf(ModelOutputError);
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ choices: [] }), { status: 200 }));
-    await expect(metaChat(input, { config })).rejects.toBeInstanceOf(ModelOutputError);
+    await expect(budgeted(input)).rejects.toBeInstanceOf(ModelOutputError);
   });
 
   it("treats a dropped connection as outcome unknown", async () => {
     fetchMock.mockRejectedValueOnce(new TypeError("fetch failed"));
-    await expect(metaChat(input, { config })).rejects.toMatchObject({
+    await expect(budgeted(input)).rejects.toMatchObject({
       name: "ModelTimeoutError",
       reason: "network",
     });
@@ -155,7 +164,7 @@ describe("metaChat errors", () => {
           init.signal?.addEventListener("abort", () => reject(init.signal?.reason));
         }),
     );
-    const error = await metaChat(input, { config, timeoutMs: 20 }).catch((e) => e);
+    const error = await runBudgetedModelCall(input, config, () => metaChat(input, { config, timeoutMs: 20 })).catch((e) => e);
     expect(error).toBeInstanceOf(ModelTimeoutError);
     expect(error.reason).toBe("timeout");
   });
@@ -169,7 +178,8 @@ describe("metaChat errors", () => {
           controller.abort();
         }),
     );
-    const error = await metaChat({ ...input, signal: controller.signal }, { config }).catch((e) => e);
+    const request = { ...input, signal: controller.signal };
+    const error = await runBudgetedModelCall(request, config, () => metaChat(request, { config })).catch((e) => e);
     expect(error).toBeInstanceOf(ModelTimeoutError);
     expect(error.reason).toBe("aborted");
   });

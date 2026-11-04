@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { AlertIcon, MicIcon, StopIcon } from "@/components/ui/icons";
 import { FeedbackPanel } from "@/features/practice/feedback-panel";
@@ -24,7 +25,7 @@ export type VoiceHandlers = {
   onSkip: () => void;
 };
 
-const ERROR_COPY: Record<VoiceErrorReason, { title: string; body: string }> = {
+const ERROR_COPY: Record<VoiceErrorReason, { title: string; body: ReactNode }> = {
   mic_blocked: {
     title: "Your browser is blocking the microphone",
     body: "Allow microphone access for this site in the address bar, then try again. Or type your answer instead.",
@@ -47,11 +48,11 @@ const ERROR_COPY: Record<VoiceErrorReason, { title: string; body: string }> = {
   },
   limit_reached: {
     title: "You've used today's speaking time",
-    body: "It comes back tomorrow. You can type your answer instead.",
+    body: <>The free demo is used up. Add your own OpenRouter key in <Link href="/settings" className="font-semibold underline underline-offset-2">Settings</Link> to keep going, or type your answer instead.</>,
   },
   service_off: {
     title: "Speech isn't available today",
-    body: "You can type your answer instead.",
+    body: <>Speech is paused. Add your own OpenRouter key in <Link href="/settings" className="font-semibold underline underline-offset-2">Settings</Link> to keep going, or type your answer instead.</>,
   },
 };
 

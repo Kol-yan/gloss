@@ -17,7 +17,8 @@ import type { Learner } from "../auth/sessions";
 import { getConfig, type AppConfig } from "../config";
 import { getDb, immediate, type Row } from "../db";
 import type { ServerDeps } from "../deps";
-import { ConflictError, NotFoundError } from "../errors";
+import { ConflictError, NotFoundError, QuotaExceededError, UnauthorizedError } from "../errors";
+import { utcDayBounds } from "../budget";
 import { newId } from "../ids";
 import { starterEntry } from "../learning/starter";
 import type { ProviderAccess } from "../models/access";
@@ -80,6 +81,17 @@ export function preparePracticeSession(
     if (existing) {
       if (Number(existing.requested_size) !== size) throw new ConflictError();
       return String(existing.id);
+    }
+
+    const current = tx.prepare("SELECT quota_profile, funding_source FROM learners WHERE id = ? AND deleted_at IS NULL").get(learner.id);
+    if (!current) throw new UnauthorizedError();
+    if (current.quota_profile === "guest" && current.funding_source === "hosted") {
+      const config = deps.config ?? getConfig();
+      const { start, end } = utcDayBounds(nowDate);
+      const used = Number(tx.prepare(
+        "SELECT COUNT(*) AS n FROM practice_sessions WHERE learner_id = ? AND created_at >= ? AND created_at < ?",
+      ).get(learner.id, start, end)?.n ?? 0);
+      if (used >= config.guestDailyPracticeSessions) throw new QuotaExceededError("evaluate", used, config.guestDailyPracticeSessions);
     }
 
     // Selection reserves new-word places, so replay lookup must happen first

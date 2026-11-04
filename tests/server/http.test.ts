@@ -41,6 +41,14 @@ describe("jsonError", () => {
 describe("errorResponse", () => {
   afterEach(() => vi.restoreAllMocks());
 
+  it("shows a safe in-place continuation for spent demo allowances", async () => {
+    for (const error of [new BudgetExhaustedError(), new QuotaExceededError("proofread", 30, 30)]) {
+      const message = (await errorResponse(error).json()).error.message;
+      expect(message).toContain("OpenRouter key in Settings");
+      expect(message).not.toContain("30/30");
+    }
+  });
+
   it("maps typed errors to ApiError responses", async () => {
     const cases: [unknown, number, string][] = [
       [new UnauthorizedError(), 401, "unauthorized"],

@@ -29,20 +29,20 @@ describe("prices", () => {
   it("prices with an explicit price when one is given", () => {
     const price = { kind: "text", inputUsdPerMTok: 2, outputUsdPerMTok: 10 } as const;
     expect(textCostMicros("any-model", 1000, 200, price)).toBe(4000);
-    expect(estimateMaxCostMicros("any-model", 100, 2048, price)).toBe(Math.ceil((300 + 600) * 2 + 2048 * 10));
+    expect(estimateMaxCostMicros("any-model", 100, 2048, price)).toBe(Math.ceil(((300 + 600) * 2 + 2048 * 10) * 1.25));
   });
 
-  it("settles at the reported cost, else at tokens times the price, else at the bound", () => {
+  it("settles at the reported cost, else retains the full bound (tokens without cost are unproven)", () => {
     const price = textPrice(FAST_MODEL_DEFAULT);
     expect(settledTextCostMicros(price, { inputTokens: 1000, outputTokens: 200, costMicros: 77 }, 9999)).toBe(77);
-    expect(settledTextCostMicros(price, { inputTokens: 1000, outputTokens: 200, costMicros: 0 }, 9999)).toBe(0);
-    expect(settledTextCostMicros(price, { inputTokens: 1000, outputTokens: 200 }, 9999)).toBe(1080);
+    expect(settledTextCostMicros(price, { inputTokens: 1000, outputTokens: 200, costMicros: 0 }, 9999)).toBe(9999);
+    expect(settledTextCostMicros(price, { inputTokens: 1000, outputTokens: 200 }, 9999)).toBe(9999);
     expect(settledTextCostMicros(price, null, 9999)).toBe(9999);
   });
 
-  it("prices speech-to-text per minute", () => {
-    expect(asrCostMicros("muse-voice-transcribe-1.0", 60)).toBe(3000);
-    expect(asrCostMicros("muse-voice-transcribe-1.0", 1)).toBe(50);
+  it("prices speech-to-text per minute with the 1.25 safety margin", () => {
+    expect(asrCostMicros("muse-voice-transcribe-1.0", 60)).toBe(3750);
+    expect(asrCostMicros("muse-voice-transcribe-1.0", 1)).toBe(63);
     expect(asrCostMicros("muse-voice-transcribe-1.0", 0)).toBe(0);
   });
 
@@ -57,8 +57,8 @@ describe("prices", () => {
 });
 
 describe("estimateMaxCostMicros", () => {
-  it("reserves a Unicode-safe input bound and the full reasoning/output budget", () => {
-    expect(estimateMaxCostMicros("muse-spark-1.3", 3000, 4096)).toBe(29_408);
+  it("reserves a Unicode-safe input bound and the full reasoning/output budget with the 1.25 safety margin", () => {
+    expect(estimateMaxCostMicros("muse-spark-1.3", 3000, 4096)).toBe(36_760);
   });
 
   it("covers input bytes for ASCII, dense Unicode and surrogate pairs", () => {

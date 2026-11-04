@@ -11,8 +11,9 @@ let sessionCookie: string | undefined;
 vi.mock("next/headers", () => ({
   cookies: async () => ({
     get: (name: string) =>
-      name === "glossy_session" && sessionCookie ? { name, value: sessionCookie } : undefined,
+      name === "glossy_session_3000" && sessionCookie ? { name, value: sessionCookie } : undefined,
   }),
+  headers: async () => new Headers({ host: "localhost:3000" }),
 }));
 vi.mock("next/server", async (importOriginal) => ({
   ...(await importOriginal<typeof import("next/server")>()),
@@ -22,6 +23,7 @@ vi.mock("next/server", async (importOriginal) => ({
 import { GET as me } from "@/app/api/me/route";
 import { POST as join } from "@/app/join/[token]/continue/route";
 import { createInvite } from "@/server/auth/invites";
+import { getSessionCookieName } from "@/server/auth/sessions";
 import { reserve, setAiEnabled } from "@/server/budget";
 import { closeDb, getDb } from "@/server/db";
 
@@ -64,13 +66,16 @@ const joinRequest = async (token: string) =>
     { params: Promise.resolve({ token }) },
   )) as NextResponse;
 
+const meRequest = () => new Request("http://localhost:3000/api/me");
+const sessionCookieName = getSessionCookieName(meRequest());
+
 function newInvite(maxUses = 1, profile: "pilot" | "judge" | "owner" = "judge") {
   return createInvite({ label: "Route test", maxUses, quotaProfile: profile }).token;
 }
 
 describe("GET /api/me", () => {
   it("answers 401 with an ApiError when there is no session", async () => {
-    const response = await me();
+    const response = await me(meRequest());
     expect(response.status).toBe(401);
     const body = ApiError.parse(await response.json());
     expect(body.error.code).toBe("unauthorized");
@@ -79,14 +84,14 @@ describe("GET /api/me", () => {
 
   it("answers 401 for an unknown session token", async () => {
     sessionCookie = "q".repeat(43);
-    expect((await me()).status).toBe(401);
+    expect((await me(meRequest())).status).toBe(401);
   });
 
   it("returns quotas used today versus the limit", async () => {
     const joined = await joinRequest(newInvite(1, "pilot"));
-    sessionCookie = joined.cookies.get("glossy_session")?.value;
+    sessionCookie = joined.cookies.get(sessionCookieName)?.value;
 
-    let body = MeResponse.parse(await (await me()).json());
+    let body = MeResponse.parse(await (await me(meRequest())).json());
     expect(body.learner.displayName).toBe("Route test 1");
     expect(body.aiEnabled).toBe(true);
     expect(body.quotas).toEqual({
@@ -97,7 +102,7 @@ describe("GET /api/me", () => {
     });
 
     reserve({ learnerId: body.learner.id, kind: "detect", requestId: "detect-1", units: 1, maxCostMicros: 1000 });
-    body = MeResponse.parse(await (await me()).json());
+    body = MeResponse.parse(await (await me(meRequest())).json());
     expect(body.quotas.detect).toEqual({ used: 1, limit: 100 });
 
     reserve({
@@ -107,20 +112,20 @@ describe("GET /api/me", () => {
       units: 45,
       maxCostMicros: 1000,
     });
-    body = MeResponse.parse(await (await me()).json());
+    body = MeResponse.parse(await (await me(meRequest())).json());
     expect(body.quotas.asrSeconds).toEqual({ used: 45, limit: 180 });
   });
 
   it("reports aiEnabled false for the kill switch and for a spent ceiling", async () => {
     const joined = await joinRequest(newInvite(1, "owner"));
-    sessionCookie = joined.cookies.get("glossy_session")?.value;
-    const learnerId = MeResponse.parse(await (await me()).json()).learner.id;
+    sessionCookie = joined.cookies.get(sessionCookieName)?.value;
+    const learnerId = MeResponse.parse(await (await me(meRequest())).json()).learner.id;
 
     setAiEnabled(false);
-    expect(MeResponse.parse(await (await me()).json()).aiEnabled).toBe(false);
+    expect(MeResponse.parse(await (await me(meRequest())).json()).aiEnabled).toBe(false);
 
     setAiEnabled(true);
-    expect(MeResponse.parse(await (await me()).json()).aiEnabled).toBe(true);
+    expect(MeResponse.parse(await (await me(meRequest())).json()).aiEnabled).toBe(true);
     const spent = getDb()
       .prepare("SELECT COALESCE(SUM(max_cost_micros), 0) AS n FROM usage_reservations")
       .get();
@@ -131,20 +136,20 @@ describe("GET /api/me", () => {
       units: 1,
       maxCostMicros: 1_000_000 - Number(spent?.n ?? 0),
     });
-    expect(MeResponse.parse(await (await me()).json()).aiEnabled).toBe(false);
+    expect(MeResponse.parse(await (await me(meRequest())).json()).aiEnabled).toBe(false);
   });
 
   it("disables hosted AI when the owner OpenRouter key is missing or invalid", async () => {
     const joined = await joinRequest(newInvite(1, "pilot"));
-    sessionCookie = joined.cookies.get("glossy_session")?.value;
+    sessionCookie = joined.cookies.get(sessionCookieName)?.value;
     const validKey = process.env.OPENROUTER_API_KEY;
     try {
       delete process.env.OPENROUTER_API_KEY;
-      expect(MeResponse.parse(await (await me()).json()).aiEnabled).toBe(false);
+      expect(MeResponse.parse(await (await me(meRequest())).json()).aiEnabled).toBe(false);
       process.env.OPENROUTER_API_KEY = "invalid";
-      expect(MeResponse.parse(await (await me()).json()).aiEnabled).toBe(false);
+      expect(MeResponse.parse(await (await me(meRequest())).json()).aiEnabled).toBe(false);
       process.env.OPENROUTER_API_KEY = validKey!;
-      expect(MeResponse.parse(await (await me()).json()).aiEnabled).toBe(true);
+      expect(MeResponse.parse(await (await me(meRequest())).json()).aiEnabled).toBe(true);
     } finally {
       if (validKey === undefined) delete process.env.OPENROUTER_API_KEY;
       else process.env.OPENROUTER_API_KEY = validKey;

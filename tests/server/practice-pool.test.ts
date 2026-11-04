@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 import { setAiEnabled } from "@/server/budget";
 import { loadConfig } from "@/server/config";
@@ -13,7 +13,12 @@ import { createTempDb, insertLearner } from "./helpers/db";
 
 const TARGET = "take a rain check";
 const MEANING = "politely decline now and accept later";
-const AT = new Date("2026-11-03T00:00:00.000Z");
+const AT = new Date("2026-11-02T00:00:00.000Z");
+
+// Reservations and their dispatch must land in the same UTC day; the transport
+// checks the reservation's day against the real clock at send time.
+beforeEach(() => { vi.useFakeTimers({ now: AT, toFake: ["Date"] }); });
+afterEach(() => { vi.useRealTimers(); });
 
 function bundle(prefix = "first") {
   const make = (rung: number, sentence: string, prompt: string, options: string[] | null, answer: string) => ({
@@ -159,9 +164,12 @@ describe("practice exercise pool", () => {
         choices: [{ message: { content: JSON.stringify(bundle("fresh")) }, finish_reason: "stop" }],
         usage: { prompt_tokens: 100, completion_tokens: 200, cost: 0.001 },
       }), { status: 200 }));
+      vi.setSystemTime(boundary);
       const atBoundary = await takePoolExercise(state.learnerId, state.expressionId, 2, { db: state.db, now: boundary, config: state.config });
       expect(atBoundary.sentence).not.toBe(first.sentence);
-      const afterBoundary = await takePoolExercise(state.learnerId, state.expressionId, 2, { db: state.db, now: new Date(boundary.getTime() + 1), config: state.config });
+      const afterBoundaryAt = new Date(boundary.getTime() + 1);
+      vi.setSystemTime(afterBoundaryAt);
+      const afterBoundary = await takePoolExercise(state.learnerId, state.expressionId, 2, { db: state.db, now: afterBoundaryAt, config: state.config });
       expect(afterBoundary.sentence).toBe(first.sentence);
       state.db.prepare("DELETE FROM practice_exercise_pool WHERE learner_id = ? AND expression_id = ?").run(state.learnerId, state.expressionId);
       expect(state.db.prepare("SELECT sentence FROM practice_exercise_history WHERE learner_id = ? AND sentence_hash = ?")

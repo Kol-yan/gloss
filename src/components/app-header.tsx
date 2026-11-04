@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { AccountControls } from "./provider-access";
+import { buttonClasses } from "./ui/button";
 
 const NAV = [
   { href: "/", label: "Editor" },
@@ -13,7 +13,13 @@ const NAV = [
 export function AppHeader() {
   const pathname = usePathname();
 
-  if (pathname === "/practice") return null;
+  if (pathname === "/practice") {
+    return (
+      <div className="fixed right-4 top-3 z-50">
+        <Link href="/settings" className={buttonClasses("quiet", "sm")}>Settings</Link>
+      </div>
+    );
+  }
 
   return (
     <header className="relative z-40 shrink-0 border-b border-line bg-paper/90 backdrop-blur">
@@ -44,7 +50,13 @@ export function AppHeader() {
             })}
           </ul>
         </nav>
-        <AccountControls />
+        <Link
+          href="/settings"
+          aria-current={pathname === "/settings" ? "page" : undefined}
+          className={buttonClasses("quiet", "sm")}
+        >
+          Settings
+        </Link>
       </div>
     </header>
   );

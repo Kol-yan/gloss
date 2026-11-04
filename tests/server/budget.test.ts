@@ -8,6 +8,7 @@ import {
   markUnknown,
   reserve,
   settle,
+  recordProviderReportedCost,
   setAiEnabled,
   utcDayBounds,
   type ReserveInput,
@@ -31,6 +32,11 @@ function input(learnerId: string, requestId: string, over: Partial<ReserveInput>
 }
 
 const deps = (over: Record<string, unknown> = {}) => ({ db: temp.db, now: T0, config, ...over });
+
+function providerCost(id: string, cost: number) {
+  temp.db.prepare("INSERT INTO budget_dispatches (reservation_id, dispatched_at) VALUES (?, ?)").run(id, T0.toISOString());
+  return recordProviderReportedCost(id, Math.ceil(cost), deps());
+}
 
 describe("reserve", () => {
   it("replays the same (learner, kind, requestId) without counting again", () => {
@@ -204,14 +210,14 @@ describe("reserve", () => {
       BudgetExhaustedError,
     );
     // A later settle (usage reported after all) replaces the pessimistic count.
-    settle(big.id, 50_000, deps());
+    providerCost(big.id, 50_000);
     expect(getBudgetStatus(deps()).spentMicros).toBe(50_000);
   });
 
   it("settle replaces max cost with the actual cost and is idempotent", () => {
     const learner = insertLearner(temp.db);
     const r = reserve(input(learner, "s1", { maxCostMicros: 600_000 }), deps());
-    const settled = settle(r.id, 12_345.2, deps());
+    const settled = providerCost(r.id, 12_345.2);
     expect(settled).toMatchObject({ status: "settled", actualCostMicros: 12_346 });
     expect(settled.settledAt).toBe(T0.toISOString());
     expect(settle(r.id, 999_999, deps()).actualCostMicros).toBe(12_346);

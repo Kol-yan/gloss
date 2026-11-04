@@ -3,7 +3,6 @@ import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { performance } from "node:perf_hooks";
 import { dirname, resolve } from "node:path";
 
-const API_BASE = "https://openrouter.ai/api/v1";
 const LABELER_MODEL = "openai/gpt-oss-120b";
 const BATCH_SIZE = 8;
 const MAX_TOKENS = 2048;
@@ -139,32 +138,9 @@ function refuse(message: string): never {
   throw new RunRefusal(message);
 }
 
-function parseContent(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    return content.map((part) => {
-      if (typeof part === "object" && part !== null && "text" in part && typeof part.text === "string") {
-        return part.text;
-      }
-      return "";
-    }).join("");
-  }
-  return "";
-}
-
 function parseJson<T>(text: string): T {
   const trimmed = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
   return JSON.parse(trimmed) as T;
-}
-
-function getUsage(value: unknown): Usage | null {
-  if (typeof value !== "object" || value === null) return null;
-  const row = value as Record<string, unknown>;
-  return {
-    ...(typeof row.prompt_tokens === "number" ? { prompt_tokens: row.prompt_tokens } : {}),
-    ...(typeof row.completion_tokens === "number" ? { completion_tokens: row.completion_tokens } : {}),
-    ...(typeof row.cost === "number" || typeof row.cost === "string" ? { cost: row.cost } : {}),
-  };
 }
 
 function usageCost(usage: Usage | null): number | null {
@@ -193,11 +169,7 @@ function requestBody(model: string, messages: unknown[], schema: typeof LABEL_SC
 }
 
 async function getCatalog(): Promise<Model[]> {
-  const response = await fetch(`${API_BASE}/models`, { headers: { Accept: "application/json" } });
-  if (!response.ok) throw new Error(`model catalog request returned HTTP ${response.status}`);
-  const payload = await response.json() as { data?: Model[] };
-  if (!Array.isArray(payload.data)) throw new Error("model catalog response has no data array");
-  return payload.data;
+  return refuse("live provider catalog access is disabled until this benchmark uses the application budget ledger");
 }
 
 function pricePerToken(value: string | undefined): number | null {
@@ -263,64 +235,14 @@ function detectMessages(batch: Case[]) {
 }
 
 async function callModel(
-  model: string,
-  messages: unknown[],
-  schema: typeof LABEL_SCHEMA | typeof DETECT_SCHEMA,
-  purpose: CallEvidence["purpose"],
-  batch: number,
-  evidence: CallEvidence[],
+  _model: string,
+  _messages: unknown[],
+  _schema: typeof LABEL_SCHEMA | typeof DETECT_SCHEMA,
+  _purpose: CallEvidence["purpose"],
+  _batch: number,
+  _evidence: CallEvidence[],
 ): Promise<string> {
-  const body = requestBody(model, messages, schema);
-  const started = performance.now();
-  let response: Response;
-  try {
-    response = await fetch(`${API_BASE}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.OPENROUTER_API_KEY ?? ""}`,
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        "X-OpenRouter-Title": "gloss",
-      },
-      body: JSON.stringify(body),
-    });
-  } catch {
-    evidence.push({
-      purpose,
-      model,
-      batch,
-      request_body: body,
-      response: { status: 0, provider: null, usage: null, finish_reason: null, content: null, latency_ms: Math.round(performance.now() - started) },
-    });
-    throw new Error(`transport failed for ${model} batch ${batch}; cost is unknown up to its reserved bound`);
-  }
-
-  const latencyMs = Math.round(performance.now() - started);
-  const responseText = await response.text();
-  let payload: Record<string, unknown> = {};
-  try {
-    payload = JSON.parse(responseText) as Record<string, unknown>;
-  } catch {
-    // Keep only the status and secret-free request when a response is not JSON.
-  }
-  const choices = Array.isArray(payload.choices) ? payload.choices : [];
-  const choice = typeof choices[0] === "object" && choices[0] !== null ? choices[0] as Record<string, unknown> : {};
-  const message = typeof choice.message === "object" && choice.message !== null ? choice.message as Record<string, unknown> : {};
-  const content = parseContent(message.content) || null;
-  const usage = getUsage(payload.usage);
-  const provider = typeof payload.provider === "string" ? payload.provider : null;
-  const finishReason = typeof choice.finish_reason === "string" ? choice.finish_reason : null;
-  evidence.push({
-    purpose,
-    model,
-    batch,
-    request_body: body,
-    response: { status: response.status, provider, usage, finish_reason: finishReason, content, latency_ms: latencyMs },
-  });
-  if (!response.ok) throw new Error(`HTTP ${response.status} for ${model} batch ${batch}; response body omitted`);
-  if (finishReason === "length") throw new Error(`truncated completion for ${model} batch ${batch}`);
-  if (!content) throw new Error(`empty completion for ${model} batch ${batch}`);
-  return content;
+  return refuse("live model calls are disabled until this benchmark uses the application budget ledger");
 }
 
 function checkedLabels(content: string, expected: number): Label[] {
@@ -414,7 +336,7 @@ async function writeResult(content: string): Promise<void> {
 async function main(): Promise<void> {
   printRunCap();
   if (!process.argv.includes("--live")) refuse("pass --live to make owner-funded OpenRouter calls");
-  if (!process.env.OPENROUTER_API_KEY) refuse("OPENROUTER_API_KEY is not present in the process environment");
+  // Live provider calls stay disabled until this benchmark uses the budget ledger.
   try {
     await access(RESULT_PATH);
     refuse(`result already exists at ${RESULT_PATH}; this corpus run is not repeated automatically`);

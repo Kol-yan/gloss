@@ -52,7 +52,7 @@ export async function runReservedChat<T>(args: ReservedChatArgs<T>): Promise<{
   try {
     const access = resolveProviderAccess(reservation.learnerId, args.providerAccess, db);
     route = resolveTextRoute(access, config, args.tier);
-    result = await chatWithRoute({ ...chat, model: route.model }, route, config);
+    result = await chatWithRoute({ ...chat, model: route.model }, route, config, { reservation, db, now });
   } catch (error) {
     if (error instanceof ModelOutputError) close(billed(error.usage));
     else if (

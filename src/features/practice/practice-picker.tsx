@@ -4,7 +4,7 @@ import Link from "next/link";
 import { buttonClasses } from "@/components/ui/button";
 import { EmptyState } from "@/components/empty-state";
 import { VocabularyPronunciation } from "@/components/vocabulary-pronunciation";
-import { InviteRequired } from "@/components/invite-required";
+import { AccessUnavailable } from "@/components/invite-required";
 import { LoadError, LoadingState } from "@/components/load-states";
 import { isUnauthorized, listExpressions } from "@/features/api/client";
 import { useLoad } from "@/features/api/use-load";
@@ -16,7 +16,7 @@ export function PracticePicker() {
   if (!result) return <LoadingState label="Loading your expressions" />;
 
   if (!result.ok) {
-    if (isUnauthorized(result)) return <InviteRequired onRetry={reload} />;
+    if (isUnauthorized(result)) return <AccessUnavailable />;
     return (
       <LoadError title="We couldn't load your expressions" onRetry={reload}>
         Check your connection and try again.

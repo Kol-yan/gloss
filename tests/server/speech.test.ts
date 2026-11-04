@@ -108,8 +108,10 @@ describe("POST /api/speech/transcribe", () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("https://meta.test/v1/asr/transcribe");
     expect(init.method).toBe("POST");
-    expect(init.headers).toMatchObject({ Authorization: "Bearer test-key", Accept: "application/json" });
-    expect(init.headers["Content-Type"]).toBeUndefined();
+    const headers = init.headers as Headers;
+    expect(headers.get("authorization")).toBe("Bearer test-key");
+    expect(headers.get("accept")).toBe("application/json");
+    expect(headers.get("content-type")).toBeNull();
     const form = init.body as FormData;
     const settings = form.get("request") as Blob;
     expect(settings.type).toBe("application/json");
@@ -129,9 +131,9 @@ describe("POST /api/speech/transcribe", () => {
       audio_seconds: 2.4,
       answer: null,
     });
-    // 3 seconds reserved (2.4 rounded up) and settled at that reservation: 3 s * $0.003/min.
+    // 3 seconds reserved (2.4 rounded up) and settled at that reservation: 3 s * $0.003/min with the 1.25 safety margin.
     expect(reservations(learner.id)).toEqual([
-      expect.objectContaining({ units: 3, status: "settled", actual_cost_micros: 150 }),
+      expect.objectContaining({ units: 3, status: "settled", actual_cost_micros: 188 }),
     ]);
     // Nothing in the database holds the audio bytes.
     expect(JSON.stringify(db().prepare("SELECT * FROM attempts WHERE id = ?").all(attemptId))).not.toMatch(/RIFF/);
@@ -162,7 +164,7 @@ describe("POST /api/speech/transcribe", () => {
     fetchMock.mockResolvedValueOnce(asrReply({ transcript: "x", audioDurationMs: 200 }));
     await upload(attemptId, makeWav({ seconds: 2 }));
     expect(reservations(learner.id)).toEqual([
-      expect.objectContaining({ units: 2, status: "settled", actual_cost_micros: 100 }),
+      expect.objectContaining({ units: 2, status: "settled", actual_cost_micros: 125 }),
     ]);
 
     // A longer report cannot raise the charge above the reservation, and is logged.
@@ -171,7 +173,7 @@ describe("POST /api/speech/transcribe", () => {
     fetchMock.mockResolvedValueOnce(asrReply({ transcript: "x", audioDurationMs: 99_000 }));
     await upload(second.attemptId, makeWav({ seconds: 2 }));
     expect(reservations(second.learner.id)).toEqual([
-      expect.objectContaining({ units: 2, actual_cost_micros: 100 }),
+      expect.objectContaining({ units: 2, actual_cost_micros: 125 }),
     ]);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(String(warn.mock.calls[0][0])).toMatch(/99000 ms for 2 reserved seconds/);

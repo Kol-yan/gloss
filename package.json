@@ -11,7 +11,8 @@
     "test": "vitest run",
     "test:e2e": "playwright test --config tests/e2e/playwright.config.ts",
     "invite": "tsx scripts/invite.ts",
-    "ai": "tsx scripts/ai-switch.ts"
+    "ai": "tsx scripts/ai-switch.ts",
+    "spend:report": "tsx scripts/spend-report.ts"
   },
   "dependencies": {
     "harper.js": "3.0.0",

@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useId, useState, type FormEvent } from "react";
-import { enrollByok, getMe, signOut } from "@/features/api/client";
+import { useId, useState, type FormEvent } from "react";
+import { enrollByok } from "@/features/api/client";
 import { forgetProviderKey, isProviderKey } from "@/features/api/access-store";
 import { useAccess } from "@/features/api/use-access";
 import { Button } from "./ui/button";
 
-export function ProviderKeyForm({ onReady, compact = false }: { onReady: () => void; compact?: boolean }) {
+export function ProviderKeyForm({ onReady, compact = false }: { onReady?: () => void; compact?: boolean }) {
   const inputId = useId();
   const descriptionId = useId();
   const [draft, setDraft] = useState("");
@@ -26,13 +26,13 @@ export function ProviderKeyForm({ onReady, compact = false }: { onReady: () => v
       return;
     }
     setDraft("");
-    setMessage(result.data.accessMode === "byok" ? "Your key is ready." : "Your invite access is already active. Your key was not saved.");
-    onReady();
+    setMessage(result.data.accessMode === "byok" ? "Your key is ready." : "Your shared demo workspace is already active. Your key was not saved.");
+    onReady?.();
   };
 
   return (
     <form onSubmit={(event) => void submit(event)} className="flex flex-col gap-3 text-left">
-      {!compact ? <h2 className="text-xl font-semibold">Try with your own OpenRouter key</h2> : null}
+      {!compact ? <h2 className="text-xl font-semibold">Use your own OpenRouter key</h2> : null}
       <p id={descriptionId} className="text-sm leading-snug text-ink-muted">
         Your key is stored only in this browser. For cloud requests, it passes temporarily through gloss to OpenRouter.
         The gloss server never saves it. OpenRouter charges your account for model use.
@@ -62,64 +62,31 @@ export function ProviderKeyForm({ onReady, compact = false }: { onReady: () => v
   );
 }
 
-export function AccountControls() {
+export function SettingsPanel() {
   const access = useAccess();
-  const panelId = useId();
-  const [open, setOpen] = useState(false);
-  const [pending, setPending] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-
-  useEffect(() => {
-    void getMe();
-  }, []);
-
-  const leave = async () => {
-    if (pending) return;
-    setPending(true);
-    const result = await signOut();
-    setPending(false);
-    if (result.ok) {
-      setOpen(false);
-      setMessage(null);
-    } else {
-      setMessage(result.message);
-    }
-  };
-
-  if (!access.session) return null;
-  const byok = access.session.accessMode === "byok";
+  const byok = access.session?.accessMode === "byok";
 
   return (
-    <div className="relative shrink-0">
-      <Button variant="quiet" size="sm" aria-expanded={open} aria-controls={panelId} onClick={() => setOpen((value) => !value)}>
-        {byok && !access.hasKey ? "Add key" : "Account"}
-      </Button>
-      {open ? (
-        <section id={panelId} aria-label="Your access" className="absolute right-0 top-full z-50 mt-2 flex max-h-[75dvh] w-80 max-w-[calc(100vw-2rem)] flex-col gap-3 overflow-y-auto rounded-tile border border-line bg-paper p-4 shadow-lift">
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="font-semibold">{byok ? "Your OpenRouter key" : "Invitation access"}</h2>
-            <Button variant="quiet" size="sm" onClick={() => setOpen(false)}>Close</Button>
-          </div>
-          {byok ? (
-            <>
-              <p className="text-sm leading-snug text-ink-muted">
-                {access.hasKey ? "A key is ready in this browser." : "Add a key to use cloud checks. Your session and history are still here."}
-              </p>
-              <ProviderKeyForm compact onReady={() => setMessage(null)} />
-              {access.hasKey ? (
-                <Button variant="secondary" size="sm" onClick={() => { forgetProviderKey(); setMessage("Key forgotten. Your session and history are unchanged."); }}>
-                  Forget key
-                </Button>
-              ) : null}
-            </>
-          ) : (
-            <p className="text-sm leading-snug text-ink-muted">Cloud calls use this server&apos;s keys within your invitation allowance.</p>
-          )}
-          <p className="text-xs leading-snug text-ink-muted">Signing out forgets your key and ends access to this workspace. To keep its history accessible, open another invite in a separate browser instead.</p>
-          <Button variant="quiet" size="sm" onClick={() => void leave()} pending={pending}>{pending ? "Signing out…" : "Sign out"}</Button>
-          {message ? <p role="status" className="text-sm leading-snug text-ink-muted">{message}</p> : null}
-        </section>
+    <section aria-labelledby="settings-title" className="mx-auto flex w-full max-w-xl flex-col gap-4 rounded-card border border-line bg-card p-5 shadow-card sm:p-7">
+      <div>
+        <p className="eyebrow">Settings</p>
+        <h1 id="settings-title" className="mt-1 text-2xl font-semibold tracking-tight">Cloud access</h1>
+      </div>
+      <p className="text-sm leading-relaxed text-ink-muted">
+        Your key is saved only in this browser and passes temporarily through gloss for cloud requests. OpenRouter charges your account for model use. Your workspace stays in this browser when you add your key.
+      </p>
+      {access.session ? (
+        <p className="text-sm text-ink-muted">
+          {byok
+            ? access.hasKey ? "Your OpenRouter key is ready in this browser." : "Add your OpenRouter key to continue this workspace."
+            : access.session.aiEnabled ? "The shared demo is active for this workspace." : "The shared demo is paused for this workspace."}
+        </p>
       ) : null}
-    </div>
+      <ProviderKeyForm compact />
+      {byok && access.hasKey ? (
+        <Button variant="secondary" size="sm" onClick={forgetProviderKey}>Forget key</Button>
+      ) : null}
+      {access.storageNotice ? <p role="status" className="text-sm leading-snug text-caution">{access.storageNotice}</p> : null}
+    </section>
   );
 }

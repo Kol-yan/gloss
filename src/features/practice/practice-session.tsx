@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { buttonClasses } from "@/components/ui/button";
 import { EmptyState } from "@/components/empty-state";
-import { InviteRequired } from "@/components/invite-required";
+import { AccessUnavailable, DemoSpentNotice } from "@/components/invite-required";
 import { LoadError, LoadingState } from "@/components/load-states";
 import {
   createTask,
@@ -34,8 +34,8 @@ type Stage =
 // The answer could not be judged. It is never counted, and the message says so.
 function unavailableEvaluation(attemptId: string, failure: ApiFailure, target: string): Evaluation {
   const retryable = !isQuota(failure) && !isAiOff(failure);
-  const message = isQuota(failure)
-    ? "You've used today's practice checks. They come back tomorrow."
+  const message = isQuota(failure) || failure.code === "budget_exhausted"
+    ? "The free demo is used up. Add your own OpenRouter key in Settings to keep going."
     : isAiOff(failure)
       ? "Checking isn't available today. Your answer wasn't counted."
       : "We couldn't check this answer. It wasn't counted either way.";
@@ -56,11 +56,16 @@ export function PracticeSession({ expressionId }: { expressionId: string }) {
   const { result, reload } = useLoad(getMe);
   if (!result) return <LoadingState label="Opening your practice" />;
   if (!result.ok) {
-    if (isUnauthorized(result)) return <InviteRequired onRetry={reload} />;
+    if (isUnauthorized(result)) return <AccessUnavailable />;
     return <LoadError title="We couldn't open your practice" onRetry={reload}>Check your connection and try again.</LoadError>;
   }
   // A change of learner discards any answer or transcript from the previous session.
-  return <PracticeForLearner key={result.data.learner.id} expressionId={expressionId} />;
+  return (
+    <>
+      {!result.data.aiEnabled && result.data.accessMode === "hosted" ? <DemoSpentNotice className="mx-auto mt-3 max-w-2xl" /> : null}
+      <PracticeForLearner key={result.data.learner.id} expressionId={expressionId} />
+    </>
+  );
 }
 
 // One expression, practised in order: a written task, then a spoken one.
@@ -71,7 +76,7 @@ function PracticeForLearner({ expressionId }: { expressionId: string }) {
   const [nextLabel, setNextLabel] = useState<string | null>(null);
   const started = useRef(false);
 
-  const fetchTask = async (kind: PracticeKind) => {
+  const fetchTask = useCallback(async (kind: PracticeKind) => {
     // Every press is a new request: the server counts a failed attempt as spent, and
     // reusing its id would be refused as a conflict.
     const result = await createTask(expressionId, kind, newRequestId());
@@ -79,15 +84,16 @@ function PracticeForLearner({ expressionId }: { expressionId: string }) {
       setStage({ name: "task", task: result.data });
     } else if (isUnauthorized(result)) {
       setSessionLost(true);
+      void getMe();
     } else {
       setStage({ name: "error", kind, failure: result });
     }
-  };
+  }, [expressionId]);
 
-  const loadTask = (kind: PracticeKind) => {
+  const loadTask = useCallback((kind: PracticeKind) => {
     setStage({ name: "loading", kind });
     void fetchTask(kind);
-  };
+  }, [fetchTask]);
 
   // Start once. Effects run again when the route becomes visible after another
   // one was shown, and that must not request a second task.
@@ -97,6 +103,18 @@ function PracticeForLearner({ expressionId }: { expressionId: string }) {
     void fetchTask("written");
     // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per mounted session
   }, []);
+
+  useEffect(() => {
+    if (!sessionLost) return;
+    let active = true;
+    void getMe().then((result) => {
+      if (active && result.ok) {
+        setSessionLost(false);
+        loadTask("written");
+      }
+    });
+    return () => { active = false; };
+  }, [sessionLost, access.sessionRevision, loadTask]);
 
   const submit: SubmitAnswer = async ({ attemptId, answer, hintUsed }) => {
     const result = await submitAttempt(attemptId, { answer, hintUsed });
@@ -119,13 +137,7 @@ function PracticeForLearner({ expressionId }: { expressionId: string }) {
   };
 
   if (sessionLost || (access.checked && !access.session)) {
-    return <InviteRequired onRetry={() => {
-      void getMe().then((result) => {
-        if (!result.ok) return;
-        setSessionLost(false);
-        loadTask("written");
-      });
-    }} />;
+    return <AccessUnavailable />;
   }
 
   if (stage.name === "loading") return <LoadingState label="Preparing your task" />;
@@ -142,7 +154,8 @@ function PracticeForLearner({ expressionId }: { expressionId: string }) {
             </Link>
           }
         >
-          It comes back tomorrow. Your expressions are saved.
+          The free demo is used up. Add your own OpenRouter key in{" "}
+          <Link href="/settings" className="font-semibold underline underline-offset-2">Settings</Link> to keep going. Your expressions are saved.
         </LoadError>
       );
     }

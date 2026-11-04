@@ -27,30 +27,57 @@ The client normalizes text with `normalizeText` (NFC, `\n` line endings) before 
 
 ## Identity
 
-There is no anonymous access to cloud features and no default learner.
+Every cloud action requires an authenticated learner; there is no default learner.
+The app opens immediately and automatically requests a guest session through
+`POST /api/access/guest`. When configured, Turnstile is verified on the server
+before enrollment. Production enrollment refuses missing verification keys.
+At most three guests per IP can be created per UTC day, recorded atomically in
+SQLite; only an explicitly trusted proxy can supply `CF-Connecting-IP`.
 
-Visitors can start a separate BYOK workspace through `POST /api/access/byok`.
-The learner's immutable database funding source selects hosted Meta access or
-visitor-funded OpenRouter access; headers cannot change that funding source.
+Settings accepts a browser-held OpenRouter key through `POST /api/access/byok`.
+Adding a key upgrades the current learner without losing history. Funding can
+move only from hosted to BYOK; request headers cannot move it back to the
+operator's keys. Historic ledger rows retain their original funding source.
 `POST /api/access/signout` revokes the current session so an invite can be opened
 with a different account. Both access endpoints require a same-origin empty JSON
 object, and enrollment is rate limited.
 
-- `GET /join/{token}` only shows a page with a Continue button, so link previews and scanners cannot spend an invite. The button posts to `/join/{token}/continue`, which redeems the invite, creates a learner and a session, sets the `glossy_session` cookie (httpOnly, Secure in production, SameSite=Lax) and answers 303 to `/`. That POST must be same-origin (`Sec-Fetch-Site`, `Origin`), and a browser that already has a valid session is sent home without redeeming.
-- Session and invite tokens are random 32-byte values; only their SHA-256 hashes are stored.
+- `GET /join/{token}` only shows a page with a Continue button, so link previews and scanners cannot spend an invite. The button posts to `/join/{token}/continue`, which redeems the invite, creates a learner and a session, sets a host-only session cookie (httpOnly, Secure in production, SameSite=Lax; development names include the port) and answers 303 to `/`. That POST must be same-origin (`Sec-Fetch-Site`, `Origin`), and an existing learner receives the upgraded allowance without losing history or changing BYOK funding.
+- Session and invite tokens are random 32-byte values; only their SHA-256 hashes are stored. Sessions renew for 365 days on use; `/api/me` refreshes the browser cookie.
 - Every learner-owned row has `learner_id`, and every query filters by the learner from the session.
 - `npm run invite -- --label <name> --uses <n> --profile <pilot|judge|owner>` prints an invite link.
 
 ## Budget
 
-Two independent limits protect the operator's API credits:
+Three independent limits protect the operator's API credits:
 
 1. **Per-learner daily quotas** by kind: `proofread`, `detect` and `evaluate` (operations) and `asrSeconds`. Detector and generator operations count separately, and each profile sets both limits (`QUOTA_PROFILES` in `src/server/config.ts`). Writing a practice situation counts toward `evaluate`; dictation clean-up counts toward `proofread`.
-2. **A daily spend ceiling** for the whole instance (`DAILY_BUDGET_USD`).
+2. **A daily spend ceiling** for the whole instance (`DAILY_BUDGET_USD`, default $5, UTC).
+3. **A persistent period ceiling** (`PERIOD_BUDGET_USD`, default $25). All hosted ledger history counts, so a restart or UTC day change cannot reset it.
 
-Before a model call, `reserve()` runs in one `BEGIN IMMEDIATE` transaction: it checks the kill switch, the learner quota and `reserved + actual + maxCost <= ceiling`, then inserts a reservation. `maxCost` is an upper bound from the input size, the role's `max_tokens` and the configured price. After the call, `settle()` records the actual cost from reported usage. If the outcome is unknown (timeout, dropped connection), the reservation stays counted, because the provider may have done the work. Retries are new reservations.
+Guests have 30 checks, a separate 30-operation detector allowance, three practice
+sessions and 300 audio seconds per UTC day. Owner funding expires at
+`OWNER_FUNDED_UNTIL` (default `2026-11-09T08:00:00Z`). After a quota, ceiling or
+expiry, the action points to Settings so a visitor can use their own key.
+
+Before a model call, `reserve()` runs in one `BEGIN IMMEDIATE` transaction: it checks the kill switch, the learner quota and `reserved + actual + maxCost <= ceiling`, then inserts a reservation. `maxCost` is an upper bound from the bounded input size, the role's explicit
+`max_tokens`, and the configured price with a 1.25 safety margin. Audio is limited
+to 60 seconds per request. After the call, `settle()` lowers a charge only for a
+strictly positive provider-reported cost; missing or zero cost retains the bound. If the outcome is unknown (timeout, dropped connection), the reservation stays counted, because the provider may have done the work. Retries are new reservations.
 
 When the ceiling is reached or `AI_ENABLED=false`, cloud features report `ai_disabled` or `budget_exhausted` and the editor keeps working with local checks.
+
+The mandatory transport in `src/server/budget/provider-request.ts` checks the
+stored reservation and consumes a durable one-time dispatch claim before any
+provider network request. Calls without a reservation, duplicate dispatches,
+under-reserved inputs, changed funding, expiry, a disabled switch or any ledger
+failure refuse the network request. Model adapters cannot bypass this transport.
+
+`TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`, when both are configured, send
+asynchronous owner alerts through the Telegram Bot API at 50%, 80% and 100% of
+the daily cap and a guest-enrollment burst alert; the token is never logged.
+Notification errors do not change request results. `npm run spend:report` prints charged daily and period
+spend by role plus guest counts.
 
 BYOK reservations retain daily learner quotas and the global kill switch, but do
 not count toward the operator's dollar ceiling. They are additionally limited to
@@ -106,9 +133,8 @@ Request and response schemas are in `src/shared/contracts.ts`. Errors use `{ err
 ## Models
 
 Text jobs run on one of two tiers. A role (a kind of job) fixes its tier, an
-explicit `max_tokens` and a price used for the cost upper bound. Chat roles
-reserve 4096 output tokens, including reasoning; the detector role reserves
-2048. The input reservation uses a
+explicit `max_tokens` and a price used for the cost upper bound. Chat roles reserve 4096 output tokens, including reasoning; detection,
+learning proposals and dictation cleanup reserve 2048. The input reservation uses a
 conservative UTF-8 byte bound rather than an average English token ratio. A
 model without a known price is never called. There is no automatic fallback to
 another provider or tier: a job whose tier cannot be served is refused.
@@ -128,22 +154,14 @@ another provider or tier: a job whose tier cannot be served is refused.
 | Dictation clean-up | smart |
 | Speech-to-text | Meta Muse Voice Transcribe (`meta/muse-voice-transcribe-1.0` for visitors) |
 
-The fast tier asks OpenRouter for a strict `json_schema` response, `reasoning`
-effort `low`, an explicit `max_tokens`, `provider.require_parameters` (so routing
-never lands on a provider without structured output), and `usage.include`. For a
-model preset, the request adds only `provider.require_parameters` and leaves
-routing to the preset. For a plain fast model ID, the request explicitly uses
-throughput sorting, a prompt/completion `max_price` of 0.16/0.65, denied data
-collection, provider fallbacks enabled, and `require_parameters`. The reservation
-uses a price bound: `OPENROUTER_FAST_PRICE_IN_PER_M` and
-`OPENROUTER_FAST_PRICE_OUT_PER_M`, or the default, which is twice the highest
-per-token price any provider listed for gpt-oss-120b in November 2026. A preset
-hides its provider, so a preset uses the same bound unless both prices are set;
-any other model needs both prices or it has no bound and is refused. When the
-call finishes, the reservation settles at the `usage.cost` OpenRouter reports,
-or at the reported tokens times the bound's price when no cost is reported. A
-missing `OPENROUTER_API_KEY` answers `ai_disabled` for fast jobs; Meta is never
-used instead.
+The fast tier asks OpenRouter for strict `json_schema` output, low reasoning,
+an explicit `max_tokens`, supported parameters and usage accounting. Owner-funded
+routes must use a known model from the price table. Opaque presets and unknown
+model IDs are refused because they cannot demonstrate a worst-case bound.
+Configured prices cannot lower the table's bound. OpenRouter routing uses maximum
+provider prices; a missing hosted key refuses the role without a fallback.
+A positive reported `usage.cost` settles the reservation; missing or zero cost
+retains the full reservation, including its safety margin.
 
 Successful proofreading rows also retain OpenRouter's returned serving provider
 and the settled cost in micro-dollars. The audit log records provider, model,
@@ -156,7 +174,8 @@ For end-to-end tests only, `GLOSSY_MODEL_MOCK=true` replaces the network call in
 (`src/server/models/mock-provider.ts`). Routing, reservations, parsing and error
 handling still run. It is off by default.
 
-BYOK uses OpenRouter with the visitor's key for both tiers. The adapters request
+BYOK uses OpenRouter with the visitor's key for both tiers and transcription.
+Speech requests use JSON `input_audio` with base64 WAV data. The adapters request
 providers that deny data collection; this routing preference is not a claim of
 independently verified zero retention. There is no fallback to operator-funded
 access when a visitor request fails.

@@ -3,8 +3,8 @@
 // (RIFF/WAVE, mono, 16-bit PCM, 16 or 24 kHz). One call, no retries. The audio
 // stays in memory: it is never written to disk or logged.
 import { getConfig, type AppConfig } from "../config";
+import { sendProviderRequest } from "../budget/provider-request";
 import { ModelNotConfiguredError, ModelOutputError } from "./errors";
-import { sendProviderRequest } from "./meta";
 import { asrPrice } from "./prices";
 
 export const ASR_TIMEOUT_MS = 30_000;
@@ -60,6 +60,7 @@ export async function metaTranscribe(
     `${baseUrl}/asr/transcribe`,
     {
       method: "POST",
+      redirect: "error",
       headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" },
       body: form,
     },

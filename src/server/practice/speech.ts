@@ -67,6 +67,7 @@ export async function transcribeAttempt(
         {
           learnerId: learner.id,
           kind: "asrSeconds",
+          role: "practice_speech",
           requestId: `${attemptId}:${newId()}`,
           units,
           maxCostMicros,
@@ -79,7 +80,7 @@ export async function transcribeAttempt(
   let result;
   try {
     // Only the canonical file leaves the server, never the raw upload.
-    result = await transcribeWithAccess({ model, audio: info.canonical }, access, config);
+    result = await transcribeWithAccess({ model, audio: info.canonical }, access, config, { reservation, db, now });
   } catch (error) {
     // Same rules as the text role: provider refusal costs nothing, unusable
     // output was billed, anything else leaves the outcome unknown.

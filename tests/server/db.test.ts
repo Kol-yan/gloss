@@ -32,12 +32,15 @@ describe("openDatabase", () => {
     expect(tableNames(db)).toEqual(
       [
         "attempts",
+        "budget_dispatches",
         "check_runs",
         "detect_runs",
         "evaluations",
         "evidence_events",
         "expressions",
+        "guest_enrollments",
         "invites",
+        "invite_redemptions",
         "learners",
         "practice_task_requests",
         "practice_tasks",
@@ -77,6 +80,8 @@ describe("openDatabase", () => {
       "0013_practice_word_progress.sql",
       "0014_practice_exercise_pool.sql",
       "0015_practice_sessions.sql",
+      "0016_guest_access.sql",
+      "0017_budget_hardening.sql",
     ]);
     const again = openDatabase(temp.path);
     expect(migrate(again)).toEqual([]);
@@ -123,6 +128,8 @@ describe("openDatabase", () => {
         "0013_practice_word_progress.sql",
         "0014_practice_exercise_pool.sql",
         "0015_practice_sessions.sql",
+        "0016_guest_access.sql",
+        "0017_budget_hardening.sql",
       ]);
       expect(db.prepare("SELECT * FROM evidence_events WHERE id = 'old'").get()).toEqual({ ...before, document_id: null });
       db.exec(`INSERT INTO evidence_events (id, learner_id, expression_id, kind, document_id, created_at)
@@ -132,6 +139,80 @@ describe("openDatabase", () => {
       expect(() => db.exec(`INSERT INTO evidence_events (id, learner_id, expression_id, kind, document_id, created_at)
         VALUES ('duplicate', 'writer', 'expression', 'independent_writing', 'document', '2026-11-03')`)).toThrow();
       expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    } finally {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves learner-owned rows while adding guest access to an existing database", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "glossy-guest-upgrade-"));
+    const oldMigrations = path.join(dir, "m");
+    mkdirSync(oldMigrations);
+    const source = defaultMigrationsDir();
+    for (const file of readdirSync(source).filter((name) => Number.parseInt(name.slice(0, 4), 10) <= 15)) {
+      copyFileSync(path.join(source, file), path.join(oldMigrations, file));
+    }
+    const db = new DatabaseSync(path.join(dir, "existing.db"));
+    db.exec("PRAGMA foreign_keys = ON");
+    try {
+      migrate(db, oldMigrations);
+      const now = "2026-11-03T10:00:00.000Z";
+      db.exec(`
+        INSERT INTO learners (id, display_name, quota_profile, created_at, funding_source, level)
+          VALUES ('preserved', 'Preserved', 'judge', '${now}', 'hosted', 'B2');
+        INSERT INTO invites (token_hash, label, quota_profile, max_uses, uses, created_at)
+          VALUES ('${"a".repeat(64)}', 'Stored invite', 'judge', 2, 1, '${now}');
+        INSERT INTO sessions (token_hash, learner_id, created_at, expires_at)
+          VALUES ('${"b".repeat(64)}', 'preserved', '${now}', '2027-11-03T10:00:00.000Z');
+        INSERT INTO usage_reservations
+          (id, learner_id, kind, request_id, units, max_cost_micros, status, created_at, funding_source)
+          VALUES ('reservation', 'preserved', 'proofread', 'request', 1, 9000, 'reserved', '${now}', 'hosted');
+        INSERT INTO word_progress
+          (expression_id, learner_id, text, normalized, source, status, created_at, updated_at)
+          VALUES ('word', 'preserved', 'bottleneck', 'bottleneck', 'added', 'learning', '${now}', '${now}');
+        INSERT INTO practice_sessions
+          (id, learner_id, request_id, status, requested_size, total, created_at)
+          VALUES ('practice', 'preserved', 'practice-request', 'preparing', 1, 1, '${now}');
+        INSERT INTO practice_session_items
+          (id, learner_id, session_id, ordinal, expression_id, word_text, meaning, slot, word_status,
+           start_rung, frequency, why, status)
+          VALUES ('practice-item', 'preserved', 'practice', 0, 'word', 'bottleneck', 'a delay',
+                  'learn', 'learning', 1, 'common', 'A new word', 'pending');
+      `);
+      const learnerColumnsBefore = db.prepare("PRAGMA table_info(learners)").all();
+      const learnerBefore = db.prepare("SELECT * FROM learners WHERE id = 'preserved'").get();
+      const inviteBefore = db.prepare("SELECT * FROM invites WHERE label = 'Stored invite'").get();
+      const sessionBefore = db.prepare("SELECT * FROM sessions WHERE learner_id = 'preserved'").get();
+      const reservationBefore = db.prepare("SELECT * FROM usage_reservations WHERE id = 'reservation'").get() as Record<string, unknown>;
+      const wordBefore = db.prepare("SELECT * FROM word_progress WHERE expression_id = 'word'").get();
+      const practiceBefore = db.prepare("SELECT * FROM practice_sessions WHERE id = 'practice'").get();
+      const itemBefore = db.prepare("SELECT * FROM practice_session_items WHERE id = 'practice-item'").get();
+
+      expect(migrate(db, source)).toEqual(["0016_guest_access.sql", "0017_budget_hardening.sql"]);
+      expect(db.prepare("PRAGMA table_info(learners)").all()).toEqual(learnerColumnsBefore);
+      expect(db.prepare("SELECT * FROM learners WHERE id = 'preserved'").get()).toEqual(learnerBefore);
+      expect(db.prepare("SELECT * FROM invites WHERE label = 'Stored invite'").get()).toEqual(inviteBefore);
+      expect(db.prepare("SELECT * FROM sessions WHERE learner_id = 'preserved'").get()).toEqual(sessionBefore);
+      expect(db.prepare(`SELECT id, learner_id, kind, request_id, units, max_cost_micros, actual_cost_micros,
+          status, created_at, settled_at, funding_source FROM usage_reservations WHERE id = 'reservation'`).get())
+        .toEqual(reservationBefore);
+      expect(db.prepare("SELECT role FROM usage_reservations WHERE id = 'reservation'").get())
+        .toEqual({ role: "unknown" });
+      expect(db.prepare("SELECT * FROM word_progress WHERE expression_id = 'word'").get()).toEqual(wordBefore);
+      expect(db.prepare("SELECT * FROM practice_sessions WHERE id = 'practice'").get()).toEqual(practiceBefore);
+      expect(db.prepare("SELECT * FROM practice_session_items WHERE id = 'practice-item'").get()).toEqual(itemBefore);
+      expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+      expect(db.prepare("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 1 });
+      expect(db.prepare("PRAGMA legacy_alter_table").get()).toEqual({ legacy_alter_table: 0 });
+      expect(db.prepare("SELECT name FROM sqlite_master WHERE type = 'trigger' ORDER BY name").all())
+        .toEqual([{ name: "learners_funding_immutable" }, { name: "reservations_funding_immutable" }]);
+
+      db.prepare("INSERT INTO learners (id, display_name, quota_profile, created_at) VALUES ('guest', 'Guest', 'guest', ?)")
+        .run(now);
+      expect(db.prepare("UPDATE learners SET funding_source = 'byok' WHERE id = 'preserved'").run().changes).toBe(1);
+      expect(() => db.prepare("UPDATE learners SET funding_source = 'hosted' WHERE id = 'preserved'").run()).toThrow();
+      expect(() => db.prepare("UPDATE usage_reservations SET funding_source = 'byok' WHERE id = 'reservation'").run()).toThrow();
     } finally {
       db.close();
       rmSync(dir, { recursive: true, force: true });
@@ -191,6 +272,8 @@ describe("openDatabase", () => {
         "0013_practice_word_progress.sql",
         "0014_practice_exercise_pool.sql",
         "0015_practice_sessions.sql",
+        "0016_guest_access.sql",
+        "0017_budget_hardening.sql",
       ]);
 
       const row = db.prepare("SELECT * FROM check_runs WHERE id = 'run-old'").get() as Record<string, unknown>;
@@ -216,8 +299,6 @@ describe("openDatabase", () => {
       ).all();
       expect(actualLedger).toEqual([...ledger].sort((a, b) => a.id.localeCompare(b.id)));
 
-      expect(() => db.prepare("UPDATE learners SET funding_source = 'byok' WHERE id = 'legacy-hosted'").run())
-        .toThrow(/Learner funding cannot change/);
       expect(() => db.prepare("UPDATE learners SET funding_source = 'hosted' WHERE id = 'legacy-byok'").run())
         .toThrow(/Learner funding cannot change/);
       expect(() => db.prepare("UPDATE usage_reservations SET funding_source = 'byok' WHERE id = 'hosted-settled'").run())
@@ -247,6 +328,10 @@ describe("openDatabase", () => {
         .toMatchObject({ proofread: { used: 2, limit: 20 }, detect: { used: 1, limit: 100 } });
       expect(db.prepare("SELECT kind, request_id FROM usage_reservations WHERE learner_id = 'legacy-hosted' AND request_id = 'same-request' ORDER BY kind").all())
         .toEqual([{ kind: "detect", request_id: "same-request" }, { kind: "proofread", request_id: "same-request" }]);
+      expect(db.prepare("UPDATE learners SET funding_source = 'byok' WHERE id = 'legacy-hosted'").run().changes)
+        .toBe(1);
+      expect(() => db.prepare("UPDATE learners SET funding_source = 'hosted' WHERE id = 'legacy-hosted'").run())
+        .toThrow(/Learner funding cannot change/);
     } finally {
       db.close();
       rmSync(dir, { recursive: true, force: true });
@@ -283,6 +368,8 @@ describe("openDatabase", () => {
         "0013_practice_word_progress.sql",
         "0014_practice_exercise_pool.sql",
         "0015_practice_sessions.sql",
+        "0016_guest_access.sql",
+        "0017_budget_hardening.sql",
       ]);
       const row = db.prepare("SELECT * FROM check_runs WHERE id = 'pre-routing-run'").get() as Record<string, unknown>;
       expect(row).toMatchObject({
@@ -306,6 +393,30 @@ describe("openDatabase", () => {
 });
 
 describe("migrate", () => {
+  it("rolls back a foreign-key-off migration and restores both pragma settings", () => {
+    for (const [foreignKeys, legacyAlterTable] of [[1, 0], [0, 1]] as const) {
+      const dir = mkdtempSync(path.join(tmpdir(), "glossy-mig-fk-rollback-"));
+      const migrations = path.join(dir, "m");
+      mkdirSync(migrations);
+      writeFileSync(path.join(migrations, "0001_broken.sql"),
+        "-- migrate:foreign-keys-off\nCREATE TABLE transient (id TEXT PRIMARY KEY); INSERT INTO missing VALUES ('x');");
+      const db = new DatabaseSync(":memory:");
+      db.exec(`PRAGMA foreign_keys = ${foreignKeys}; PRAGMA legacy_alter_table = ${legacyAlterTable};`);
+      try {
+        expect(() => migrate(db, migrations)).toThrow();
+        expect(tableNames(db)).toEqual(["schema_migrations"]);
+        expect(db.prepare("SELECT name FROM schema_migrations").all()).toEqual([]);
+        expect(db.isTransaction).toBe(false);
+        expect(db.prepare("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: foreignKeys });
+        expect(db.prepare("PRAGMA legacy_alter_table").get())
+          .toEqual({ legacy_alter_table: legacyAlterTable });
+      } finally {
+        db.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
   it("applies files in name order and rolls back a failing file completely", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "glossy-mig-"));
     const migrations = path.join(dir, "m");

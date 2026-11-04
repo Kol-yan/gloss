@@ -14,10 +14,11 @@ const MESSAGES: Partial<Record<CheckStatus, ReactNode>> = {
   failed: "We couldn't check your text just now. Your text is safe. Try again.",
   quota: (
     <>
-      You&apos;ve used all of today&apos;s AI checks. They come back tomorrow.{" "}
-      <Link href="/practice" className="font-semibold text-accent underline underline-offset-2">
-        Practice instead
+      The free demo is used up. Add your own OpenRouter key in{" "}
+      <Link href="/settings" className="font-semibold text-accent underline underline-offset-2">
+        Settings
       </Link>
+      {" "}to keep going.
     </>
   ),
   unavailable: "AI checking isn't available today. Checks on this device still work.",

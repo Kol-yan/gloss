@@ -102,7 +102,7 @@ export async function dictate(
   const reservation = immediate(
     (tx) =>
       reserve(
-        { learnerId: learner.id, kind: "asrSeconds", requestId: `dictation:${newId()}`, units, maxCostMicros },
+        { learnerId: learner.id, kind: "asrSeconds", role: "dictation_asr", requestId: `dictation:${newId()}`, units, maxCostMicros },
         { db: tx, now, config },
       ),
     db,
@@ -110,7 +110,7 @@ export async function dictate(
 
   let result;
   try {
-    result = await transcribeWithAccess({ model, audio: info.canonical }, access, config);
+    result = await transcribeWithAccess({ model, audio: info.canonical }, access, config, { reservation, db, now });
   } catch (error) {
     // Same rules as practice speech: a refusal costs nothing, unusable output
     // was billed, anything else leaves the outcome unknown.
@@ -153,7 +153,7 @@ async function cleanUp(
     const reservation = immediate(
       (tx) =>
         reserve(
-          { learnerId, kind: "proofread", requestId: `dictation-cleanup:${newId()}`, units: 1, maxCostMicros },
+          { learnerId, kind: "proofread", role: "dictation_cleanup", requestId: `dictation-cleanup:${newId()}`, units: 1, maxCostMicros },
           { db: tx, now, config },
         ),
       db,

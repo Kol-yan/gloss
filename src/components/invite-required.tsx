@@ -1,34 +1,143 @@
 "use client";
 
-import { Button } from "@/components/ui/button";
-import { EmptyState } from "@/components/empty-state";
-import { ProviderKeyForm } from "@/components/provider-access";
+import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { bootstrapGuestAccess, createGuestSession } from "@/features/api/client";
+import { useAccess } from "@/features/api/use-access";
 
-// Shown when the server does not recognise the browser's session (HTTP 401).
-export function InviteRequired({ notice, onRetry }: { notice?: string; onRetry: () => void }) {
+type TurnstileApi = {
+  render: (container: HTMLElement, options: {
+    sitekey: string;
+    action?: string;
+    appearance: "interaction-only";
+    callback: (token: string) => void;
+    "error-callback": () => void;
+    "expired-callback": () => void;
+  }) => string;
+  reset: (widgetId?: string) => void;
+  remove: (widgetId: string) => void;
+};
+
+declare global {
+  interface Window {
+    turnstile?: TurnstileApi;
+  }
+}
+
+const TURNSTILE_SCRIPT = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+
+// A single root-layout component starts the demo session in the background.
+// Invite continuations remain in control of their own session upgrade flow.
+export function AccessBootstrap() {
+  const pathname = usePathname();
+  const { sessionRevision } = useAccess();
+  const [requestedTurnstile, setRequestedTurnstile] = useState<{
+    pathname: string;
+    sessionRevision: number;
+    siteKey: string;
+    action?: string;
+  } | null>(null);
+  const onToken = useCallback((token: string) => {
+    void createGuestSession(token);
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    if (pathname === "/join" || pathname.startsWith("/join/")) return () => { active = false; };
+
+    void bootstrapGuestAccess().then((result) => {
+      if (active && result.kind === "turnstile") {
+        setRequestedTurnstile({
+          pathname,
+          sessionRevision,
+          siteKey: result.siteKey,
+          ...(result.action ? { action: result.action } : {}),
+        });
+      }
+    });
+    return () => { active = false; };
+  }, [pathname, sessionRevision]);
+
+  const turnstile = requestedTurnstile?.pathname === pathname && requestedTurnstile.sessionRevision === sessionRevision
+    ? requestedTurnstile
+    : null;
+  if (!turnstile || pathname === "/join" || pathname.startsWith("/join/")) return null;
+  return <TurnstileWidget siteKey={turnstile.siteKey} action={turnstile.action} onToken={onToken} />;
+}
+
+function TurnstileWidget({ siteKey, action, onToken }: { siteKey: string; action?: string; onToken: (token: string) => void }) {
+  const container = useRef<HTMLDivElement>(null);
+  const onTokenRef = useRef(onToken);
+
+  useEffect(() => {
+    onTokenRef.current = onToken;
+  }, [onToken]);
+
+  useEffect(() => {
+    let active = true;
+    let widgetId: string | null = null;
+    let script: HTMLScriptElement | null = null;
+
+    const render = () => {
+      const api = window.turnstile;
+      if (!active || !api || !container.current || widgetId) return;
+      widgetId = api.render(container.current, {
+        sitekey: siteKey,
+        ...(action ? { action } : {}),
+        // Managed mode stays quiet unless Turnstile needs the visitor to act.
+        appearance: "interaction-only",
+        callback: (token) => onTokenRef.current(token),
+        "error-callback": () => undefined,
+        "expired-callback": () => {
+          if (widgetId && window.turnstile) window.turnstile.reset(widgetId);
+        },
+      });
+    };
+
+    if (window.turnstile) {
+      render();
+    } else {
+      script = document.querySelector<HTMLScriptElement>(`script[src="${TURNSTILE_SCRIPT}"]`);
+      if (!script) {
+        script = document.createElement("script");
+        script.src = TURNSTILE_SCRIPT;
+        script.async = true;
+        script.defer = true;
+        document.head.append(script);
+      }
+      script.addEventListener("load", render);
+    }
+
+    return () => {
+      active = false;
+      script?.removeEventListener("load", render);
+      if (widgetId && window.turnstile) window.turnstile.remove(widgetId);
+    };
+  }, [action, siteKey]);
+
+  return <div ref={container} className="fixed bottom-2 right-2 z-[60]" />;
+}
+
+export function AccessUnavailable() {
   return (
-    <div className="flex flex-col">
-      {notice ? (
-        <p role="status" className="mx-auto mt-4 max-w-md rounded-chip bg-caution-soft px-4 py-2 text-center text-sm font-semibold text-caution">
-          {notice}
-        </p>
-      ) : null}
-      <EmptyState
-        eyebrow="Welcome"
-        title="Choose how to try gloss"
-        action={
-          <Button variant="secondary" onClick={onRetry}>
-            I opened my link, check again
-          </Button>
-        }
-      >
-        Have an invite? Open its link for access within an allowance. You can also use your own OpenRouter key below.
-      </EmptyState>
-      <div className="mx-auto mb-8 w-full max-w-md px-4">
-        <div className="rounded-tile border border-line bg-surface p-4">
-          <ProviderKeyForm onReady={onRetry} />
-        </div>
-      </div>
-    </div>
+    <section role="status" className="mx-auto mt-6 max-w-lg rounded-tile border border-line bg-card p-5 text-center shadow-card">
+      <h1 className="text-xl font-semibold">Your workspace is not ready yet.</h1>
+      <p className="mt-2 text-sm leading-relaxed text-ink-muted">
+        You can keep writing and using on-device checks. Open Settings to add your own OpenRouter key for cloud features.
+      </p>
+      <Link href="/settings" className="mt-4 inline-flex rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-strong">
+        Settings
+      </Link>
+    </section>
+  );
+}
+
+export function DemoSpentNotice({ className = "" }: { className?: string }) {
+  return (
+    <p role="status" className={`rounded-chip bg-caution-soft px-3 py-2 text-sm leading-snug text-caution ${className}`}>
+      The free demo is used up. Add your own OpenRouter key in{" "}
+      <Link href="/settings" className="font-semibold underline underline-offset-2">Settings</Link> to keep going.
+    </p>
   );
 }

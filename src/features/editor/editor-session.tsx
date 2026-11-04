@@ -1,8 +1,7 @@
 "use client";
 
-import { useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { InviteRequired } from "@/components/invite-required";
+import { useCallback, useMemo, useRef, useSyncExternalStore } from "react";
+import { DemoSpentNotice } from "@/components/invite-required";
 import {
   createExpression,
   detect,
@@ -32,26 +31,6 @@ import { checkLocal, getLocalCheckerStatus, getServerLocalCheckerStatus, subscri
 import { bindToLearner, type DetectOutcome, type DetectSentences } from "./sentence-detect";
 import { NO_RECHECK, type CheckWithAi, type Dictate, type DictationOutcome, type ProofreadOutcome, type RecheckSentences } from "./types";
 
-// `/join/{token}` sends people here with ?invite=invalid when the link did not work.
-function InviteNotice() {
-  const invalid = useSearchParams().get("invite") === "invalid";
-  const [dismissed, setDismissed] = useState(false);
-  if (!invalid || dismissed) return null;
-  return (
-    <div
-      role="status"
-      className="mx-auto mt-3 flex w-full max-w-6xl shrink-0 items-center justify-between gap-3 px-4"
-    >
-      <p className="flex-1 rounded-chip bg-caution-soft px-3 py-2 text-sm font-semibold text-caution">
-        That invite link didn&apos;t work. It may have expired or been used already. Ask for a new one.
-      </p>
-      <button type="button" onClick={() => setDismissed(true)} className="text-sm font-medium text-ink-muted underline underline-offset-4 hover:text-ink">
-        Dismiss
-      </button>
-    </div>
-  );
-}
-
 // A decision is a courtesy to the server's records; failing to send it must never disturb writing.
 async function safeHash(text: string): Promise<string> {
   try {
@@ -69,10 +48,9 @@ export function EditorSession({ recheckSentences = NO_RECHECK }: { recheckSenten
   const access = useAccess();
   const capture = useSyncExternalStore(subscribeSelection, getSelectionSnapshot, getServerSelectionSnapshot);
   const localCheckStatus = useSyncExternalStore(subscribeLocalChecker, getLocalCheckerStatus, getServerLocalCheckerStatus);
-  const { result: me, reload } = useLoad(getMe);
+  const { result: me } = useLoad(getMe);
   const { result: savedExpressions, reload: reloadExpressions } = useLoad(listExpressions);
   const documentIds = useRef(new Map<string, string>());
-  const [sessionLost, setSessionLost] = useState(false);
   // Decisions are fire-and-forget, but "start practice" must wait for the matching "accepted".
   const decisions = useRef(new Map<string, Promise<unknown>>());
 
@@ -82,7 +60,7 @@ export function EditorSession({ recheckSentences = NO_RECHECK }: { recheckSenten
       const { quota, suggestions } = result.data;
       return { ok: true, suggestions, checksLeft: Math.max(0, quota.limit - quota.used) };
     }
-    if (isUnauthorized(result)) setSessionLost(true);
+    if (isUnauthorized(result)) void getMe();
     if (isQuota(result)) return { ok: false, reason: "quota" };
     if (isAiOff(result)) return { ok: false, reason: "unavailable" };
     return { ok: false, reason: "failed" };
@@ -91,7 +69,7 @@ export function EditorSession({ recheckSentences = NO_RECHECK }: { recheckSenten
   const dictateSpeech: Dictate = useCallback(async (audio, signal): Promise<DictationOutcome> => {
     const result = await dictate(audio, signal);
     if (result.ok) return { ok: true, text: result.data.text };
-    if (isUnauthorized(result)) setSessionLost(true);
+    if (isUnauthorized(result)) void getMe();
     if (isQuota(result)) return { ok: false, reason: "quota" };
     if (isAiOff(result)) return { ok: false, reason: "unavailable" };
     return { ok: false, reason: "failed" };
@@ -116,7 +94,7 @@ export function EditorSession({ recheckSentences = NO_RECHECK }: { recheckSenten
         checksLeft: Math.max(0, quota.limit - quota.used),
       };
     }
-    if (isUnauthorized(result)) setSessionLost(true);
+    if (isUnauthorized(result)) void getMe();
     if (isQuota(result)) return { ok: false, reason: "quota" };
     if (isAiOff(result)) return { ok: false, reason: "unavailable" };
     if (result.code === "rate_limited") return { ok: false, reason: "busy" };
@@ -129,7 +107,7 @@ export function EditorSession({ recheckSentences = NO_RECHECK }: { recheckSenten
     if (!learnerId || getAccessSnapshot().session?.learner.id !== learnerId) return { ok: false as const, reason: "unavailable" as const };
     const result = await learnExpressions(text);
     if (result.ok) return { ok: true as const, suggestions: result.data.suggestions };
-    if (isUnauthorized(result)) setSessionLost(true);
+    if (isUnauthorized(result)) void getMe();
     return { ok: false as const, reason: isQuota(result) ? "quota" as const : isAiOff(result) ? "unavailable" as const : "failed" as const };
   }, [learnerId]);
   const onIndependentWriting = useCallback(async (text: string, assistedRanges: WritingRange[]) => {
@@ -141,7 +119,7 @@ export function EditorSession({ recheckSentences = NO_RECHECK }: { recheckSenten
       documentIds.current.set(key, documentId);
     }
     const result = await recordWritingEvidence({ documentId, text, assistedRanges });
-    if (!result.ok && isUnauthorized(result)) setSessionLost(true);
+    if (!result.ok && isUnauthorized(result)) void getMe();
     return result.ok;
   }, [learnerId, capture.revision]);
   const detectSentences = useMemo(
@@ -166,56 +144,44 @@ export function EditorSession({ recheckSentences = NO_RECHECK }: { recheckSenten
         reloadExpressions();
         return true;
       }
-      if (isUnauthorized(result)) setSessionLost(true);
+      if (isUnauthorized(result)) void getMe();
       return false;
     },
     [reloadExpressions],
   );
 
-  const unauthorized = sessionLost || (access.checked && !access.session) || (me?.ok === false && isUnauthorized(me));
   const quota = me?.ok ? me.data.quotas.proofread : undefined;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <Suspense fallback={null}>
-        <InviteNotice />
-      </Suspense>
       {capture.result ? (
         <p role="status" className="mx-auto w-full max-w-6xl shrink-0 px-4 pt-2 text-sm text-ink-muted">
           {SELECTION_NOTICE[capture.result.status]}
         </p>
       ) : null}
-      {unauthorized ? (
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <InviteRequired
-            onRetry={() => {
-              setSessionLost(false);
-              reload();
-            }}
-          />
-        </div>
-      ) : (
-        <div className="min-h-0 flex-1">
-          <EditorScreen
-            key={`${learnerId ?? "pending"}:${capture.revision}`}
-            initialText={capture.result?.status === "accepted" ? capture.result.text : ""}
-            expressions={savedExpressions?.ok ? savedExpressions.data.expressions.map((item) => item.expression) : []}
-            learningListFailed={savedExpressions?.ok === false}
-            learnWithAi={learnWithAi}
-            onIndependentWriting={onIndependentWriting}
-            checksLeft={quota ? Math.max(0, quota.limit - quota.used) : null}
-            aiAvailable={me?.ok ? me.data.aiEnabled && (me.data.accessMode !== "byok" || access.hasKey) : false}
-            checkWithAi={checkWithAi}
-            dictate={dictateSpeech}
-            detectSentences={detectSentences}
-            checkLocal={checkLocal}
-            localCheckStatus={localCheckStatus}
-            onDecision={onDecision}
-            onStartPractice={onStartPractice}
-            recheckSentences={recheckSentences}
-          />
-        </div>
-      )}
+      {me?.ok && !me.data.aiEnabled && me.data.accessMode === "hosted" ? (
+        <div className="mx-auto w-full max-w-6xl shrink-0 px-4 pt-2"><DemoSpentNotice /></div>
+      ) : null}
+      <div className="min-h-0 flex-1">
+        <EditorScreen
+          key={`${access.learnerRevision}:${capture.revision}`}
+          initialText={capture.result?.status === "accepted" ? capture.result.text : ""}
+          expressions={savedExpressions?.ok ? savedExpressions.data.expressions.map((item) => item.expression) : []}
+          learningListFailed={savedExpressions?.ok === false}
+          learnWithAi={learnWithAi}
+          onIndependentWriting={onIndependentWriting}
+          checksLeft={quota ? Math.max(0, quota.limit - quota.used) : null}
+          aiAvailable={me?.ok ? me.data.aiEnabled && (me.data.accessMode !== "byok" || access.hasKey) : false}
+          checkWithAi={checkWithAi}
+          dictate={dictateSpeech}
+          detectSentences={detectSentences}
+          checkLocal={checkLocal}
+          localCheckStatus={localCheckStatus}
+          onDecision={onDecision}
+          onStartPractice={onStartPractice}
+          recheckSentences={recheckSentences}
+        />
+      </div>
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { AppHeader } from "@/components/app-header";
+import { AccessBootstrap } from "@/components/invite-required";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -26,6 +27,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           Skip to content
         </a>
         <AppHeader />
+        <AccessBootstrap />
         <main id="content" className="min-h-0 flex-1 overflow-y-auto">
           {children}
         </main>

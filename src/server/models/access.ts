@@ -4,7 +4,7 @@ import type { AppConfig } from "../config";
 import { getDb } from "../db";
 import { AiDisabledError, UnauthorizedError } from "../errors";
 import { ModelNotConfiguredError, UnknownModelError } from "./errors";
-import { FAST_MODEL_DEFAULT, FAST_PRICE_DEFAULT, textPrice, type TextPrice } from "./prices";
+import { FAST_MODEL_DEFAULT, FAST_PRICE_DEFAULT, MODEL_PRICES, textPrice, type TextPrice } from "./prices";
 
 export type FundingSource = "hosted" | "byok";
 export type ProviderAccess = { provider: "meta" } | { provider: "openrouter"; apiKey: string };
@@ -78,30 +78,30 @@ export function resolveTextRoute(access: ProviderAccess, config: AppConfig, tier
   } catch {
     throw new ModelNotConfiguredError();
   }
-  const { fastModel, fastPriceInUsdPerM: priceIn, fastPriceOutUsdPerM: priceOut } = config.openRouter;
-  // The default bound fits gpt-oss-120b (also with a :floor or :nitro routing
-  // suffix) and presets. Any other model needs both prices spelled out, or it
-  // has no cost bound and no call.
-  const priced = priceIn !== undefined && priceOut !== undefined;
-  if (!priced && !isBoundedByDefaultPrice(fastModel)) throw new UnknownModelError(fastModel);
+  const route = hostedFastRoute(config);
   return {
     tier,
     provider: "openrouter",
-    model: fastModel,
+    model: route.model,
     apiKey,
-    price: {
-      kind: "text",
-      inputUsdPerMTok: priceIn ?? FAST_PRICE_DEFAULT.inputUsdPerMTok,
-      outputUsdPerMTok: priceOut ?? FAST_PRICE_DEFAULT.outputUsdPerMTok,
-    },
+    price: route.price,
   };
 }
 
-function isBoundedByDefaultPrice(model: string): boolean {
-  return (
-    model.startsWith("@preset/") ||
-    [FAST_MODEL_DEFAULT, `${FAST_MODEL_DEFAULT}:floor`, `${FAST_MODEL_DEFAULT}:nitro`].includes(model)
-  );
+// Hosted OpenRouter routing must use a model with a published local price. An
+// opaque preset or a manually asserted low price cannot establish a hard cap.
+export function hostedFastRoute(config: AppConfig): { model: string; price: TextPrice } {
+  const model = config.openRouter.fastModel;
+  const base = model === `${FAST_MODEL_DEFAULT}:floor` || model === `${FAST_MODEL_DEFAULT}:nitro`
+    ? FAST_PRICE_DEFAULT
+    : Object.hasOwn(MODEL_PRICES, model) && MODEL_PRICES[model]?.kind === "text"
+      ? textPrice(model)
+      : undefined;
+  if (!base) throw new UnknownModelError(model);
+  const priceIn = config.openRouter.fastPriceInUsdPerM ?? base.inputUsdPerMTok;
+  const priceOut = config.openRouter.fastPriceOutUsdPerM ?? base.outputUsdPerMTok;
+  if (priceIn < base.inputUsdPerMTok || priceOut < base.outputUsdPerMTok) throw new UnknownModelError(model);
+  return { model, price: { kind: "text", inputUsdPerMTok: priceIn, outputUsdPerMTok: priceOut } };
 }
 
 export function speechModel(access: ProviderAccess, config: AppConfig): string {

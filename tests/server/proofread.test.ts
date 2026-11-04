@@ -12,8 +12,9 @@ let sessionCookie: string | undefined;
 vi.mock("next/headers", () => ({
   cookies: async () => ({
     get: (name: string) =>
-      name === "glossy_session" && sessionCookie ? { name, value: sessionCookie } : undefined,
+      name === "glossy_session_3000" && sessionCookie ? { name, value: sessionCookie } : undefined,
   }),
+  headers: async () => new Headers({ host: "localhost:3000" }),
 }));
 
 import { POST as proofreadRoute } from "@/app/api/proofread/route";
@@ -187,13 +188,16 @@ describe("POST /api/proofread", () => {
     });
     expect(Number(run.latency_ms)).toBeGreaterThanOrEqual(0);
     expect(rows("SELECT status FROM suggestions WHERE check_run_id = ?", body.checkRunId)).toHaveLength(4);
-    // 1000 input * 0.70 + 200 output * 1.90 = 1080 micro-dollars at the fast tier's price bound.
+    // Token counts without a monetary cost retain the full max reservation
+    // (1.25 safety margin); only a positive provider-reported cost lowers it.
     expect(reservationFor(id)).toMatchObject({
       status: "settled",
-      actual_cost_micros: 1080,
       kind: "proofread",
       units: 1,
     });
+    expect((reservationFor(id) as { max_cost_micros: number; actual_cost_micros: number }).actual_cost_micros).toBe(
+      (reservationFor(id) as { max_cost_micros: number }).max_cost_micros,
+    );
   });
 
   it("applying every error suggestion of the check yields the model's corrected text", async () => {
@@ -316,7 +320,7 @@ describe("POST /api/proofread", () => {
 
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("https://openrouter.ai/api/v1/chat/completions");
-    expect(init.headers.Authorization).toBe(`Bearer ${OWNER_KEY}`);
+    expect(new Headers(init.headers).get("authorization")).toBe(`Bearer ${OWNER_KEY}`);
     const sent = JSON.parse(init.body);
     expect(sent.model).toBe("openai/gpt-oss-120b");
     expect(sent.max_tokens).toBeGreaterThanOrEqual(2048);
@@ -328,18 +332,19 @@ describe("POST /api/proofread", () => {
     expect(sent.response_format.json_schema.schema.additionalProperties).toBe(false);
   });
 
-  it("sends only require_parameters for a preset model and lets the preset route", async () => {
+  it("refuses an opaque preset: it cannot prove a cost bound", async () => {
     login();
     const preset = "@preset/gpt-oss-120b-balanced";
     process.env.OPENROUTER_FAST_MODEL = preset;
-    fetchMock.mockResolvedValueOnce(modelReply([]));
-    await post({ requestId: requestId(), text: "All good here." });
-
-    const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
-    expect(sent.model).toBe(preset);
-    // A preset already decides sort, price and fallbacks; the app only adds
-    // the structured-output requirement it cannot express in the preset.
-    expect(sent.provider).toEqual({ require_parameters: true });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const id = requestId();
+    const response = await post({ requestId: id, text: "All good here." });
+    expect(response.status).toBe(503);
+    expect(ApiError.parse(await json(response)).error.code).toBe("ai_disabled");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(reservationFor(id)).toBeUndefined();
+    expect(runFor(id)).toBeUndefined();
+    vi.restoreAllMocks();
   });
 
   it("uses throughput routing and the preset's price ceiling for a plain fast model", async () => {
@@ -378,7 +383,7 @@ describe("POST /api/proofread", () => {
     expect(reservationFor(id)).toMatchObject({ status: "settled", actual_cost_micros: 123 });
   });
 
-  it("reserves a cost upper bound before the call and keeps the actual cost below it", async () => {
+  it("reserves a cost upper bound before the call and retains the full bound without a reported cost", async () => {
     login();
     const id = requestId();
     let seenDuringCall: unknown;
@@ -394,7 +399,8 @@ describe("POST /api/proofread", () => {
       inTransaction: false,
     });
     const reservation = reservationFor(id) as Record<string, number>;
-    expect(reservation.max_cost_micros).toBeGreaterThan(reservation.actual_cost_micros);
+    // Token counts without a monetary cost retain the full max reservation.
+    expect(reservation.actual_cost_micros).toBe(reservation.max_cost_micros);
   });
 
   it("replays a stored result without calling the model again", async () => {
@@ -571,8 +577,9 @@ describe("POST /api/proofread", () => {
 
     expect(response.status).toBe(502);
     expect(ApiError.parse(await json(response)).error.code).toBe("model_unavailable");
-    // 1000 * 0.70 + 50 * 1.90 = 795 micro-dollars.
-    expect(reservationFor(id)).toMatchObject({ status: "settled", actual_cost_micros: 795 });
+    // Token counts without a monetary cost retain the full max reservation.
+    const failedReservation = reservationFor(id) as { max_cost_micros: number; actual_cost_micros: number };
+    expect(failedReservation.actual_cost_micros).toBe(failedReservation.max_cost_micros);
     expect(runFor(id)).toMatchObject({ status: "failed" });
     expect(
       rows(

@@ -3,6 +3,8 @@ import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { runImmediate } from "./transaction";
 
+const FOREIGN_KEYS_OFF_MARKER = "-- migrate:foreign-keys-off";
+
 // Resolved against the working directory: the Docker image keeps `db/` next
 // to the app, and tests and scripts run from the repository root.
 export function defaultMigrationsDir(): string {
@@ -49,17 +51,46 @@ export function migrate(db: DatabaseSync, dir: string = defaultMigrationsDir()):
   const applied: string[] = [];
   for (const file of files) {
     const sql = readFileSync(/*turbopackIgnore: true*/ path.join(dir, file), "utf8");
-    runImmediate(db, () => {
+    const disableForeignKeys = sql.startsWith(FOREIGN_KEYS_OFF_MARKER);
+    const migration = () => runImmediate(db, () => {
       // Re-check under the write lock: another process may have just applied it.
       const done = db.prepare("SELECT 1 FROM schema_migrations WHERE name = ?").get(file);
       if (done) return;
       db.exec(sql);
+      if (disableForeignKeys) {
+        const violations = db.prepare("PRAGMA foreign_key_check").all();
+        if (violations.length > 0) {
+          throw new Error(`Migration ${file} left ${violations.length} foreign-key violations`);
+        }
+      }
       db.prepare("INSERT INTO schema_migrations (name, applied_at) VALUES (?, ?)").run(
         file,
         new Date().toISOString(),
       );
       applied.push(file);
     });
+
+    if (!disableForeignKeys) {
+      migration();
+      continue;
+    }
+
+    if (db.isTransaction) {
+      throw new Error(`Migration ${file} requires foreign keys to be disabled before its transaction`);
+    }
+    const originalForeignKeys = Number(db.prepare("PRAGMA foreign_keys").get()?.foreign_keys ?? 0);
+    const originalLegacyAlterTable = Number(db.prepare("PRAGMA legacy_alter_table").get()?.legacy_alter_table ?? 0);
+    try {
+      db.exec("PRAGMA foreign_keys = OFF");
+      if (Number(db.prepare("PRAGMA foreign_keys").get()?.foreign_keys ?? 1) !== 0) {
+        throw new Error(`Could not disable foreign keys for migration ${file}`);
+      }
+      db.exec("PRAGMA legacy_alter_table = ON");
+      migration();
+    } finally {
+      db.exec(`PRAGMA legacy_alter_table = ${originalLegacyAlterTable === 0 ? "OFF" : "ON"}`);
+      db.exec(`PRAGMA foreign_keys = ${originalForeignKeys === 0 ? "OFF" : "ON"}`);
+    }
   }
   return applied;
 }

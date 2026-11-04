@@ -134,6 +134,7 @@ export async function runCheckJob(
       {
         learnerId: learner.id,
         kind: job.quotaKind,
+        role: job.purpose,
         requestId: input.requestId,
         units: 1,
         maxCostMicros,
@@ -177,6 +178,7 @@ export async function runCheckJob(
       },
       route,
       config,
+      { reservation, db, now },
     );
   } catch (error) {
     closeFailedRun(bookkeeping, error, Math.round(performance.now() - started));

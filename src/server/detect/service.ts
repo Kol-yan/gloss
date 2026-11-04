@@ -86,6 +86,7 @@ export async function detect(
       {
         learnerId: learner.id,
         kind: "detect",
+        role: "detect",
         requestId: input.requestId,
         units: 1,
         maxCostMicros,
@@ -115,6 +116,7 @@ export async function detect(
       },
       route,
       config,
+      { reservation, db, now },
     );
   } catch (error) {
     const latencyMs = error instanceof ModelHttpError || error instanceof ModelTimeoutError || error instanceof ModelOutputError
