@@ -1,0 +1,8 @@
+# Cargo build output
+/target/
+
+# Tauri capability schema files
+/gen/schemas
+
+# Lockfile is resolved in CI; its tool header trips the public-content check
+Cargo.lock

@@ -1,0 +1,95 @@
+# Builds the desktop app for macOS (universal: Apple silicon and Intel) and
+# uploads the .app and .dmg as workflow artifacts.
+#
+# Without signing secrets the bundle is ad-hoc signed, which is enough to run
+# it on the Mac that downloads it (see desktop/README.md). With the secrets
+# below, Tauri signs with a Developer ID certificate and notarizes the app.
+name: Desktop app (macOS)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "desktop/**"
+      - ".github/workflows/desktop-macos.yml"
+  pull_request:
+    paths:
+      - "desktop/**"
+      - ".github/workflows/desktop-macos.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bundle:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    env:
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      # Type-checks and builds the frontend; the Rust crate embeds it.
+      - name: Build the frontend
+        run: npm run build
+
+      - name: Rust checks
+        working-directory: desktop/src-tauri
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets -- -D warnings
+          cargo test
+
+      - name: Build the bundle (ad-hoc signed)
+        if: env.APPLE_CERTIFICATE == ''
+        run: npm run tauri -- build --ci --target universal-apple-darwin --bundles app,dmg
+
+      - name: Build the bundle (Developer ID, notarized)
+        if: env.APPLE_CERTIFICATE != ''
+        run: npm run tauri -- build --ci --target universal-apple-darwin --bundles app,dmg
+        env:
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      # A zip made with ditto keeps the bundle's permissions and signature.
+      - name: Package the app
+        working-directory: desktop/src-tauri/target/universal-apple-darwin/release/bundle
+        run: ditto -c -k --keepParent macos/gloss.app gloss-macos-universal.app.zip
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: gloss-macos-universal
+          path: |
+            desktop/src-tauri/target/universal-apple-darwin/release/bundle/gloss-macos-universal.app.zip
+            desktop/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+          retention-days: 14

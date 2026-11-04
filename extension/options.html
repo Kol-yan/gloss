@@ -10,21 +10,37 @@
   <body>
     <main>
       <p class="brand">gloss</p>
-      <h1>Choose your editor</h1>
-      <p>Select English text on a page, then choose “Check with gloss” from its context menu.</p>
+      <h1>Extension settings</h1>
+
       <form id="settings">
         <fieldset id="controls" disabled>
-          <label for="app-origin">Editor address</label>
-          <input id="app-origin" name="appOrigin" type="url" value="https://gloss.li" placeholder="https://gloss.li" required autocomplete="url" aria-describedby="address-help status" />
-          <p id="address-help">Use an HTTPS address without a path. Local testing also accepts HTTP on localhost or 127.0.0.1.</p>
+          <label for="app-origin">Your gloss server</label>
+          <input id="app-origin" name="appOrigin" type="url" value="http://localhost:3000" placeholder="http://localhost:3000" required autocomplete="url" aria-describedby="address-help status" />
+          <p id="address-help">An HTTPS address without a path, or HTTP on localhost or 127.0.0.1 for a local server. Saving asks your browser to let gloss reach this address.</p>
           <div class="actions">
             <button type="submit">Save address</button>
-            <button id="use-default" class="secondary" type="button">Use gloss.li</button>
+            <button id="use-default" class="secondary" type="button">Use localhost:3000</button>
+            <button id="test" class="secondary" type="button">Check connection</button>
           </div>
         </fieldset>
         <p id="status" role="status" aria-live="polite">Loading settings…</p>
       </form>
-      <p class="privacy">Only this address is stored by the extension. Selected text travels in the new tab’s URL fragment, not an HTTP query. Checking with a model still requires a separate action in the editor.</p>
+
+      <section aria-labelledby="sign-in-title">
+        <h2 id="sign-in-title">Signing in</h2>
+        <p>The extension uses your gloss session in this browser. Open your invite link once in this browser, then come back here and check the connection.</p>
+      </section>
+
+      <section aria-labelledby="checks-title">
+        <h2 id="checks-title">Writing checks</h2>
+        <label class="check"><input id="checks-enabled" type="checkbox" disabled /> Check my writing in text fields on all sites</label>
+        <p class="hint">After you pause typing, the text of the field you are writing in is sent to your gloss server for a cloud check. Each check counts toward your daily allowance. Password and other structured fields are never checked.</p>
+        <h3>Sites where checks are off</h3>
+        <ul id="off-sites"></ul>
+        <p id="no-off-sites" class="hint">None. Use “Off on this site” in the toolbar popup to add one.</p>
+      </section>
+
+      <p class="privacy">This extension stores only your server address, whether writing checks are on, and the sites where you turned them off. Saved words travel to your server with fetch requests; nothing is put in page addresses or browser history. “Check with gloss” still opens the editor with the selection in the address fragment.</p>
     </main>
   </body>
 </html>

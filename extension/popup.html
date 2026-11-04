@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>gloss</title>
+    <link rel="stylesheet" href="popup.css" />
+    <script type="module" src="popup.js"></script>
+  </head>
+  <body>
+    <header>
+      <p class="brand">gloss</p>
+      <button id="settings" class="link" type="button">Settings</button>
+    </header>
+    <p id="account" class="account" role="status" aria-live="polite">Checking your sign-in…</p>
+    <p id="account-note" class="note" hidden></p>
+    <p id="account-actions" hidden><button id="open-app" class="secondary" type="button">Open gloss</button></p>
+
+    <section aria-labelledby="highlight-label">
+      <div class="switch-row">
+        <label id="highlight-label" for="highlight">Highlight my words</label>
+        <input id="highlight" type="checkbox" role="switch" disabled />
+      </div>
+      <p id="highlight-status" class="note" aria-live="polite">On this page only.</p>
+    </section>
+
+    <section aria-labelledby="checks-title">
+      <h2 id="checks-title">Writing checks</h2>
+      <div class="switch-row">
+        <label for="site-off">Off on this site <span id="site" class="site"></span></label>
+        <input id="site-off" type="checkbox" role="switch" disabled />
+      </div>
+      <p id="checks-status" class="note" aria-live="polite"></p>
+    </section>
+
+    <footer>
+      <button id="open-words" class="secondary" type="button">Open My words</button>
+    </footer>
+  </body>
+</html>

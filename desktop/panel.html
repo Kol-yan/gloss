@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>gloss</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body class="panel">
+    <div class="frame">
+      <header class="head" data-tauri-drag-region>
+        <span class="mark small" aria-hidden="true" data-tauri-drag-region>g</span>
+        <span id="title" class="title" data-tauri-drag-region>gloss</span>
+        <button id="close" type="button" class="icon" aria-label="Close (Esc)" title="Close (Esc)">×</button>
+      </header>
+      <section id="content" class="content" aria-live="polite"></section>
+      <footer id="actions" class="actions"></footer>
+    </div>
+    <script type="module" src="/src/panel.ts"></script>
+  </body>
+</html>

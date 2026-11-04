@@ -1,0 +1,47 @@
+:root {
+  color-scheme: light dark;
+  font-family: "Avenir Next", "Segoe UI", "Helvetica Neue", system-ui, sans-serif;
+  color: #203139;
+  background: #f4efe7;
+}
+
+* { box-sizing: border-box; }
+body { width: 330px; margin: 0; padding: 14px 16px 16px; font-size: 14px; line-height: 1.45; }
+header { display: flex; align-items: center; justify-content: space-between; }
+.brand { margin: 0; color: #0a665f; font-size: 18px; font-weight: 750; }
+p { margin: 6px 0 0; }
+h2 { margin: 0 0 6px; font-size: 13px; font-weight: 700; letter-spacing: 0.02em; color: #51656e; text-transform: uppercase; }
+.account { font-weight: 600; }
+.note { color: #51656e; font-size: 13px; }
+.note:empty { display: none; }
+section { margin-top: 14px; border-top: 1px solid #d6cec1; padding-top: 12px; }
+.switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+label { font-size: 15px; font-weight: 650; }
+.site { color: #51656e; font-weight: 500; font-size: 13px; overflow-wrap: anywhere; }
+footer { margin-top: 14px; border-top: 1px solid #d6cec1; padding-top: 12px; }
+button { border: 1px solid transparent; border-radius: 24px; padding: 7px 14px; font: inherit; font-weight: 650; cursor: pointer; color: #fff; background: #0a665f; }
+button.secondary { border-color: #9caaa8; color: #203139; background: transparent; }
+button.link { border: 0; padding: 4px 6px; color: #0a665f; background: transparent; text-decoration: underline; }
+button:focus-visible, input:focus-visible { outline: 3px solid #0d7a72; outline-offset: 3px; }
+
+input[role="switch"] {
+  appearance: none; flex: none; position: relative; width: 42px; height: 24px; margin: 0;
+  border-radius: 12px; background: #9caaa8; cursor: pointer; transition: background 0.15s;
+}
+input[role="switch"]::after {
+  content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px;
+  border-radius: 50%; background: #fff; transition: transform 0.15s;
+}
+input[role="switch"]:checked { background: #0a665f; }
+input[role="switch"]:checked::after { transform: translateX(18px); }
+input[role="switch"]:disabled { cursor: default; opacity: 0.5; }
+
+@media (prefers-color-scheme: dark) {
+  :root { color: #e9efed; background: #18272c; }
+  .brand, button.link { color: #8fd9cf; }
+  .note, .site, h2 { color: #c0cdcc; }
+  section, footer { border-color: #526462; }
+  button.secondary { color: #e9efed; border-color: #809e9c; }
+  input[role="switch"] { background: #526462; }
+  input[role="switch"]:checked { background: #3fb8aa; }
+}

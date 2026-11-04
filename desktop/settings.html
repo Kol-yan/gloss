@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>gloss settings</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body class="settings">
+    <main>
+      <header class="brand">
+        <span class="mark" aria-hidden="true">g</span>
+        <div>
+          <h1>gloss</h1>
+          <p>Check what you write and dictate in any app.</p>
+        </div>
+      </header>
+
+      <section class="card" aria-labelledby="account-heading">
+        <h2 id="account-heading">Account</h2>
+        <div id="account-status" class="status" aria-live="polite"></div>
+
+        <form id="invite-form" class="stack">
+          <label for="invite">Invite link</label>
+          <div class="row">
+            <input id="invite" type="text" inputmode="url" autocomplete="off" spellcheck="false" placeholder="http://localhost:3000/join/…" />
+            <button type="submit">Sign in</button>
+          </div>
+          <p class="hint">Opens a new gloss workspace for this app, like opening the link in a browser.</p>
+        </form>
+
+        <details id="session-details">
+          <summary>Use the session from your browser instead</summary>
+          <form id="session-form" class="stack">
+            <p class="hint">
+              This keeps one workspace for the web editor and this app. In the browser where you opened your
+              invite, open the developer tools, find the cookie named <code>glossy_session</code> for your gloss
+              server and copy its value.
+            </p>
+            <label for="session">Session value</label>
+            <div class="row">
+              <input id="session" type="password" autocomplete="off" spellcheck="false" />
+              <button type="submit">Use session</button>
+            </div>
+          </form>
+        </details>
+
+        <div class="row end">
+          <button id="sign-out" type="button" class="secondary">Sign out</button>
+        </div>
+        <p id="account-error" class="error" role="alert"></p>
+      </section>
+
+      <section class="card" aria-labelledby="server-heading">
+        <h2 id="server-heading">Server</h2>
+        <form id="server-form" class="stack">
+          <label for="server">Server address</label>
+          <div class="row">
+            <input id="server" type="text" inputmode="url" autocomplete="off" spellcheck="false" />
+            <button type="submit">Save</button>
+          </div>
+          <p class="hint">http:// works for a server on this computer; use https:// for any other.</p>
+        </form>
+        <p id="server-error" class="error" role="alert"></p>
+      </section>
+
+      <section class="card" aria-labelledby="shortcut-heading">
+        <h2 id="shortcut-heading">Shortcuts</h2>
+        <form id="shortcut-form" class="stack">
+          <label for="check-shortcut">Check selected text</label>
+          <input id="check-shortcut" class="shortcut" type="text" readonly aria-describedby="shortcut-hint" />
+          <label for="dictation-shortcut">Dictate: hold to talk, or tap to start and tap again to stop</label>
+          <input id="dictation-shortcut" class="shortcut" type="text" readonly aria-describedby="shortcut-hint" />
+          <p id="shortcut-hint" class="hint">Click a field and press the new keys together, for example Control, Alt (Option on a Mac) and G.</p>
+          <div class="row end">
+            <button type="submit">Save shortcuts</button>
+          </div>
+        </form>
+        <p id="shortcut-error" class="error" role="alert"></p>
+      </section>
+
+      <section id="permissions" class="card" aria-labelledby="permissions-heading" hidden>
+        <h2 id="permissions-heading">Permissions</h2>
+        <div class="permission">
+          <div>
+            <h3>Accessibility</h3>
+            <p class="hint">Lets gloss read the text you select and paste the corrected text back.</p>
+          </div>
+          <span id="accessibility-state" class="pill"></span>
+        </div>
+        <div class="row end">
+          <button id="accessibility" type="button" class="secondary">Open Accessibility settings</button>
+        </div>
+        <div class="permission">
+          <div>
+            <h3>Microphone</h3>
+            <p class="hint">macOS asks the first time you dictate.</p>
+          </div>
+        </div>
+        <div class="row end">
+          <button id="microphone" type="button" class="secondary">Open Microphone settings</button>
+        </div>
+      </section>
+
+      <footer class="footer">
+        <button id="open-editor" type="button" class="link">Open the gloss editor</button>
+        <span id="version"></span>
+      </footer>
+    </main>
+    <script type="module" src="/src/settings.ts"></script>
+  </body>
+</html>
