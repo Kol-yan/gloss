@@ -13,6 +13,15 @@ import { toExpression } from "../practice/expressions";
 import { resolveEdits } from "../proofread/edits";
 import { runCheckJob, type ProofreadDeps } from "../proofread/service";
 
+// Matching a whole document against every saved expression is pure CPU work,
+// so it stays outside the write transaction. These bounds keep the work
+// predictable: the newest 200 expressions are plenty next to the 30 offered
+// for suggestions, and no real editing session supplies 500 assisted spans.
+// A longer assisted list is rejected rather than truncated, because dropping
+// a span could record accepted help as independent writing.
+export const MAX_WRITING_EXPRESSIONS = 200;
+export const MAX_WRITING_ASSISTED_RANGES = 500;
+
 const Proposal = z.object({
   expressionId: z.string().min(1).max(100),
   start: z.number().int().nonnegative(),
@@ -85,14 +94,21 @@ export async function learning(learner: Learner, input: LearningRequest, deps: P
 
 export function recordWriting(learner: Learner, input: WritingEvidenceRequest, deps: ServerDeps = {}) {
   const text = normalizeText(input.text);
-  if (text !== input.text || input.assistedRanges.some((range) => range.end > text.length)) throw new InvalidRequestError();
-  return immediate((db) => {
-    const matches = unassistedMatches(text, activeExpressions(learner, { db }), input.assistedRanges);
-    const expressionIds = [...new Set(matches.map((match) => match.expression.id))];
-    const insert = db.prepare(`INSERT OR IGNORE INTO evidence_events
+  if (text !== input.text || input.assistedRanges.some((range) => range.end > text.length) ||
+    input.assistedRanges.length > MAX_WRITING_ASSISTED_RANGES) throw new InvalidRequestError();
+  const db = deps.db ?? getDb();
+  // Read and match before taking the write lock: expression reads and the
+  // text scan must not extend the immediate transaction.
+  const expressions = activeExpressions(learner, { db }, MAX_WRITING_EXPRESSIONS);
+  const expressionIds = [...new Set(
+    unassistedMatches(text, expressions, input.assistedRanges).map((match) => match.expression.id),
+  )];
+  if (!expressionIds.length) return { expressionIds };
+  return immediate((tx) => {
+    const insert = tx.prepare(`INSERT OR IGNORE INTO evidence_events
       (id, learner_id, expression_id, kind, created_at, document_id)
       VALUES (?, ?, ?, 'independent_writing', ?, ?)`);
     for (const id of expressionIds) insert.run(newId(), learner.id, id, (deps.now ?? new Date()).toISOString(), input.documentId);
     return { expressionIds };
-  }, deps.db ?? getDb());
+  }, db);
 }

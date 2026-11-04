@@ -1,11 +1,29 @@
 import { describe, expect, it, vi } from "vitest";
+import type { DatabaseSync } from "node:sqlite";
 import { LearningResponse, WritingEvidenceResponse } from "@/shared/contracts";
 vi.mock("next/headers", async () => (await import("./helpers/app")).nextHeadersMock);
+// Wrap the real matcher so a test can observe whether it ran while the fake
+// database was inside BEGIN IMMEDIATE. Moving the call into the transaction
+// callback then fails the assertion instead of silently passing.
+const matchingProbe = vi.hoisted(() => ({
+  transactionAtCall: [] as boolean[],
+  isInTransaction: undefined as undefined | (() => boolean),
+}));
+vi.mock("@/lib/expression-matches", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/expression-matches")>();
+  return {
+    ...actual,
+    unassistedMatches: (...args: Parameters<typeof actual.unassistedMatches>) => {
+      matchingProbe.transactionAtCall.push(matchingProbe.isInTransaction?.() ?? false);
+      return actual.unassistedMatches(...args);
+    },
+  };
+});
 import { POST as learningRoute } from "@/app/api/learning/route";
 import { POST as writingRoute } from "@/app/api/expressions/writing/route";
 import { POST as detectRoute } from "@/app/api/detect/route";
 import { POST as proofreadRoute } from "@/app/api/proofread/route";
-import { resolveLearningOutput } from "@/server/learning/service";
+import { MAX_WRITING_ASSISTED_RANGES, MAX_WRITING_EXPRESSIONS, recordWriting, resolveLearningOutput } from "@/server/learning/service";
 import { listExpressions } from "@/server/practice/expressions";
 import { decideSuggestion } from "@/server/proofread/decisions";
 import { hashText } from "@/lib/text";
@@ -15,6 +33,40 @@ import { chatReply, db, fetchMock, installApp, login, postJson, proofreadReply, 
 installApp();
 const text = "This delay slows progress.";
 const input = () => ({ requestId: requestId(), text });
+
+// A minimal node:sqlite stand-in that exposes only what recordWriting uses.
+// It records whether any SELECT ran while BEGIN IMMEDIATE was open and honours
+// the LIMIT of the expression read, so a test can observe the work bounds.
+function fakeDb(expressions: Record<string, unknown>[]) {
+  const state = { inTransaction: false, readInsideTransaction: false, selectSql: "", inserts: [] as unknown[][] };
+  const db = {
+    get isTransaction() {
+      return state.inTransaction;
+    },
+    exec(sql: string) {
+      if (sql === "BEGIN IMMEDIATE") state.inTransaction = true;
+      else if (sql === "COMMIT" || sql === "ROLLBACK") state.inTransaction = false;
+    },
+    prepare(sql: string) {
+      if (/^\s*SELECT/i.test(sql)) {
+        if (state.inTransaction) state.readInsideTransaction = true;
+        state.selectSql = sql;
+        const limit = /LIMIT (\d+)/.exec(sql);
+        return { all: () => (limit ? expressions.slice(0, Number(limit[1])) : expressions) };
+      }
+      if (/^\s*INSERT/i.test(sql)) {
+        if (!state.inTransaction) throw new Error("INSERT outside the write transaction");
+        return { run: (...args: unknown[]) => state.inserts.push(args) };
+      }
+      throw new Error(`Unexpected SQL in fake database: ${sql}`);
+    },
+  };
+  return { db: db as unknown as DatabaseSync, state };
+}
+
+function expressionRow(index: number, savedText: string) {
+  return { id: `expression-${index}`, text: savedText, meaning: "A saved meaning.", ipa: null, familiarity: "new", created_at: "2026-01-01T00:00:00.000Z" };
+}
 
 describe("separate Learning call", () => {
   it("requires authentication and valid bounded input before any model work", async () => {
@@ -154,5 +206,47 @@ describe("independent real-writing evidence", () => {
     expect((await postJson(writingRoute, body)).status).toBe(401);
     login();
     expect((await postJson(writingRoute, { ...body, assistedRanges: [{ start: 0, end: 20 }] })).status).toBe(400);
+  });
+  it("reads expressions and matches before the immediate write transaction", () => {
+    const { learner } = login();
+    const { db: fake, state } = fakeDb([expressionRow(0, "bottleneck")]);
+    matchingProbe.isInTransaction = () => state.inTransaction;
+    matchingProbe.transactionAtCall.length = 0;
+    const result = recordWriting(
+      learner,
+      { documentId: requestId(), text: "A bottleneck in review.", assistedRanges: [] },
+      { db: fake },
+    );
+    expect(result).toEqual({ expressionIds: ["expression-0"] });
+    expect(matchingProbe.transactionAtCall).toEqual([false]);
+    expect(state.readInsideTransaction).toBe(false);
+    expect(state.inserts).toHaveLength(1);
+    matchingProbe.isInTransaction = undefined;
+  });
+  it("considers at most the bounded number of newest expressions", () => {
+    const { learner } = login();
+    const rows = Array.from({ length: MAX_WRITING_EXPRESSIONS + 1 }, (_, index) =>
+      expressionRow(index, index === MAX_WRITING_EXPRESSIONS ? "bottleneck" : `saved-word-${index}`));
+    const { db: fake, state } = fakeDb(rows);
+    const result = recordWriting(
+      learner,
+      { documentId: requestId(), text: "A bottleneck.", assistedRanges: [] },
+      { db: fake },
+    );
+    expect(result).toEqual({ expressionIds: [] });
+    expect(state.selectSql).toContain(`LIMIT ${MAX_WRITING_EXPRESSIONS}`);
+    expect(state.inserts).toEqual([]);
+  });
+  it("rejects more assisted ranges than the bounded maximum and accepts the limit", async () => {
+    const { learner } = login();
+    seedExpression(learner.id, { text: "bottleneck" });
+    const body = (count: number) => ({
+      documentId: requestId(),
+      text: "bottleneck",
+      assistedRanges: Array.from({ length: count }, () => ({ start: 0, end: 1 })),
+    });
+    expect((await postJson(writingRoute, body(MAX_WRITING_ASSISTED_RANGES + 1))).status).toBe(400);
+    expect((await postJson(writingRoute, body(MAX_WRITING_ASSISTED_RANGES))).status).toBe(200);
+    expect(db().prepare("SELECT COUNT(*) AS n FROM evidence_events WHERE kind = 'independent_writing' AND learner_id = ?").get(learner.id)).toEqual({ n: 0 });
   });
 });
