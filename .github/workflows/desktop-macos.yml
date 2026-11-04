@@ -63,8 +63,8 @@ jobs:
         working-directory: desktop/src-tauri
         run: |
           cargo fmt --check
-          cargo clippy --locked --all-targets -- -D warnings
-          cargo test --locked
+          cargo clippy --all-targets -- -D warnings
+          cargo test
 
       - name: Build the bundle (ad-hoc signed)
         if: env.APPLE_CERTIFICATE == ''
