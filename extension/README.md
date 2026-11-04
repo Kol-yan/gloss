@@ -1,57 +1,227 @@
 # gloss browser extension
 
-A small Manifest V3 extension that opens selected English text in the gloss web
-editor. It does not check text itself or call a model.
+A Manifest V3 extension for Chrome and Firefox that brings gloss to the pages
+you read and the fields you write in:
 
-## Load the unpacked extension
+- **Add to gloss**: select a word or a short phrase on any site, right-click,
+  and choose **Add to gloss**. It is saved to My words, and a small toast
+  confirms it and lets you add a meaning in your own words.
+- **Highlight my words**: a switch in the toolbar popup marks the words from
+  My words on the current page (whole words, any case). Hover a marked word to
+  see its meaning.
+- **Writing checks**: in text fields on every site, gloss underlines mistakes
+  after you pause typing. Hover or click an underline for a card with
+  **Apply** and **Dismiss**. Turn checks off for one site in the popup, or for
+  all sites in the settings.
+- **Check with gloss** (kept from the first draft): opens the selected text in
+  the gloss editor.
 
-1. Open `chrome://extensions` in Chrome and turn on Developer mode.
+The extension talks only to your own gloss server. It has no server address
+built in other than a local development default.
+
+## Install
+
+Start the gloss server first (for example `npm run dev` in the repository
+root, which serves `http://localhost:3000`), then load the extension.
+
+**Chrome, Edge and other Chromium browsers**
+
+1. Open `chrome://extensions` and turn on **Developer mode**.
 2. Choose **Load unpacked** and select this `extension` folder.
-3. Open the extension's **Details → Extension options** and save your editor
-   address. The default is `https://gloss.li`. For a private local test, use the
-   loopback address where your editor is available, such as
-   `http://localhost:13320`.
-4. Sign in to that editor in the same browser first.
-5. Select text on an ordinary web page, open its context menu, and choose
-   **Check with gloss**. Review the imported text before choosing a cloud check.
 
-Selections over 6,000 UTF-16 code units open an explanatory editor state without
-the text. The extension never silently cuts a selection short. Line endings and
-Unicode composition are normalized; the remaining text is preserved.
+**Firefox** (128 or later)
 
-## Permissions and privacy
+1. Open `about:debugging#/runtime/this-firefox`.
+2. Choose **Load Temporary Add-on…** and select `extension/manifest.json`.
+3. In `about:addons` → gloss → **Permissions**, allow access to websites if
+   Firefox has not granted it. Highlighting and checks need it.
 
-- `contextMenus` adds the selection action; `storage` saves only the editor
-  origin locally. There are no host permissions, content scripts, or browsing
-  history permissions.
-- Opening a new tab with `chrome.tabs.create` does not require the `tabs`
-  permission. The extension does not read existing tab URLs or titles.
-- Selected text is placed in a URL fragment (`#text=...`), not a query. Fragments
-  are not sent in HTTP requests, but the target page can read them and the browser
-  may retain the URL in history. Use an editor address you trust. The editor
-  removes the capture fragment after importing it.
-- No provider keys, page URL, page title, selected text, or transcript is stored
-  by the extension. It makes no model request and writes no selection logs.
-- A storage or invalid-address failure opens settings instead of falling back
-  to another destination.
+A temporary Firefox add-on is removed when Firefox quits.
 
-The web application must support the capture fragment contract for this draft
-to import text. Browser installation and manual integration testing have not yet
-been performed; Chrome behavior and support on other browsers are unverified.
-No extension-store package has been published.
+## Set up
 
-## Capture contract
+1. **Sign in**: open your gloss invite link in the same browser. The extension
+   uses that browser session; it never sees or stores a password or token.
+2. **Server address**: open the extension's settings (popup → **Settings**).
+   The default is `http://localhost:3000`. For another server, enter its
+   origin (HTTPS, or HTTP on `localhost`/`127.0.0.1`) and choose
+   **Save address**. The browser then asks to let gloss reach that address.
+3. Choose **Check connection**. It should say "Signed in as …" with the
+   number of checks left today.
 
-The worker normalizes the selection to NFC and `\n` line endings, preserving
-surrounding whitespace. An empty or whitespace-only selection does nothing.
+Pages that were open before the extension was installed or updated need a
+reload before highlighting and checks work there.
 
-- Up to 6,000 UTF-16 code units: `/#text=<URLSearchParams-encoded selection>`.
-- Longer selection: `/#capture=too-long`, with no text included.
+## Using it
 
-The destination must be an HTTPS origin or HTTP loopback origin (`localhost` or
-`127.0.0.1`). Paths, queries, fragments and embedded sign-in details are rejected.
+**Add to gloss.** The selection is trimmed to one line without surrounding
+punctuation ("serendipity," becomes "serendipity") and may be up to 80
+characters. Saving the same word again, in any case, does not create a
+duplicate. A word saved from a page starts without a meaning; choose
+**Add a meaning** in the toast to give it one. Chrome and Firefox show the two
+gloss menu items under a "gloss" submenu.
 
-API references: [context menus](https://developer.chrome.com/docs/extensions/reference/api/contextMenus),
-[tabs permissions](https://developer.chrome.com/docs/extensions/reference/api/tabs),
-[local storage](https://developer.chrome.com/docs/extensions/reference/api/storage),
-[options pages](https://developer.chrome.com/docs/extensions/develop/ui/options-page).
+**Highlight my words.** The switch applies to the current page until it is
+switched off or the page is reloaded. Text in inputs, editable areas, scripts,
+styles, code blocks and similar elements is never marked. A word added while
+highlighting is on appears right away.
+
+**Writing checks.** After about two seconds without typing, the text of the
+field you are in (up to 6,000 characters) is checked on your server. Each
+check counts toward your daily allowance, so the extension waits at least
+eight seconds between checks of one field, sends at most six checks a minute
+in total, and reuses the answer for text it checked recently. When the allowance is used up,
+when you are signed out, or when cloud checks are paused, checks stop quietly
+and you are told once.
+
+Checks work in textareas, single-line text inputs and rich text editors
+(contenteditable). They are never run in password fields, fields with an
+autocomplete hint (names, emails, card numbers, one-time codes and so on),
+fields marked `spellcheck="false"`, read-only fields, fields that opt out with
+`data-gloss="off"`, `data-gramm="false"` or `data-enable-grammarly="false"`,
+or on your gloss server's own pages, which have their own checks.
+
+Corrections are underlined in red, style notes in blue. **Apply** changes the
+text through the browser's own editing command, so the site sees a normal edit
+and Ctrl+Z undoes it. **Dismiss** hides the suggestion for that field. Both
+decisions are recorded on the server like decisions in the editor.
+
+## Permissions
+
+| Permission | Why |
+|---|---|
+| `contextMenus` | The **Add to gloss** and **Check with gloss** items. |
+| `storage` | Your settings, on this device only. |
+| Host access to `http://localhost/*` | Calls to the default local server with your session cookie. |
+| Optional host access (`https://*/*`, `http://127.0.0.1/*`) | Asked for only for the one server address you save; access to a previous custom address is given back when you change it. |
+| Content scripts on `http://*/*` and `https://*/*` | Writing checks run on every site by default, and highlighting needs to read the page. Top frames only. |
+
+There is no `tabs`, `history`, `cookies`, `scripting` or `webRequest`
+permission, and no file is exposed to web pages.
+
+## Privacy
+
+- **Stored on this device**: the server address, whether writing checks are
+  on, and the host names where you turned them off. Nothing else: no text, no
+  word list, no page address.
+- **Sent to your server**: the word you add; the text of the field you are
+  typing in, while writing checks are on for that site; your decisions on
+  suggestions. Requests use `fetch` with your session cookie and no referrer.
+  No page address or title is ever sent, and nothing lands in browser history.
+- **Not sent anywhere**: page text. Highlighting runs on the page; it only
+  downloads your word list.
+- Everything the extension draws lives in a closed shadow root. Highlights use
+  the CSS Custom Highlight API and do not change the page, but a page's own
+  scripts can still tell which of its words are highlighted. That is why
+  highlighting is off until you switch it on for a page.
+- **Check with gloss** puts the selection in the editor's URL fragment, which
+  the browser may keep in history. Use **Add to gloss** or the in-field checks
+  to avoid that.
+
+Firefox lists the extension as transmitting website content and personal
+communications (`data_collection_permissions`), because typed text goes to your
+gloss server for checking.
+
+## How it works
+
+Only the background worker talks to the server. Content scripts run inside web
+pages, where the page's CORS rules would apply to their requests, so they send
+messages to the background instead. The background answers only messages from
+this extension, checks their shape, caches the word list for two minutes and
+check results by text, and pauses after errors whose answer would not change.
+
+| Server route | Used for |
+|---|---|
+| `GET /api/me` | Popup and settings: who is signed in, checks left today. |
+| `GET /api/expressions` | The word list for highlighting. |
+| `POST /api/expressions/capture` | **Add to gloss** and **Add a meaning**. |
+| `POST /api/proofread` | Writing checks. |
+| `POST /api/suggestions/{id}` | Apply (`accepted`) and Dismiss (`rejected`). |
+
+Files:
+
+| File | Role |
+|---|---|
+| `manifest.json` | Chrome service worker and Firefox background script, both `background.js`. |
+| `background.js` | Context menus, toasts, message routing. |
+| `capture.mjs` | Server address rules, words for **Add to gloss**, the editor capture URL. |
+| `lib/api.mjs` | Requests to the server and reading their answers. |
+| `lib/router.mjs` | Background message handling, caches, pauses, toast wording. |
+| `lib/settings.mjs` | Stored settings and per-site checks. |
+| `lib/status.mjs` | Popup and settings status lines. |
+| `content/*.js` | Content scripts. `words.js` and `edits.js` are pure; `ui.js` draws; `highlight.js` and `checks.js` are the two features; `main.js` wires them up. |
+| `popup.*`, `options.*` | Toolbar popup and settings page. |
+
+Content scripts cannot be ES modules, so each one publishes a single
+`globalThis.gloss…` object for the scripts loaded after it.
+
+## Development
+
+There is no build step: the folder is loaded as it is. From the repository
+root:
+
+```bash
+npm test
+```
+
+The extension's pure logic (server address rules, word matching, suggestion
+positions, message routing, settings, status wording) is covered by
+`tests/extension-*.test.ts`, which load the content scripts in a separate
+context the way the browser does. The capture route has its own tests in
+`tests/server/expressions-capture.test.ts`.
+
+## Status
+
+Verified: the unpacked extension in Chromium 153 against a local gloss server,
+after signing in with an invite: saving words through the background, the
+toast and **Add a meaning**, highlighting with hover meanings, underlines,
+Apply (with undo) and Dismiss in a textarea, a text input and a
+contenteditable editor, the popup switches, and that password and
+`spellcheck="false"` fields are never sent. The model reply in that run was a
+stand-in, not a real provider. Firefox passes `web-ext lint` with no errors.
+
+Not yet verified:
+
+- A real Chrome or Edge install, and any run in Firefox. In Firefox, whether
+  the session cookie is sent with the extension's requests (the extension
+  relies on it) still needs to be confirmed.
+- The real right-click menu (automated browsers cannot open it); its handler
+  is unit tested and shares the save and toast path checked above.
+- Popular sites and editors (webmail, chat apps, ProseMirror, Lexical,
+  Draft.js), HTTPS servers with the optional permission prompt, and
+  visitor-funded (BYOK) workspaces.
+
+## To do
+
+1. **Meanings for saved words**: a word added from a page has no meaning until
+   the learner types one. Add a budgeted server-side lookup, or suggest one.
+2. **Contract and docs**: move the capture route's schemas into
+   `src/shared/contracts.ts`, and describe the route and the extension's
+   stored settings in `ARCHITECTURE.md`.
+3. **Schema**: every expression must point at a suggestion, so a captured word
+   gets a check run (provider `capture`, model `none`) and an accepted
+   suggestion of its own. A migration with a nullable `suggestion_id` and a
+   `source` column would be cleaner.
+4. **Quota-friendly checks**: run the editor's local rule checker in the
+   extension and use `POST /api/detect` to choose sentences before a
+   proofreading call, as the editor does. Today every pause in a changed field
+   costs one check, which a pilot allowance (20 a day) uses up quickly.
+5. **Long fields**: text over 6,000 characters is not checked; check by
+   paragraph instead.
+6. **Frames and shadow DOM**: fields in iframes (some webmail and CMS editors)
+   and inside closed shadow roots are not reached.
+7. **Rich editors**: underlines are clipped to the editor box and the window,
+   not to scrolled containers; editors that change text without input events
+   hide underlines until the next edit. Canvas-based editors are not supported.
+8. **Keyboard and screen readers**: a shortcut to open the card at the caret,
+   focus handling inside the card, and announcements for new suggestions.
+9. **Expression suggestions** from checks are hidden in fields; offer them with
+   **Add to My words**, as the editor does.
+10. **Stale decisions**: record `stale` when an edit invalidates a suggestion.
+11. **Highlighting**: inflected forms ("run" for "running") and phrases split
+    across elements are not matched; offer "always highlight on this site".
+12. **Visitor (BYOK) workspaces**: checks need the visitor's own key, which
+    stays in the editor tab; this needs a design.
+13. **Sign-in**: a pairing token for the extension would not depend on how
+    each browser treats cookies on extension requests.
+14. **Packaging**: icons, a zip for store review, store listings.

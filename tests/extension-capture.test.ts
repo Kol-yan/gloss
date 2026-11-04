@@ -1,8 +1,22 @@
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { buildCaptureUrl, DEFAULT_ORIGIN, MAX_SELECTION_LENGTH, MENU_ID, parseAppOrigin } from "../extension/capture.mjs";
+import {
+  ADD_MENU_ID,
+  buildCaptureUrl,
+  DEFAULT_ORIGIN,
+  MAX_SELECTION_LENGTH,
+  MAX_WORD_LENGTH,
+  MENU_ID,
+  originPermission,
+  parseAppOrigin,
+  prepareWord,
+} from "../extension/capture.mjs";
 
 describe("extension capture boundaries", () => {
+  it("defaults to a local server, never a public hostname", () => {
+    expect(DEFAULT_ORIGIN).toBe("http://localhost:3000");
+  });
+
   it("keeps selected text in a fragment and does not include its source page", () => {
     const selected = "A phrase with & symbols # and a question?";
     const url = new URL(buildCaptureUrl(selected)!);
@@ -13,13 +27,13 @@ describe("extension capture boundaries", () => {
   });
 
   it("preserves whitespace, normalizes accents and line endings, and keeps emoji intact", () => {
-    const selected = "  cafe\u0301\r\n\ud83d\ude00\rsecond line  ";
+    const selected = "  café\r\n😀\rsecond line  ";
     const url = new URL(buildCaptureUrl(selected, "http://localhost:13320/")!);
-    expect(new URLSearchParams(url.hash.slice(1)).get("text")).toBe("  caf\u00e9\n\ud83d\ude00\nsecond line  ");
+    expect(new URLSearchParams(url.hash.slice(1)).get("text")).toBe("  café\n😀\nsecond line  ");
   });
 
   it("accepts the exact UTF-16 limit and rejects oversized text without exposing it", () => {
-    const exact = "a".repeat(MAX_SELECTION_LENGTH - 2) + "\ud83d\ude00";
+    const exact = "a".repeat(MAX_SELECTION_LENGTH - 2) + "😀";
     expect(new URLSearchParams(new URL(buildCaptureUrl(exact)!).hash.slice(1)).get("text")).toBe(exact);
     const tooLong = new URL(buildCaptureUrl(exact + "b")!);
     expect(tooLong.hash).toBe("#capture=too-long");
@@ -31,64 +45,207 @@ describe("extension capture boundaries", () => {
   });
 
   it("allows secure origins and HTTP loopback only", () => {
-    expect(parseAppOrigin(" https://gloss.li/ ")).toBe("https://gloss.li");
+    expect(parseAppOrigin(" https://gloss.example/ ")).toBe("https://gloss.example");
     expect(parseAppOrigin("https://example.com:8443")).toBe("https://example.com:8443");
     expect(parseAppOrigin("http://127.0.0.1:3200")).toBe("http://127.0.0.1:3200");
     expect(parseAppOrigin("http://localhost:13320/")).toBe("http://localhost:13320");
-    for (const origin of ["http://example.com", "javascript:alert(1)", "ftp://gloss.li", "gloss.li",
-      "https://user:pass@gloss.li", "https://@gloss.li", "https://gloss.li/editor", "https://gloss.li/./",
-      "https://gloss.li?", "https://gloss.li/#", "https://gloss.li?text=secret", "https://gloss.li/#text=secret",
-      "https://glo\tss.li", "https://gloss.li\\", "https://gloss.li:invalid"]) {
+    for (const origin of ["http://example.com", "javascript:alert(1)", "ftp://gloss.example", "gloss.example",
+      "https://user:pass@gloss.example", "https://@gloss.example", "https://gloss.example/editor", "https://gloss.example/./",
+      "https://gloss.example?", "https://gloss.example/#", "https://gloss.example?text=secret", "https://gloss.example/#text=secret",
+      "https://glo\tss.example", "https://gloss.example\\", "https://gloss.example:invalid"]) {
       expect(parseAppOrigin(origin), origin).toBeNull();
       expect(buildCaptureUrl("Example", origin), origin).toBeNull();
     }
   });
 
-  it("declares only menu and local-setting permissions", () => {
-    const manifest = JSON.parse(readFileSync("extension/manifest.json", "utf8"));
-    expect(manifest.permissions.sort()).toEqual(["contextMenus", "storage"]);
-    expect(manifest).not.toHaveProperty("host_permissions");
-    expect(manifest).not.toHaveProperty("content_scripts");
-    expect(manifest.background.type).toBe("module");
+  it("asks for a port-free host permission for the server origin only", () => {
+    expect(originPermission("http://localhost:3000")).toBe("http://localhost/*");
+    expect(originPermission("http://127.0.0.1:3200/")).toBe("http://127.0.0.1/*");
+    expect(originPermission("https://gloss.example:8443")).toBe("https://gloss.example/*");
+    expect(originPermission("http://example.com")).toBeNull();
+    expect(originPermission(undefined)).toBeNull();
   });
 });
 
-describe("extension action wiring", () => {
-  let clicked: (info: { menuItemId: string; selectionText?: string; pageUrl?: string }) => void;
-  let installed: () => void;
+describe("words for Add to gloss", () => {
+  it("keeps one line without the punctuation a selection picks up", () => {
+    expect(prepareWord("  serendipity, ")).toEqual({ ok: true, text: "serendipity" });
+    expect(prepareWord("“get the ball\n rolling.”")).toEqual({ ok: true, text: "get the ball rolling" });
+    expect(prepareWord("(rock 'n' roll)")).toEqual({ ok: true, text: "rock 'n' roll" });
+    expect(prepareWord("well-known")).toEqual({ ok: true, text: "well-known" });
+    expect(prepareWord("café")).toEqual({ ok: true, text: "café" });
+  });
+
+  it("refuses empty, letterless and overlong selections", () => {
+    for (const text of [undefined, "", "  ", "...", "2026", "— 42 —"]) {
+      expect(prepareWord(text), String(text)).toEqual({ ok: false, reason: "empty" });
+    }
+    expect(prepareWord("a".repeat(MAX_WORD_LENGTH))).toEqual({ ok: true, text: "a".repeat(MAX_WORD_LENGTH) });
+    expect(prepareWord("a".repeat(MAX_WORD_LENGTH + 1))).toEqual({ ok: false, reason: "too_long" });
+  });
+});
+
+describe("extension manifest", () => {
+  const manifest = JSON.parse(readFileSync("extension/manifest.json", "utf8"));
+
+  it("asks only for menus, local settings and the default local server", () => {
+    expect(manifest.manifest_version).toBe(3);
+    expect([...manifest.permissions].sort()).toEqual(["contextMenus", "storage"]);
+    expect(manifest.host_permissions).toEqual(["http://localhost/*"]);
+    expect([...manifest.optional_host_permissions].sort()).toEqual(["http://127.0.0.1/*", "https://*/*"]);
+    for (const forbidden of ["tabs", "history", "cookies", "webRequest", "scripting", "<all_urls>"]) {
+      expect(JSON.stringify(manifest.permissions)).not.toContain(forbidden);
+    }
+  });
+
+  it("runs content scripts in top frames of web pages only, with pure helpers loaded first", () => {
+    expect(manifest.content_scripts).toHaveLength(1);
+    const [script] = manifest.content_scripts;
+    expect(script.matches).toEqual(["http://*/*", "https://*/*"]);
+    expect(script.all_frames).toBeUndefined();
+    expect(script.js[0]).toBe("content/words.js");
+    expect(script.js.at(-1)).toBe("content/main.js");
+    for (const file of [...script.js, ...script.css]) expect(() => readFileSync(`extension/${file}`)).not.toThrow();
+  });
+
+  it("works as a Chrome service worker and a Firefox background script", () => {
+    expect(manifest.background).toEqual({ service_worker: "background.js", scripts: ["background.js"], type: "module" });
+    expect(manifest.browser_specific_settings.gecko.id).toMatch(/^\{[0-9a-f-]{36}\}$/);
+    expect(manifest).not.toHaveProperty("web_accessible_resources");
+    expect(manifest).not.toHaveProperty("externally_connectable");
+  });
+});
+
+describe("extension background wiring", () => {
+  type MenuInfo = { menuItemId: string; selectionText?: string; pageUrl?: string; frameId?: number };
+  type Tab = { id: number; url?: string };
+  let clicked: (info: MenuInfo, tab?: Tab) => void;
+  let installed: () => Promise<void>;
+  let onMessage: (message: unknown, sender: unknown, respond: (value: unknown) => void) => boolean;
   const get = vi.fn();
   const createTab = vi.fn();
+  const sendToTab = vi.fn();
   const openOptions = vi.fn();
   const createMenu = vi.fn();
+  const contains = vi.fn();
+  const setBadgeText = vi.fn();
+  const fetchMock = vi.fn();
+  const tab = { id: 7, url: "https://private.example/secret" };
+
+  const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 
   beforeEach(async () => {
     vi.resetModules();
-    get.mockReset().mockResolvedValue({ appOrigin: "http://localhost:13320" });
+    get.mockReset().mockImplementation(async (defaults: Record<string, unknown>) => ({ ...defaults, appOrigin: "http://localhost:13320" }));
     createTab.mockReset().mockResolvedValue({});
+    sendToTab.mockReset().mockResolvedValue({ ok: true });
     openOptions.mockReset().mockResolvedValue(undefined);
     createMenu.mockReset().mockImplementation((_item, done) => done());
+    contains.mockReset().mockResolvedValue(true);
+    setBadgeText.mockReset().mockResolvedValue(undefined);
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("chrome", {
-      runtime: { lastError: undefined, openOptionsPage: openOptions, onInstalled: { addListener: (fn: () => void) => { installed = fn; } } },
-      contextMenus: { removeAll: (done: () => void) => done(), create: createMenu,
-        onClicked: { addListener: (fn: typeof clicked) => { clicked = fn; } } },
-      storage: { local: { get } }, tabs: { create: createTab },
+      runtime: {
+        id: "gloss-extension",
+        lastError: undefined,
+        openOptionsPage: openOptions,
+        onInstalled: { addListener: (fn: typeof installed) => { installed = fn; } },
+        onStartup: { addListener: () => undefined },
+        onMessage: { addListener: (fn: typeof onMessage) => { onMessage = fn; } },
+      },
+      contextMenus: {
+        removeAll: async () => undefined,
+        create: createMenu,
+        onClicked: { addListener: (fn: typeof clicked) => { clicked = fn; } },
+      },
+      storage: { local: { get }, onChanged: { addListener: () => undefined } },
+      permissions: { contains },
+      tabs: { create: createTab, sendMessage: sendToTab },
+      action: {
+        setBadgeText,
+        setBadgeBackgroundColor: vi.fn().mockResolvedValue(undefined),
+        setTitle: vi.fn().mockResolvedValue(undefined),
+      },
     });
     await import("../extension/background.js");
   });
 
   afterEach(() => vi.unstubAllGlobals());
 
-  it("registers a selection-only menu and opens only the encoded selection", async () => {
-    installed();
-    expect(createMenu.mock.calls[0][0]).toMatchObject({ contexts: ["selection"], id: MENU_ID });
-    clicked({ menuItemId: MENU_ID, selectionText: "A sample", pageUrl: "https://private.example/secret" });
+  it("registers Add to gloss and Check with gloss for selections only", async () => {
+    await installed();
+    expect(createMenu.mock.calls.map(([item]) => item)).toEqual([
+      { id: ADD_MENU_ID, title: "Add to gloss", contexts: ["selection"] },
+      { id: MENU_ID, title: "Check with gloss", contexts: ["selection"] },
+    ]);
+  });
+
+  it("opens only the encoded selection for Check with gloss", async () => {
+    clicked({ menuItemId: MENU_ID, selectionText: "A sample", pageUrl: tab.url }, tab);
     await vi.waitFor(() => expect(createTab).toHaveBeenCalledOnce());
     expect(createTab.mock.calls[0][0]).toEqual({ url: "http://localhost:13320/#text=A+sample" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("saves a selected word with fetch and the session cookie, then shows a toast", async () => {
+    fetchMock.mockResolvedValue(json({ expression: { id: "e1", text: "serendipity", meaning: "", familiarity: "new" }, created: true }));
+    clicked({ menuItemId: ADD_MENU_ID, selectionText: " serendipity, ", pageUrl: tab.url }, tab);
+    await vi.waitFor(() => expect(sendToTab).toHaveBeenCalledOnce());
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("http://localhost:13320/api/expressions/capture");
+    expect(init).toMatchObject({ method: "POST", credentials: "include", referrerPolicy: "no-referrer", redirect: "error" });
+    expect(JSON.parse(init.body)).toEqual({ text: "serendipity" });
+    expect(JSON.stringify(fetchMock.mock.calls)).not.toContain("private.example");
+    expect(createTab).not.toHaveBeenCalled();
+    expect(sendToTab.mock.calls[0]).toEqual([7, {
+      type: "toast",
+      toast: { tone: "success", text: "Added “serendipity” to My words.", word: "serendipity", canAddMeaning: true },
+    }, { frameId: 0 }]);
+  });
+
+  it("reports a missing session without other details", async () => {
+    fetchMock.mockResolvedValue(json({ error: { code: "unauthorized", message: "Please open your invite link to sign in." } }, 401));
+    clicked({ menuItemId: ADD_MENU_ID, selectionText: "word" }, tab);
+    await vi.waitFor(() => expect(sendToTab).toHaveBeenCalledOnce());
+    expect(sendToTab.mock.calls[0][1].toast).toEqual({
+      tone: "error",
+      text: "Sign in to gloss in this browser, then try again.",
+      action: "app",
+    });
+  });
+
+  it("sends nothing without host permission or a valid address", async () => {
+    contains.mockResolvedValueOnce(false);
+    clicked({ menuItemId: ADD_MENU_ID, selectionText: "word" }, tab);
+    await vi.waitFor(() => expect(sendToTab).toHaveBeenCalledTimes(1));
+    expect(sendToTab.mock.calls[0][1].toast.action).toBe("options");
+
+    get.mockImplementationOnce(async (defaults: Record<string, unknown>) => ({ ...defaults, appOrigin: "http://remote.example" }));
+    clicked({ menuItemId: ADD_MENU_ID, selectionText: "word" }, tab);
+    await vi.waitFor(() => expect(sendToTab).toHaveBeenCalledTimes(2));
+    expect(sendToTab.mock.calls[1][1].toast.text).toContain("server address");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses a long selection before any request", async () => {
+    clicked({ menuItemId: ADD_MENU_ID, selectionText: "word ".repeat(30) }, tab);
+    await vi.waitFor(() => expect(sendToTab).toHaveBeenCalledOnce());
+    expect(sendToTab.mock.calls[0][1].toast.text).toBe("Select a word or a short phrase (up to 80 characters).");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("falls back to a toolbar badge where the page has no content script", async () => {
+    fetchMock.mockResolvedValue(json({ expression: { id: "e1", text: "word", meaning: "m", familiarity: "new" }, created: false }));
+    sendToTab.mockRejectedValue(new Error("Receiving end does not exist."));
+    clicked({ menuItemId: ADD_MENU_ID, selectionText: "word" }, tab);
+    await vi.waitFor(() => expect(setBadgeText).toHaveBeenCalledWith({ tabId: 7, text: "✓" }));
   });
 
   it("ignores unrelated actions and empty selections", async () => {
-    clicked({ menuItemId: "another-action", selectionText: "A sample" });
-    clicked({ menuItemId: MENU_ID, selectionText: " " });
+    clicked({ menuItemId: "another-action", selectionText: "A sample" }, tab);
+    clicked({ menuItemId: MENU_ID, selectionText: " " }, tab);
     await Promise.resolve();
     expect(get).not.toHaveBeenCalled();
     expect(createTab).not.toHaveBeenCalled();
@@ -98,9 +255,21 @@ describe("extension action wiring", () => {
     for (const failure of ["invalid", "unavailable"]) {
       if (failure === "invalid") get.mockResolvedValueOnce({ appOrigin: "http://remote.example" });
       else get.mockRejectedValueOnce(new Error("Storage unavailable"));
-      clicked({ menuItemId: MENU_ID, selectionText: "A private sample" });
+      clicked({ menuItemId: MENU_ID, selectionText: "A private sample" }, tab);
       await vi.waitFor(() => expect(openOptions).toHaveBeenCalledTimes(failure === "invalid" ? 1 : 2));
     }
     expect(createTab).not.toHaveBeenCalled();
+  });
+
+  it("answers messages asynchronously and only from this extension", async () => {
+    fetchMock.mockResolvedValue(json({ expressions: [{ expression: { id: "e1", text: "ubiquitous", meaning: "everywhere" } }] }));
+    const respond = vi.fn();
+    expect(onMessage({ type: "words" }, { id: "gloss-extension" }, respond)).toBe(true);
+    await vi.waitFor(() => expect(respond).toHaveBeenCalledWith({ ok: true, words: [{ text: "ubiquitous", meaning: "everywhere" }] }));
+
+    const stranger = vi.fn();
+    onMessage({ type: "words" }, { id: "another-extension" }, stranger);
+    await vi.waitFor(() => expect(stranger).toHaveBeenCalledWith({ ok: false, error: "invalid" }));
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 });

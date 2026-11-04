@@ -1,12 +1,46 @@
 {
   "manifest_version": 3,
   "name": "gloss",
-  "version": "0.1.0",
-  "description": "Open selected English text in your gloss editor.",
+  "version": "0.2.0",
+  "description": "Save words to My words, see them on pages you read, and check your English in text fields.",
   "permissions": ["contextMenus", "storage"],
+  "host_permissions": ["http://localhost/*"],
+  "optional_host_permissions": ["http://127.0.0.1/*", "https://*/*"],
   "background": {
     "service_worker": "background.js",
+    "scripts": ["background.js"],
     "type": "module"
   },
-  "options_page": "options.html"
+  "action": {
+    "default_title": "gloss",
+    "default_popup": "popup.html"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": [
+        "content/words.js",
+        "content/edits.js",
+        "content/ui.js",
+        "content/highlight.js",
+        "content/checks.js",
+        "content/main.js"
+      ],
+      "css": ["content/page.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "{e29035ac-6fe1-400e-9267-aadecd6a5123}",
+      "strict_min_version": "128.0",
+      "data_collection_permissions": {
+        "required": ["websiteContent", "personalCommunications"]
+      }
+    }
+  }
 }

@@ -21,13 +21,22 @@ button { border: 1px solid transparent; border-radius: 24px; padding: 11px 18px;
 button.secondary { border-color: #9caaa8; color: #203139; background: transparent; }
 fieldset:disabled button { cursor: wait; opacity: 0.65; }
 #status { min-height: 24px; font-weight: 600; }
+section { margin-top: 28px; border-top: 1px solid #c6beb1; padding-top: 6px; }
+h2 { font-size: 20px; margin: 16px 0 8px; }
+h3 { font-size: 15px; margin: 20px 0 8px; }
+label.check { display: flex; gap: 10px; align-items: center; font-weight: 600; }
+label.check input { width: 20px; height: 20px; margin: 0; accent-color: #0a665f; }
+.hint { color: #4c6069; font-size: 13px; }
+ul { list-style: none; margin: 0; padding: 0; }
+li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 6px 0; border-bottom: 1px solid #ded6c9; overflow-wrap: anywhere; }
+button.small { padding: 6px 12px; font-size: 13px; }
 .privacy { margin-top: 30px; border-top: 1px solid #c6beb1; padding-top: 18px; }
 
 @media (prefers-color-scheme: dark) {
   :root { color: #e9efed; background: #18272c; }
   .brand { color: #8fd9cf; }
   input { color: #e9efed; background: #203139; border-color: #809e9c; }
-  #address-help, .privacy { color: #c0cdcc; }
+  #address-help, .privacy, .hint { color: #c0cdcc; }
   button.secondary { color: #e9efed; border-color: #809e9c; }
-  .privacy { border-color: #526462; }
+  .privacy, section, li { border-color: #526462; }
 }
