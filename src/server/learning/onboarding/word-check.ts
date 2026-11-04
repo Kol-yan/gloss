@@ -11,6 +11,7 @@
 // Nothing here calls a model and nothing is shared between learners.
 
 import type { DatabaseSync } from "node:sqlite";
+import { OnboardingLevelInput, resolveOnboardingEngineLevel } from "@/shared/contracts";
 import { getDb, immediate } from "../../db";
 import { newId } from "../../ids";
 import { InvalidRequestError } from "../../errors";
@@ -272,17 +273,20 @@ function readHistory(db: DatabaseSync, learnerId: string): Map<string, History> 
 
 // Store the level chosen on the Level step. It is the starting point for the
 // next Word check round; Word check answers then refine `learners.level` from
-// their own evidence (see estimateLevel).
+// their own evidence (see estimateLevel). Accepts a legacy CEFR level or a
+// named group; the stored value is always the canonical A2/B1/B2/C1 level.
 export function recordChosenLevel(
   learnerId: string,
-  level: CefrLevel,
+  level: OnboardingLevelInput,
   deps: { db?: DatabaseSync } = {},
 ): CefrLevel {
   const db = deps.db ?? getDb();
-  if (!isCefrLevel(level)) throw new InvalidRequestError();
-  const result = db.prepare("UPDATE learners SET level = ? WHERE id = ?").run(level, learnerId);
+  const parsed = OnboardingLevelInput.safeParse(level);
+  if (!parsed.success) throw new InvalidRequestError();
+  const canonical = resolveOnboardingEngineLevel(parsed.data);
+  const result = db.prepare("UPDATE learners SET level = ? WHERE id = ?").run(canonical, learnerId);
   if (result.changes === 0) throw new InvalidRequestError();
-  return level;
+  return canonical;
 }
 
 // The level estimate from Word check answers.

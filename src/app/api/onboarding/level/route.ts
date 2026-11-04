@@ -3,9 +3,12 @@ import { requireLearner } from "@/server/auth/request";
 import { errorResponse, jsonError, jsonOk } from "@/server/http";
 import { recordChosenLevel } from "@/server/learning/onboarding/word-check";
 
-// The Level step of onboarding: the learner picks a starting CEFR level, which
-// becomes `learners.level` and is the starting point for the first Word check
-// round. It has no GET: the stored level is part of the Word check response.
+// The Level step of onboarding: the learner picks a starting level, either a
+// legacy CEFR level (A2/B1/B2/C1) or a named group (proficient, advanced,
+// intermediate, elementary, unsure). The stored `learners.level` is always the
+// canonical A2/B1/B2/C1 engine level the group maps to, and is the starting
+// point for the first Word check round. It has no GET: the stored level is
+// part of the Word check response.
 //
 // The choice is not final. Word check answers refine the level from their own
 // evidence on every POST (see estimateLevel), so the explicit choice only

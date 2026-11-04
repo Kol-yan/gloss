@@ -13,6 +13,8 @@ const NAV = [
 export function AppHeader() {
   const pathname = usePathname();
 
+  if (pathname === "/practice") return null;
+
   return (
     <header className="relative z-40 shrink-0 border-b border-line bg-paper/90 backdrop-blur">
       <div className="mx-auto flex min-h-13 w-full max-w-6xl flex-wrap items-center justify-between gap-1 px-4">

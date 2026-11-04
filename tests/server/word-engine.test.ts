@@ -13,6 +13,7 @@ import {
   seedStarterWords,
   wordEngineCounts,
 } from "@/server/learning/priority";
+import { recordPracticeReaction } from "@/server/learning/priority/engine";
 import { recordWriting } from "@/server/learning/service";
 import type { Learner } from "@/server/auth/sessions";
 import { createTempDb, insertLearner, type TempDb } from "./helpers/db";
@@ -93,6 +94,9 @@ describe("word engine migrations", () => {
         "0010_word_engine.sql",
         "0011_word_real_use.sql",
         "0012_onboarding_level.sql",
+        "0013_practice_word_progress.sql",
+        "0014_practice_exercise_pool.sql",
+        "0015_practice_sessions.sql",
       ]);
       expect(db.prepare("SELECT * FROM expressions WHERE id = 'expression'").get()).toEqual(before);
       expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
@@ -142,7 +146,13 @@ describe("word engine migrations", () => {
           VALUES ('e${index}', 'old', 'expression', 'independent_writing', '${documentId}', '${iso}')`);
       }
 
-      expect(migrate(db, source)).toEqual(["0011_word_real_use.sql", "0012_onboarding_level.sql"]);
+      expect(migrate(db, source)).toEqual([
+        "0011_word_real_use.sql",
+        "0012_onboarding_level.sql",
+        "0013_practice_word_progress.sql",
+        "0014_practice_exercise_pool.sql",
+        "0015_practice_sessions.sql",
+      ]);
       expect(pickSessionWords("old", 8, { db, now: NOW })).toEqual([]);
       expect(
         db.prepare("SELECT status, real_use_count FROM word_progress WHERE expression_id = 'expression'").get(),
@@ -279,6 +289,34 @@ describe("recordPracticeResult", () => {
     );
     expect(result.status).toBe("hidden");
     expect(pickSessionWords(learner, 8, { db: temp.db, now: NOW })).toEqual([]);
+    expect(temp.db.prepare("SELECT answers, correct_answers, productive_answers FROM word_progress WHERE expression_id = 'expr'").get())
+      .toEqual({ answers: 0, correct_answers: 0, productive_answers: 0 });
+  });
+
+  it("annotates a prior answer event without recounting it or un-hiding a late word", () => {
+    temp = createTempDb();
+    const learner = insertLearner(temp.db);
+    addExpression(temp.db, learner, "expr", "bottleneck");
+    recordPracticeResult(
+      { learnerId: learner, expressionId: "expr", rung: 4, productive: true, correct: true, usedHint: false, eventId: "prior-answer" },
+      { db: temp.db, now: NOW },
+    );
+    recordPracticeResult(
+      { learnerId: learner, expressionId: "expr", rung: 4, productive: false, correct: true, usedHint: true, reaction: "not_relevant", eventId: "hide-event" },
+      { db: temp.db, now: NOW },
+    );
+    const lateReaction = recordPracticeReaction(
+      { learnerId: learner, expressionId: "expr", eventId: "prior-answer", reaction: "too_easy", correct: true },
+      { db: temp.db, now: NOW },
+    );
+
+    expect(lateReaction.status).toBe("hidden");
+    expect(temp.db.prepare("SELECT status, answers, correct_answers, productive_answers, bland FROM word_progress WHERE expression_id = 'expr'").get())
+      .toEqual({ status: "hidden", answers: 1, correct_answers: 1, productive_answers: 1, bland: 0 });
+    expect(temp.db.prepare("SELECT reaction FROM word_practice_events WHERE id = 'prior-answer'").get())
+      .toEqual({ reaction: "too_easy" });
+    expect(temp.db.prepare("SELECT COUNT(*) AS n FROM word_practice_events WHERE learner_id = ?").get(learner))
+      .toEqual({ n: 2 });
   });
 
   it("does not accept an expression id from another learner", () => {
@@ -466,6 +504,39 @@ describe("saved expressions that match a starter entry", () => {
         { db: temp!.db, now: NOW },
       ),
     ).not.toThrow();
+  });
+
+  it("keeps a starter identity stable after a session reference exists and a saved alias appears", () => {
+    temp = createTempDb();
+    const learner = insertLearner(temp.db);
+    seedStarterWords(learner, "A2", { db: temp.db, now: NOW });
+    const starter = temp.db.prepare("SELECT expression_id, text FROM word_progress WHERE learner_id = ? LIMIT 1")
+      .get(learner) as unknown as { expression_id: string; text: string };
+    const d = temp.db;
+    temp.db.prepare(`INSERT INTO practice_sessions (id, learner_id, request_id, status, requested_size, total, created_at)
+      VALUES ('session-ref', ?, 'request-ref', 'preparing', 1, 1, ?)`)
+      .run(learner, NOW.toISOString());
+    temp.db.prepare(`INSERT INTO practice_session_items
+      (id, learner_id, session_id, ordinal, expression_id, word_text, meaning, slot, word_status,
+       start_rung, frequency, why, status)
+      VALUES ('item-ref', ?, 'session-ref', 0, ?, ?, 'A meaning.', 'learn', 'learning', 1, 'common', 'A reason.', 'pending')`)
+      .run(learner, starter.expression_id, starter.text);
+    addExpression(temp.db, learner, "saved-alias", starter.text);
+
+    // No answer event exists yet: the prepared session alone must be enough
+    // to keep the canonical identity stable when its saved alias is scored.
+    expect(() => recordPracticeResult(
+      { learnerId: learner, expressionId: "saved-alias", rung: 1, productive: false, correct: true, usedHint: false },
+      { db: d, now: NOW },
+    )).not.toThrow();
+    expect(() => recordPracticeResult(
+      { learnerId: learner, expressionId: starter.expression_id, rung: 2, productive: false, correct: true, usedHint: false },
+      { db: d, now: NOW },
+    )).not.toThrow();
+    expect(temp.db.prepare("SELECT expression_id FROM practice_session_items WHERE id = 'item-ref'").get())
+      .toEqual({ expression_id: starter.expression_id });
+    expect(temp.db.prepare("SELECT expression_id FROM word_progress WHERE learner_id = ? AND normalized = ?")
+      .get(learner, normalizeWord(starter.text))).toEqual({ expression_id: starter.expression_id });
   });
 });
 

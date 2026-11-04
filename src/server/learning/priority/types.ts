@@ -40,7 +40,12 @@ export interface PracticeResultInput {
   productive: boolean;
   correct: boolean;
   usedHint: boolean;
+  // A reaction may accompany an answer in direct engine use. Practice sessions
+  // apply later reactions through recordPracticeReaction instead.
   reaction?: Reaction;
+  // Practice sessions use the stable item id so a later reaction annotates
+  // the answer event that created that item.
+  eventId?: string;
 }
 
 export interface PracticeResult {

@@ -275,6 +275,101 @@ export type ExpressionHistory = z.infer<typeof ExpressionHistory>;
 export const ExpressionsResponse = z.object({ expressions: z.array(ExpressionHistory) });
 export type ExpressionsResponse = z.infer<typeof ExpressionsResponse>;
 
+// POST /api/practice/sessions. `requestId` makes session creation safe to retry.
+export const PracticeSessionPrepareRequest = z.object({
+  requestId: z.uuid(),
+  size: z.number().int().min(1).max(8).optional(),
+}).strict();
+export type PracticeSessionPrepareRequest = z.infer<typeof PracticeSessionPrepareRequest>;
+
+export const PracticeSessionStatus = z.enum(["preparing", "ready", "failed", "finished", "empty"]);
+export type PracticeSessionStatus = z.infer<typeof PracticeSessionStatus>;
+export const PracticeFrequencyBand = z.enum(["core", "common", "uncommon", "rare"]);
+export type PracticeFrequencyBand = z.infer<typeof PracticeFrequencyBand>;
+
+export const PracticeSessionReadiness = z.object({
+  sessionId: z.uuid(),
+  ready: z.number().int().nonnegative(),
+  total: z.number().int().nonnegative(),
+  status: PracticeSessionStatus,
+  canStart: z.boolean(),
+}).strict();
+export type PracticeSessionReadiness = z.infer<typeof PracticeSessionReadiness>;
+
+export const PracticeSessionExercise = z.object({
+  exerciseId: z.uuid(),
+  rung: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
+  sentence: z.string(),
+  prompt: z.string(),
+  options: z.array(z.string()).length(4).nullable(),
+}).strict().superRefine((exercise, context) => {
+  if ((exercise.rung === 4) !== (exercise.options === null)) {
+    context.addIssue({ code: "custom", message: "Only rung four uses typed recall." });
+  }
+});
+export type PracticeSessionExercise = z.infer<typeof PracticeSessionExercise>;
+
+export const PracticeSessionNextResponse = z.object({
+  status: z.enum(["ready", "waiting", "complete"]),
+  exercise: PracticeSessionExercise.nullable(),
+}).strict();
+export type PracticeSessionNextResponse = z.infer<typeof PracticeSessionNextResponse>;
+
+export const PracticeSessionAnswerRequest = z.object({
+  exerciseId: z.uuid(),
+  answer: z.string().max(500),
+  usedHint: z.boolean(),
+  dontKnow: z.boolean().optional(),
+}).strict();
+export type PracticeSessionAnswerRequest = z.infer<typeof PracticeSessionAnswerRequest>;
+
+export const PracticeReaction = z.enum(["already_know", "too_easy", "not_relevant", "too_hard"]);
+export type PracticeReaction = z.infer<typeof PracticeReaction>;
+
+export const PracticeSessionReactionRequest = z.object({
+  exerciseId: z.uuid(),
+  reaction: PracticeReaction,
+}).strict();
+export type PracticeSessionReactionRequest = z.infer<typeof PracticeSessionReactionRequest>;
+
+export const PracticeSessionAnswerView = z.object({
+  exerciseId: z.uuid(),
+  correct: z.boolean(),
+  word: z.string(),
+  frequency: PracticeFrequencyBand,
+  ipa: z.string().max(MAX_IPA_LENGTH).nullable(),
+  meaning: z.string(),
+  example: z.string(),
+  comesBackText: z.string(),
+  allowedReactions: z.array(PracticeReaction),
+  reaction: PracticeReaction.nullable(),
+}).strict();
+export type PracticeSessionAnswerView = z.infer<typeof PracticeSessionAnswerView>;
+
+export const PracticeSessionAnswerResponse = z.object({
+  answer: PracticeSessionAnswerView,
+}).strict();
+export type PracticeSessionAnswerResponse = z.infer<typeof PracticeSessionAnswerResponse>;
+
+export const PracticeSessionHintRequest = z.object({ exerciseId: z.uuid() }).strict();
+export type PracticeSessionHintRequest = z.infer<typeof PracticeSessionHintRequest>;
+export const PracticeSessionHintResponse = z.object({
+  exerciseId: z.uuid(),
+  hint: z.string().max(200),
+}).strict();
+export type PracticeSessionHintResponse = z.infer<typeof PracticeSessionHintResponse>;
+
+export const PracticeSessionFinishResponse = z.object({
+  sessionId: z.uuid(),
+  summary: z.string(),
+  correct: z.number().int().nonnegative(),
+  answered: z.number().int().nonnegative(),
+  total: z.number().int().nonnegative(),
+  durationSeconds: z.number().int().nonnegative(),
+  durationMinutes: z.number().int().nonnegative(),
+}).strict();
+export type PracticeSessionFinishResponse = z.infer<typeof PracticeSessionFinishResponse>;
+
 export const MAX_LEARNING_EXPRESSIONS = 30;
 export const LearningRequest = ProofreadRequest.strict();
 export type LearningRequest = z.infer<typeof LearningRequest>;
@@ -395,7 +490,84 @@ export type WordCheckAnswersResponse = z.infer<typeof WordCheckAnswersResponse>;
 
 // POST /api/onboarding/level - the starting level chosen on the Level step.
 // Validated here and again by the learners table CHECK constraint.
-export const OnboardingLevelRequest = z.object({ level: CefrLevel }).strict();
+//
+// The Level step offers named groups for learners who do not know their CEFR
+// level. Each group maps to one canonical engine level that is stored in
+// `learners.level`; the response is always that canonical A2/B1/B2/C1 level.
+// Word check answers then refine it (see estimateLevel), so the group only
+// decides the first round.
+export const OnboardingLevelGroup = z.enum(["proficient", "advanced", "intermediate", "elementary", "unsure"]);
+export type OnboardingLevelGroup = z.infer<typeof OnboardingLevelGroup>;
+
+export interface OnboardingLevelGroupDefinition {
+  group: OnboardingLevelGroup;
+  // Learner-facing option label.
+  label: string;
+  // Learner-facing range badge (for example "B2–C1").
+  rangeLabel: string;
+  // Learner-facing level badge (for example "C2" for proficient).
+  displayLevel: string;
+  // Canonical level stored in `learners.level` and used by Word check.
+  engineLevel: CefrLevel;
+}
+
+export const ONBOARDING_LEVEL_GROUPS: Record<OnboardingLevelGroup, OnboardingLevelGroupDefinition> = {
+  proficient: {
+    group: "proficient",
+    label: "Proficient or native",
+    rangeLabel: "C2",
+    displayLevel: "C2",
+    engineLevel: "C1",
+  },
+  advanced: {
+    group: "advanced",
+    label: "Advanced",
+    rangeLabel: "B2–C1",
+    displayLevel: "B2–C1",
+    engineLevel: "B2",
+  },
+  intermediate: {
+    group: "intermediate",
+    label: "Intermediate",
+    rangeLabel: "B1",
+    displayLevel: "B1",
+    engineLevel: "B1",
+  },
+  elementary: {
+    group: "elementary",
+    label: "Elementary",
+    rangeLabel: "A1–A2",
+    displayLevel: "A1–A2",
+    engineLevel: "A2",
+  },
+  unsure: {
+    group: "unsure",
+    label: "Not sure yet",
+    rangeLabel: "Unsure",
+    displayLevel: "B1",
+    engineLevel: "B1",
+  },
+};
+
+export const ONBOARDING_LEVEL_GROUP_LIST: OnboardingLevelGroupDefinition[] = [
+  ONBOARDING_LEVEL_GROUPS.proficient,
+  ONBOARDING_LEVEL_GROUPS.advanced,
+  ONBOARDING_LEVEL_GROUPS.intermediate,
+  ONBOARDING_LEVEL_GROUPS.elementary,
+  ONBOARDING_LEVEL_GROUPS.unsure,
+];
+
+// What the Level step accepts: a legacy CEFR level or a named group.
+export const OnboardingLevelInput = z.union([CefrLevel, OnboardingLevelGroup]);
+export type OnboardingLevelInput = z.infer<typeof OnboardingLevelInput>;
+
+export function resolveOnboardingEngineLevel(input: OnboardingLevelInput): CefrLevel {
+  const parsed = OnboardingLevelGroup.safeParse(input);
+  if (parsed.success) return ONBOARDING_LEVEL_GROUPS[parsed.data].engineLevel;
+  return CefrLevel.parse(input);
+}
+
+export const OnboardingLevelRequest = z.object({ level: OnboardingLevelInput }).strict();
 export type OnboardingLevelRequest = z.infer<typeof OnboardingLevelRequest>;
 
 // ---------------------------------------------------------------------------

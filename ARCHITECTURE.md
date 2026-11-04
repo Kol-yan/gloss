@@ -382,6 +382,22 @@ Word check answer that decides whether a word is brand new.
 level estimate, plus `word_progress.level` (the starter level a word was served
 at) and the `word_check_entries` table of rounds described below.
 
+Practice sessions use the same engine through `src/server/practice/word-source.ts`.
+There is one status and schedule per word, in `word_progress`; the compatibility
+table in `0013_practice_word_progress.sql` is unused by the application.
+`0014_practice_exercise_pool.sql` and `0015_practice_sessions.sql` reference the
+engine's learner-owned word identities, so starter and Word check words do not
+need synthetic saved expressions. Their definitions come from the curated set;
+IPA remains unavailable when there is no saved pronunciation data. Engine word
+IDs stay stable when a saved expression with the same normalized text arrives.
+
+Session creation checks its request ID before selecting words, in the same
+transaction that reserves the day's new-word places. Answers update the engine
+and the session item atomically. A later reaction annotates that answer event
+without adding another answer or productive credit. The current exercise pool
+serves rungs 1-4; words at engine rungs 5-6 receive rung-4 recall, and the event
+records the exercise actually served.
+
 ## Onboarding: level and Word check
 
 Onboarding has a Welcome step, a Level step, Word check, the Word check result,
@@ -392,7 +408,15 @@ comes from Word check answers and the learner's own writing and saved words.
 the single stored level. Two writers feed it, and the rule is:
 
 1. **The Level step sets the starting point.** `POST /api/onboarding/level`
-   accepts `{ level }` with one of A2-C1 and writes `learners.level`. The first
+   accepts `{ level }` with a legacy `A2`/`B1`/`B2`/`C1` level or a named
+   group (`proficient`, `advanced`, `intermediate`, `elementary`, `unsure`)
+   and writes the canonical `learners.level`. The groups map to engine
+   levels `C1`, `B2`, `B1`, `A2` and `B1` respectively (`proficient` shows
+   `C2` as `Proficient or native`, `advanced` covers `B2–C1`,
+   `intermediate` is `B1`, `elementary` covers `A1–A2`); the typed
+   definitions, labels, ranges and mapping live in `src/shared/contracts.ts`
+   (`ONBOARDING_LEVEL_GROUPS`) for later UI consumers. The response is
+   always the canonical `A2`/`B1`/`B2`/`C1` level. The first
    Word check round is built around that choice. It has no GET: the stored
    level travels in the Word check response.
 2. **Word check answers refine it.** Every `POST /api/onboarding/word-check`

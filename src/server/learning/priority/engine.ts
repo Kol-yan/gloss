@@ -8,12 +8,13 @@
 // starter entry whose text matches it joins that row.
 
 import type { DatabaseSync } from "node:sqlite";
-import { getDb } from "../../db";
+import { getDb, immediate } from "../../db";
+import { ConflictError, NotFoundError } from "../../errors";
 import { newId } from "../../ids";
 import { starterSet } from "../starter";
 import type { StarterEntry } from "../starter/entries";
 import { entryRung, estimateBand, normalizeWord, wordCheckOutcome, type WordCheckAnswer } from "./intake";
-import { recordAnswer, applyRealUse, productiveAfterAnswer } from "./rules";
+import { recordAnswer, applyRealUse, productiveAfterAnswer, applyReaction, comebackAfter } from "./rules";
 import { isBrandNew, pickWords } from "./scheduler";
 import {
   DEFAULT_RUNG,
@@ -254,30 +255,32 @@ function readAccuracy(db: DatabaseSync, learnerId: string): number | null {
 // The session for this learner. Deterministic for a given database state and
 // clock.
 export function pickSessionWords(learnerId: string, size: number = 8, deps: { db?: DatabaseSync; now?: Date } = {}): SessionWord[] {
+  if (!learnerId) throw new TypeError("A learner id is required");
   const db = deps.db ?? getDb();
   const now = deps.now ?? new Date();
-  materializeSavedWords(db, learnerId, now);
-  const words = syncRealUse(db, learnerId, readWords(db, learnerId), now);
-  const today = now.toISOString().slice(0, 10);
-  const picked = pickWords({
-    words,
-    brandNewToday: words.filter((word) => word.introducedOn === today).length,
-    accuracy: readAccuracy(db, learnerId),
-    now,
-    size,
-  });
-  // A brand-new word takes one of the day's places when it is first shown, so
-  // a second session on the same day sees the places used. Only words with no
-  // answer yet are brand-new; a word the learner already worked on is not.
-  const brandNew = new Set(words.filter(isBrandNew).map((word) => word.expressionId));
-  const mark = db.prepare(
-    `UPDATE word_progress SET introduced_on = ?
-     WHERE learner_id = ? AND expression_id = ? AND introduced_on IS NULL`,
-  );
-  for (const word of picked) {
-    if (word.slot === "learn" && brandNew.has(word.expressionId)) mark.run(today, learnerId, word.expressionId);
-  }
-  return picked;
+  const limit = Math.max(1, Math.min(8, Number.isFinite(size) ? Math.trunc(size) : 8));
+  return immediate((tx) => {
+    materializeSavedWords(tx, learnerId, now);
+    const words = syncRealUse(tx, learnerId, readWords(tx, learnerId), now);
+    const today = now.toISOString().slice(0, 10);
+    const picked = pickWords({
+      words,
+      brandNewToday: words.filter((word) => word.introducedOn === today).length,
+      accuracy: readAccuracy(tx, learnerId),
+      now,
+      size: limit,
+    });
+    // Reserve brand-new daily places atomically with the session selection.
+    const brandNew = new Set(words.filter(isBrandNew).map((word) => word.expressionId));
+    const mark = tx.prepare(
+      `UPDATE word_progress SET introduced_on = ?
+       WHERE learner_id = ? AND expression_id = ? AND introduced_on IS NULL`,
+    );
+    for (const word of picked) {
+      if (word.slot === "learn" && brandNew.has(word.expressionId)) mark.run(today, learnerId, word.expressionId);
+    }
+    return picked;
+  }, db);
 }
 
 function findWord(
@@ -295,7 +298,7 @@ function findWord(
   const saved = db
     .prepare("SELECT id, text, familiarity FROM expressions WHERE learner_id = ? AND id = ?")
     .get(learnerId, expressionId) as unknown as { id: string; text: string; familiarity: string } | undefined;
-  if (!saved) throw new Error("Unknown word");
+  if (!saved) throw new NotFoundError();
   const normalized = normalizeWord(saved.text);
   // A saved expression and a starter entry with the same text are one word.
   // Reuse the existing row instead of inserting a second row for the same
@@ -304,22 +307,8 @@ function findWord(
     .prepare("SELECT * FROM word_progress WHERE learner_id = ? AND normalized = ?")
     .get(learnerId, normalized) as unknown as WordRow | undefined;
   if (existing) {
-    const events = db
-      .prepare("SELECT COUNT(*) AS n FROM word_practice_events WHERE learner_id = ? AND expression_id = ?")
-      .get(learnerId, existing.expression_id) as unknown as { n: number };
-    // Before the first answer the row can adopt the saved expression id, so
-    // later answers find it directly. Its band, status and source stay as the
-    // starter row set them.
-    if (events.n === 0) {
-      db.prepare(
-        "UPDATE word_progress SET expression_id = ?, updated_at = ? WHERE learner_id = ? AND expression_id = ?",
-      ).run(expressionId, now.toISOString(), learnerId, existing.expression_id);
-      const adopted = db
-        .prepare("SELECT * FROM word_progress WHERE learner_id = ? AND expression_id = ?")
-        .get(learnerId, expressionId) as unknown as WordRow;
-      return syncRealUse(db, learnerId, [toStored(adopted)], now)[0];
-    }
-    // The row already has answers; keep them on their own expression id.
+    // Engine-issued identities stay stable even when a saved expression with
+    // the same text appears later. Aliases resolve through normalized text.
     return syncRealUse(db, learnerId, [toStored(existing)], now)[0];
   }
   const status: WordStatus = saved.familiarity === "known_unused" ? "ready" : "learning";
@@ -347,27 +336,84 @@ export function recordPracticeResult(
 ): PracticeResult {
   const db = deps.db ?? getDb();
   const now = deps.now ?? new Date();
-  const word = findWord(db, input.learnerId, input.expressionId, now);
-  const errorsAfter = input.correct ? 0 : word.consecutiveErrors + 1;
-
-  if (input.reaction === "not_relevant") {
+  const eventId = input.eventId ?? newId();
+  return immediate((tx) => {
+    const word = findWord(tx, input.learnerId, input.expressionId, now);
+    const errorsAfter = input.correct ? 0 : word.consecutiveErrors + 1;
     const result = recordAnswer(input, word, now, errorsAfter);
-    persist(db, word, result, input, now, { answers: word.answers, correct: word.correctAnswers, errors: 0, productive: word.productiveAnswers, bland: word.bland, realUse: word.realUseCount });
+    if (input.reaction === "not_relevant") {
+      persist(tx, word, result, input, now, {
+        answers: word.answers,
+        correct: word.correctAnswers,
+        errors: 0,
+        productive: word.productiveAnswers,
+        bland: word.bland,
+        realUse: word.realUseCount,
+      }, eventId);
+      return result;
+    }
+    const steppedDown = errorsAfter >= 2 && !input.correct;
+    const productiveAnswers = productiveAfterAnswer(word, input, errorsAfter);
+    persist(tx, word, result, input, now, {
+      answers: word.answers + 1,
+      correct: word.correctAnswers + (input.correct ? 1 : 0),
+      errors: steppedDown || input.correct ? 0 : errorsAfter,
+      productive: productiveAnswers,
+      bland: word.bland + (input.reaction === "too_easy" ? 1 : 0),
+      realUse: word.realUseCount,
+    }, eventId);
     return result;
-  }
+  }, db);
+}
 
-  const result = recordAnswer(input, word, now, errorsAfter);
-  const steppedDown = errorsAfter >= 2 && !input.correct;
-  const productiveAnswers = productiveAfterAnswer(word, input, errorsAfter);
-  persist(db, word, result, input, now, {
-    answers: word.answers + 1,
-    correct: word.correctAnswers + (input.correct ? 1 : 0),
-    errors: steppedDown || input.correct ? 0 : errorsAfter,
-    productive: productiveAnswers,
-    bland: word.bland + (input.reaction === "too_easy" ? 1 : 0),
-    realUse: word.realUseCount,
-  });
-  return result;
+// A reaction annotates the already-recorded answer event and adjusts its
+// schedule. It never replays the answer or changes answer counters.
+export function recordPracticeReaction(
+  input: {
+    learnerId: string;
+    expressionId: string;
+    eventId: string;
+    reaction: import("./types").Reaction;
+    correct: boolean;
+  },
+  deps: { db?: DatabaseSync; now?: Date } = {},
+): PracticeResult {
+  const db = deps.db ?? getDb();
+  const now = deps.now ?? new Date();
+  return immediate((tx) => {
+    const word = findWord(tx, input.learnerId, input.expressionId, now);
+    // Another session may have hidden the word since this answer was served.
+    // A late reaction annotates its event but cannot bring the word back.
+    const outcome = word.status === "hidden"
+      ? { status: "hidden" as WordStatus, rung: word.rung }
+      : applyReaction(word, input.reaction);
+    const comesBackAt = comebackAfter(word, {
+      expressionId: input.expressionId,
+      rung: word.rung,
+      productive: false,
+      correct: input.correct,
+      usedHint: true,
+      reaction: input.reaction,
+    }, outcome, now);
+    const updatedEvent = tx.prepare(
+      `UPDATE word_practice_events SET reaction = ?
+       WHERE id = ? AND learner_id = ? AND expression_id = ? AND reaction IS NULL`,
+    ).run(input.reaction, input.eventId, input.learnerId, word.expressionId);
+    if (Number(updatedEvent.changes) !== 1) throw new ConflictError();
+    tx.prepare(
+      `UPDATE word_progress SET status = ?, rung = ?, bland = ?, next_at = ?, updated_at = ?
+       WHERE learner_id = ? AND expression_id = ?`,
+    ).run(
+      outcome.status,
+      outcome.rung,
+      word.bland + (word.status !== "hidden" && input.reaction === "too_easy" ? 1 : 0),
+      comesBackAt,
+      now.toISOString(),
+      input.learnerId,
+      word.expressionId,
+    );
+    return { status: outcome.status, nextRung: outcome.rung, comesBackAt };
+  }, db);
 }
 
 interface Counters {
@@ -386,51 +432,43 @@ function persist(
   input: PracticeResultInput,
   now: Date,
   counters: Counters,
+  eventId: string,
 ): void {
-  // The step down for good is recorded inside one transaction: the event and
-  // the counters can never disagree.
-  db.exec("BEGIN IMMEDIATE");
-  try {
-    db.prepare(
-      `UPDATE word_progress SET
-         status = ?, rung = ?, productive_answers = ?, consecutive_errors = ?,
-         answers = ?, correct_answers = ?, bland = ?, last_practiced_at = ?,
-         next_at = ?, updated_at = ?
-       WHERE learner_id = ? AND expression_id = ?`,
-    ).run(
-      result.status,
-      result.nextRung,
-      counters.productive,
-      counters.errors,
-      counters.answers,
-      counters.correct,
-      counters.bland,
-      now.toISOString(),
-      result.comesBackAt,
-      now.toISOString(),
-      word.learnerId,
-      word.expressionId,
-    );
-    db.prepare(
-      `INSERT INTO word_practice_events
-         (id, learner_id, expression_id, rung, productive, correct, used_hint, reaction, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-      newId(),
-      word.learnerId,
-      word.expressionId,
-      Math.min(6, Math.max(1, Math.round(input.rung))) || DEFAULT_RUNG,
-      input.productive ? 1 : 0,
-      input.correct ? 1 : 0,
-      input.usedHint ? 1 : 0,
-      input.reaction ?? null,
-      now.toISOString(),
-    );
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
+  db.prepare(
+    `UPDATE word_progress SET
+       status = ?, rung = ?, productive_answers = ?, consecutive_errors = ?,
+       answers = ?, correct_answers = ?, bland = ?, last_practiced_at = ?,
+       next_at = ?, updated_at = ?
+     WHERE learner_id = ? AND expression_id = ?`,
+  ).run(
+    result.status,
+    result.nextRung,
+    counters.productive,
+    counters.errors,
+    counters.answers,
+    counters.correct,
+    counters.bland,
+    now.toISOString(),
+    result.comesBackAt,
+    now.toISOString(),
+    word.learnerId,
+    word.expressionId,
+  );
+  db.prepare(
+    `INSERT INTO word_practice_events
+       (id, learner_id, expression_id, rung, productive, correct, used_hint, reaction, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    eventId,
+    word.learnerId,
+    word.expressionId,
+    Math.min(6, Math.max(1, Math.round(input.rung))) || DEFAULT_RUNG,
+    input.productive ? 1 : 0,
+    input.correct ? 1 : 0,
+    input.usedHint ? 1 : 0,
+    input.reaction ?? null,
+    now.toISOString(),
+  );
 }
 
 // Real use from the learner's own writing ("Used on your own in real writing").

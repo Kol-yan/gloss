@@ -1,7 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
-import { ApiError, CefrLevel, WordCheckResponse } from "@/shared/contracts";
+import {
+  ApiError,
+  CefrLevel,
+  ONBOARDING_LEVEL_GROUPS,
+  ONBOARDING_LEVEL_GROUP_LIST,
+  OnboardingLevelGroup,
+  OnboardingLevelRequest,
+  WordCheckResponse,
+  resolveOnboardingEngineLevel,
+} from "@/shared/contracts";
 import { POST as postLevel } from "@/app/api/onboarding/level/route";
-import { GET as getWordCheck } from "@/app/api/onboarding/word-check/route";
+import { GET as getWordCheck, POST as postWordCheck } from "@/app/api/onboarding/word-check/route";
 import { db, installApp, login, postJson, session } from "./helpers/app";
 
 vi.mock("next/headers", async () => (await import("./helpers/app")).nextHeadersMock);
@@ -100,5 +109,134 @@ describe("POST /api/onboarding/level", () => {
     const raw = await postLevel(new Request(ROUTE, { method: "POST", body: "{not json" }));
     await expectApiError(raw, 400, "invalid_request");
     expect(storedLevel(learner.id)).toBeNull();
+  });
+
+  it("accepts every legacy CEFR level and returns it unchanged", async () => {
+    for (const level of ["A2", "B1", "B2", "C1"] as const) {
+      const learner = newLearner();
+      asLearner(learner);
+      const response = await postJson(postLevel, { level });
+      expect(response.status).toBe(200);
+      expect(CefrLevel.parse(await response.json())).toBe(level);
+      expect(storedLevel(learner.id)).toBe(level);
+    }
+  });
+});
+
+describe("onboarding level groups", () => {
+  it("exports typed group definitions with labels, ranges and engine mapping", () => {
+    expect(ONBOARDING_LEVEL_GROUPS.proficient).toMatchObject({
+      label: "Proficient or native",
+      displayLevel: "C2",
+      engineLevel: "C1",
+    });
+    expect(ONBOARDING_LEVEL_GROUPS.advanced.engineLevel).toBe("B2");
+    expect(ONBOARDING_LEVEL_GROUPS.advanced.rangeLabel).toContain("B2");
+    expect(ONBOARDING_LEVEL_GROUPS.intermediate.engineLevel).toBe("B1");
+    expect(ONBOARDING_LEVEL_GROUPS.elementary.engineLevel).toBe("A2");
+    expect(ONBOARDING_LEVEL_GROUPS.elementary.rangeLabel).toContain("A1");
+    expect(ONBOARDING_LEVEL_GROUPS.unsure.engineLevel).toBe("B1");
+    for (const definition of ONBOARDING_LEVEL_GROUP_LIST) {
+      expect(OnboardingLevelGroup.parse(definition.group)).toBe(definition.group);
+      expect(CefrLevel.parse(definition.engineLevel)).toBe(definition.engineLevel);
+      expect(definition.label.length).toBeGreaterThan(0);
+      expect(definition.rangeLabel.length).toBeGreaterThan(0);
+      expect(definition.displayLevel.length).toBeGreaterThan(0);
+    }
+    expect(resolveOnboardingEngineLevel("proficient")).toBe("C1");
+    expect(resolveOnboardingEngineLevel("advanced")).toBe("B2");
+    expect(resolveOnboardingEngineLevel("intermediate")).toBe("B1");
+    expect(resolveOnboardingEngineLevel("elementary")).toBe("A2");
+    expect(resolveOnboardingEngineLevel("unsure")).toBe("B1");
+    expect(resolveOnboardingEngineLevel("B2")).toBe("B2");
+    expect(OnboardingLevelRequest.parse({ level: "advanced" })).toEqual({ level: "advanced" });
+    expect(OnboardingLevelRequest.parse({ level: "B1" })).toEqual({ level: "B1" });
+  });
+
+  it("stores the mapped canonical level for every group and returns it", async () => {
+    const expected: Record<string, string> = {
+      proficient: "C1",
+      advanced: "B2",
+      intermediate: "B1",
+      elementary: "A2",
+      unsure: "B1",
+    };
+    for (const [group, canonical] of Object.entries(expected)) {
+      const learner = newLearner();
+      asLearner(learner);
+      const response = await postJson(postLevel, { level: group });
+      expect(response.status).toBe(200);
+      expect(CefrLevel.parse(await response.json())).toBe(canonical);
+      expect(storedLevel(learner.id)).toBe(canonical);
+    }
+  });
+
+  it("keeps group choices isolated between learners", async () => {
+    const first = newLearner();
+    const second = newLearner();
+    asLearner(first);
+    expect((await postJson(postLevel, { level: "proficient" })).status).toBe(200);
+    asLearner(second);
+    expect((await postJson(postLevel, { level: "elementary" })).status).toBe(200);
+    expect(storedLevel(first.id)).toBe("C1");
+    expect(storedLevel(second.id)).toBe("A2");
+    expect(await (await postJson(postLevel, { level: "advanced" })).json()).toBe("B2");
+    expect(storedLevel(first.id)).toBe("C1");
+  });
+
+  it("rejects unknown groups without writing", async () => {
+    const learner = newLearner();
+    asLearner(learner);
+    for (const body of [
+      { level: "expert" },
+      { level: "Proficient" },
+      { level: "native" },
+      { level: "c2" },
+      { level: "" },
+      { level: null },
+      { level: "B2 ", },
+      { level: "unsure", extra: 1 },
+    ]) {
+      await expectApiError(await postJson(postLevel, body), 400, "invalid_request");
+    }
+    expect(storedLevel(learner.id)).toBeNull();
+  });
+
+  it("drives the Word check round from the mapped level", async () => {
+    const learner = newLearner();
+    asLearner(learner);
+    expect((await postJson(postLevel, { level: "elementary" })).status).toBe(200);
+    const round = await fetchRound(learner);
+    expect(round.level).toBe("A2");
+    expect(round.entries.filter((entry) => entry.level === "A2")).toHaveLength(16);
+    expect(round.entries.filter((entry) => entry.level === "B1")).toHaveLength(8);
+
+    const top = newLearner();
+    asLearner(top);
+    expect((await postJson(postLevel, { level: "proficient" })).status).toBe(200);
+    const high = await fetchRound(top);
+    expect(high.level).toBe("C1");
+    expect(high.entries.filter((entry) => entry.level === "C1")).toHaveLength(16);
+  });
+
+  it("refines the chosen canonical level once Word check answers exist", async () => {
+    const learner = newLearner();
+    asLearner(learner);
+    expect((await postJson(postLevel, { level: "proficient" })).status).toBe(200);
+    expect(storedLevel(learner.id)).toBe("C1");
+    const round = await fetchRound(learner);
+    expect(round.level).toBe("C1");
+    const answers = round.entries.map((entry) => ({ id: entry.id, answer: "new" as const }));
+    asLearner(learner);
+    const result = await postWordCheck(
+      new Request("http://localhost/api/onboarding/word-check", {
+        method: "POST",
+        body: JSON.stringify({ answers }),
+      }),
+    );
+    expect(result.status).toBe(200);
+    const body = (await result.json()) as { level: string };
+    expect(body.level).toBe("A2");
+    expect(storedLevel(learner.id)).toBe("A2");
   });
 });

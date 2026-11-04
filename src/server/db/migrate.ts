@@ -9,6 +9,28 @@ export function defaultMigrationsDir(): string {
   return path.resolve(/*turbopackIgnore: true*/ process.cwd(), "db/migrations");
 }
 
+// Numeric prefixes must be unique and strictly increasing in sorted name
+// order, so two branches adding the same number (for example two 0010 files)
+// fail loudly instead of applying in an accidental order.
+export function validateMigrationFiles(files: string[]): void {
+  const seen = new Map<number, string>();
+  let last = -1;
+  for (const file of files) {
+    const match = /^(\d+)_.*\.sql$/.exec(file);
+    if (!match) throw new Error(`Invalid migration file name: ${file}`);
+    const prefix = Number.parseInt(match[1], 10);
+    const previous = seen.get(prefix);
+    if (previous !== undefined) {
+      throw new Error(`Duplicate migration prefix ${match[1]}: ${previous} and ${file}`);
+    }
+    if (prefix <= last) {
+      throw new Error(`Migrations out of order: ${file} follows prefix ${last}`);
+    }
+    seen.set(prefix, file);
+    last = prefix;
+  }
+}
+
 // Applies db/migrations/*.sql in name order, each file in its own transaction,
 // and records it in schema_migrations. Returns the names applied by this call.
 export function migrate(db: DatabaseSync, dir: string = defaultMigrationsDir()): string[] {
@@ -22,6 +44,7 @@ export function migrate(db: DatabaseSync, dir: string = defaultMigrationsDir()):
   const files = readdirSync(/*turbopackIgnore: true*/ dir)
     .filter((file) => file.endsWith(".sql"))
     .sort();
+  validateMigrationFiles(files);
 
   const applied: string[] = [];
   for (const file of files) {

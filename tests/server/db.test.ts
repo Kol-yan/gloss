@@ -41,6 +41,12 @@ describe("openDatabase", () => {
         "learners",
         "practice_task_requests",
         "practice_tasks",
+        "practice_word_progress",
+        "practice_exercise_pool",
+        "practice_exercise_history",
+        "practice_exercise_generation_leases",
+        "practice_sessions",
+        "practice_session_items",
         "schema_migrations",
         "sessions",
         "settings",
@@ -68,6 +74,9 @@ describe("openDatabase", () => {
       "0010_word_engine.sql",
       "0011_word_real_use.sql",
       "0012_onboarding_level.sql",
+      "0013_practice_word_progress.sql",
+      "0014_practice_exercise_pool.sql",
+      "0015_practice_sessions.sql",
     ]);
     const again = openDatabase(temp.path);
     expect(migrate(again)).toEqual([]);
@@ -105,10 +114,16 @@ describe("openDatabase", () => {
         INSERT INTO evidence_events (id, learner_id, expression_id, kind, hint_used, transcript_edited, created_at)
           VALUES ('old', 'writer', 'expression', 'assisted_use', 1, 1, '2026-11-03');`);
       const before = db.prepare("SELECT * FROM evidence_events WHERE id = 'old'").get();
-      // The engine tables arrive after the writing-evidence upgrade.
-      const applied = migrate(db, source);
-      expect(applied).toContain("0009_writing_evidence.sql");
-      expect(applied).toContain("0010_word_engine.sql");
+      // The engine and practice tables arrive after the writing-evidence upgrade.
+      expect(migrate(db, source)).toEqual([
+        "0009_writing_evidence.sql",
+        "0010_word_engine.sql",
+        "0011_word_real_use.sql",
+        "0012_onboarding_level.sql",
+        "0013_practice_word_progress.sql",
+        "0014_practice_exercise_pool.sql",
+        "0015_practice_sessions.sql",
+      ]);
       expect(db.prepare("SELECT * FROM evidence_events WHERE id = 'old'").get()).toEqual({ ...before, document_id: null });
       db.exec(`INSERT INTO evidence_events (id, learner_id, expression_id, kind, document_id, created_at)
         VALUES ('independent', 'writer', 'expression', 'independent_writing', 'document', '2026-11-03')`);
@@ -171,8 +186,11 @@ describe("openDatabase", () => {
         "0008_sentence_detection.sql",
         "0009_writing_evidence.sql",
         "0010_word_engine.sql",
-      "0011_word_real_use.sql",
-      "0012_onboarding_level.sql",
+        "0011_word_real_use.sql",
+        "0012_onboarding_level.sql",
+        "0013_practice_word_progress.sql",
+        "0014_practice_exercise_pool.sql",
+        "0015_practice_sessions.sql",
       ]);
 
       const row = db.prepare("SELECT * FROM check_runs WHERE id = 'run-old'").get() as Record<string, unknown>;
@@ -260,8 +278,11 @@ describe("openDatabase", () => {
         "0008_sentence_detection.sql",
         "0009_writing_evidence.sql",
         "0010_word_engine.sql",
-      "0011_word_real_use.sql",
-      "0012_onboarding_level.sql",
+        "0011_word_real_use.sql",
+        "0012_onboarding_level.sql",
+        "0013_practice_word_progress.sql",
+        "0014_practice_exercise_pool.sql",
+        "0015_practice_sessions.sql",
       ]);
       const row = db.prepare("SELECT * FROM check_runs WHERE id = 'pre-routing-run'").get() as Record<string, unknown>;
       expect(row).toMatchObject({
@@ -303,6 +324,39 @@ describe("migrate", () => {
         { name: "0001_a.sql" },
         { name: "0002_b.sql" },
       ]);
+    } finally {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects duplicate numeric prefixes before applying anything", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "glossy-mig-dup-"));
+    const migrations = path.join(dir, "m");
+    mkdirSync(migrations);
+    writeFileSync(path.join(migrations, "0010_a.sql"), "CREATE TABLE a (id INTEGER);");
+    writeFileSync(path.join(migrations, "0010_b.sql"), "CREATE TABLE b (id INTEGER);");
+    const db = new DatabaseSync(":memory:");
+    try {
+      expect(() => migrate(db, migrations)).toThrow(/Duplicate migration prefix 0010/);
+      expect(tableNames(db)).toEqual(["schema_migrations"]);
+      expect(db.prepare("SELECT name FROM schema_migrations").all()).toEqual([]);
+    } finally {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects migrations whose numeric order differs from sorted name order", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "glossy-mig-order-"));
+    const migrations = path.join(dir, "m");
+    mkdirSync(migrations);
+    // Sorted by name "10_..." comes before "9_...", but numerically it is later.
+    writeFileSync(path.join(migrations, "10_b.sql"), "CREATE TABLE b (id INTEGER);");
+    writeFileSync(path.join(migrations, "9_a.sql"), "CREATE TABLE a (id INTEGER);");
+    const db = new DatabaseSync(":memory:");
+    try {
+      expect(() => migrate(db, migrations)).toThrow(/out of order/);
     } finally {
       db.close();
       rmSync(dir, { recursive: true, force: true });

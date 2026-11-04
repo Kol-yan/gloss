@@ -49,6 +49,9 @@ describe("GET /api/health", () => {
       "0010_word_engine.sql",
       "0011_word_real_use.sql",
       "0012_onboarding_level.sql",
+      "0013_practice_word_progress.sql",
+      "0014_practice_exercise_pool.sql",
+      "0015_practice_sessions.sql",
     ]);
   });
 

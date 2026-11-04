@@ -63,7 +63,12 @@ describe("Word check migrations", () => {
         "INSERT INTO word_progress (expression_id, learner_id, text, normalized, source, status, band, created_at, updated_at) VALUES ('w1', ?, 'bottleneck', 'bottleneck', 'saved', 'ready', 'uncommon', ?, ?)",
       ).run(learner, iso, iso);
 
-      expect(migrate(db, source)).toEqual(["0012_onboarding_level.sql"]);
+      expect(migrate(db, source)).toEqual([
+        "0012_onboarding_level.sql",
+        "0013_practice_word_progress.sql",
+        "0014_practice_exercise_pool.sql",
+        "0015_practice_sessions.sql",
+      ]);
       expect(db.prepare("SELECT level FROM learners WHERE id = ?").get(learner)).toEqual({ level: null });
       expect(
         db.prepare("SELECT status, level, word_check_entry FROM word_progress WHERE expression_id = 'w1'").get(),
