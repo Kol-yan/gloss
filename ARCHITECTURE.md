@@ -209,6 +209,120 @@ The detector and proofreading prompt never receive the saved list. Opening an
 unchanged text reuses the in-memory Learning result, including an empty answer;
 editing while a request is pending cannot attach its answer to the wrong text.
 
+## Starter set and frequency bands
+
+The app ships a curated starter set of about 400 English entries: single words
+and common expressions, each with a frequency band, a CEFR level (A2 to C1), a
+definition of at most 12 words, one example sentence and up to three light topic
+tags. The entries live in `src/server/learning/starter/` as original hand-written
+data in four batches of 100. They are not taken from any published vocabulary
+list, and the definitions and examples are our own wording. The dataset is
+validated and ready; delivering the starter entries to a new learner depends on
+the later integration task and no production caller serves them yet.
+
+`loadStarterSet` (`src/server/learning/starter/schema.ts`) validates the set when
+it is first used: required fields, accepted bands, levels and tags, printable
+ASCII, a definition of 2 to 12 words that does not repeat the entry, an example
+sentence that contains the entry (base or inflected form), at most one entry per
+expression, and no two entries with the same stem. A broken edit fails the tests
+and the first request rather than reaching a learner.
+
+**Frequency source and licence.** We checked the licence of every candidate
+frequency list before writing data. None of the lists that carry real word
+frequencies is clean enough to embed here:
+
+| Candidate | Licence of the data | Result |
+| --- | --- | --- |
+| wordfreq (rspeer) | Code Apache-2.0, data CC BY-SA 4.0; data frozen since 2021 | Share-alike; would need a separate CC BY-SA data file |
+| hermitdave/FrequencyWords | CC BY-SA 4.0 | Share-alike |
+| SUBTLEX-US (Brysbaert & New) | CC BY-NC-SA 4.0 on the author's OSF page | Non-commercial and share-alike |
+| google-10000-english | Not an open licence; LDC terms, commercial use discouraged | Not clean |
+| Google Books Ngram exports | CC BY 3.0 | Clean, but needs building a table from very large exports |
+| Linguabase | CC0 1.0 | Clean, but ranks familiarity, not corpus frequency |
+
+CC BY-SA 4.0 is a one-way compatible licence for GPLv3 only, so a derived band
+table could not be relicensed under this repository's AGPL-3.0-only terms and
+would have to stay a separate share-alike file. The cheapest route to clean data
+(Google Ngram exports) needs processing of multi-gigabyte files, and Linguabase
+measures how familiar a word feels rather than how often it is written. We
+therefore do not embed any third-party list and no data file carries a
+third-party licence; `THIRD_PARTY_NOTICES.md` is unchanged.
+
+**How a band is assigned (curated).** Each entry is placed by hand into one
+band, using the following definition, applied in order:
+
+- `core` - function-like words and phrases met dozens of times a day in any
+  writing, including beginner material ("on time", "right now", "decide").
+- `common` - everyday vocabulary that a B1 learner meets most days, in general
+  or workplace writing ("suggest", "temporary", "make a decision").
+- `uncommon` - vocabulary that a B2 learner meets regularly but not daily, and
+  mostly in one register ("negotiate", "reluctant", "keep track of").
+- `rare` - lower-frequency but realistic words and idioms that a C1 learner
+  meets in careful writing or speech ("meticulous", "inevitable", "cut corners").
+
+Because the bands are curated, they are an editorial approximation of frequency,
+not a measured Zipf value. They are consistent within the starter set and are
+used only to order and explain words, never shown to the learner as a score. A
+licensed frequency list could later replace the curated table behind the same
+loader and band names.
+
+**Estimating a band for added words (provisional, not implemented yet).** A word
+that arrives later from the learner (My words), from Word check or from a model
+has no curated band. The later integration task is expected to derive one with
+the estimate below and store it with the word. Nothing in this task or in the
+current code base implements that estimate: there is no inline closed list, no
+runtime estimator, no database column and no migration for it, and the starter
+loader (`src/server/learning/starter/`) only checks bands that are already
+written in the data. The estimate uses no corpus and no network call, needs no
+data file and no third-party licence, and is provisional: it is a rough order of
+magnitude, never shown to the learner as a score, and the owner can override any
+band with a curated value.
+
+The rule is a single pass with no ambiguity. Define the input as the normalized
+text (lower case, trimmed, inner whitespace collapsed to one space), an optional
+set of tags drawn from the starter tag set (`work`, `time`, `people`,
+`communication`, `money`, `travel`, `study`, `technology`, `daily`, `emotion`),
+and the length `n` = number of ASCII letters in the normalized text. An input
+with no tags is estimated as if it had the empty tag set. Apply exactly one of
+the following cases, in this order, and stop at the first that matches:
+
+1. The normalized text equals one item of the enumerated single-word list below
+   (27 items, ASCII, lower case, compared after normalization). Result: `core`.
+2. The normalized text equals one item of the enumerated expression list below
+   (20 items, compared after normalization, so inner spacing does not matter).
+   Result: `core`.
+3. The normalized text contains at least one space. Result: `common` when the
+   tag set contains `daily` or `time`, otherwise `uncommon`.
+4. Otherwise (a single word, including unknown `ok`/`hi`-style short forms): base
+   score 2, plus 1 if the tag set contains `daily` or `time`, plus 1 if
+   `n <= 7`. Result by total score: 4 or more -> `core`; 3 -> `common`; 2 ->
+   `uncommon`; 1 or less is impossible for this branch.
+
+The enumerated lists (these are the exact, full lists; nothing outside them
+counts as a list hit):
+
+- single words: `a`, `an`, `and`, `are`, `at`, `be`, `but`, `by`, `can`, `do`,
+  `for`, `get`, `go`, `have`, `he`, `here`, `how`, `i`, `in`, `is`, `it`,
+  `look`, `make`, `me`, `my`, `no`, `not`.
+- expressions: `a lot`, `again`, `at home`, `best wishes`, `a bit`, `all right`,
+  `excuse me`, `good morning`, `good night`, `how are you`, `i think`, `in the
+  end`, `never mind`, `of course`, `on time`, `right now`, `see you`, `thank
+  you`, `the same`, `what about`.
+
+Worked examples: `back` with no tags -> case 4, `n` = 4, score 3 -> `common`.
+`ok` with no tags -> case 4, `n` = 2, score 3 -> `common`. `time` with the
+`time` tag -> case 4, `n` = 4, score 4 -> `core`. `deadline` with no tags ->
+case 4, `n` = 8, score 2 -> `uncommon`. `on time` -> case 2 -> `core`. `talk it
+over` with the `daily` tag -> case 3 -> `common`. `talk it over` with no tags ->
+case 3 -> `uncommon`. Tags do not affect cases 1-3, and case 4 never returns
+`rare`.
+
+This estimate is coarse: it separates very common short words from long words
+with few daily tags and nothing more. It is one provisional default for the
+later integration task, it is not part of the B2 starter set, and the same rule
+can be swapped for a licensed frequency table later behind the same band names
+without changing the stored band vocabulary.
+
 ## Word pronunciation
 
 Single-word expression suggestions can carry American English IPA from the same
