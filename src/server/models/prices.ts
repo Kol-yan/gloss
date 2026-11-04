@@ -34,6 +34,9 @@ export const FAST_PRICE_DEFAULT: TextPrice = Object.freeze({
 
 const mutableModelPrices: Record<string, TextPrice | AsrPrice> = {
   "muse-spark-1.3": { kind: "text", inputUsdPerMTok: 1.25, outputUsdPerMTok: 4.25 },
+  // The operator's fast-tier preset routes to gpt-oss-120b; the conservative
+  // gpt-oss-120b bound applies until an explicit price is configured.
+  "@preset/gpt-oss-120b-balanced": FAST_PRICE_DEFAULT,
   [FAST_MODEL_DEFAULT]: FAST_PRICE_DEFAULT,
   "muse-voice-transcribe-1.0": { kind: "asr", usdPerMinute: 0.003 },
   "meta/muse-spark-1.3": { kind: "text", inputUsdPerMTok: 1.25, outputUsdPerMTok: 4.25 },

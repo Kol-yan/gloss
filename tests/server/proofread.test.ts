@@ -332,10 +332,20 @@ describe("POST /api/proofread", () => {
     expect(sent.response_format.json_schema.schema.additionalProperties).toBe(false);
   });
 
-  it("refuses an opaque preset: it cannot prove a cost bound", async () => {
+  it("serves the known gpt-oss preset with the conservative gpt-oss bound", async () => {
     login();
-    const preset = "@preset/gpt-oss-120b-balanced";
-    process.env.OPENROUTER_FAST_MODEL = preset;
+    process.env.OPENROUTER_FAST_MODEL = "@preset/gpt-oss-120b-balanced";
+    fetchMock.mockResolvedValueOnce(modelReply([]));
+    const id = requestId();
+    const response = await post({ requestId: id, text: "All good here." });
+    expect(response.status).toBe(200);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).model).toBe("@preset/gpt-oss-120b-balanced");
+    expect(reservationFor(id)).toBeDefined();
+  });
+
+  it("refuses an unpriced opaque preset: it cannot prove a cost bound", async () => {
+    login();
+    process.env.OPENROUTER_FAST_MODEL = "@preset/unknown-routing";
     vi.spyOn(console, "error").mockImplementation(() => {});
     const id = requestId();
     const response = await post({ requestId: id, text: "All good here." });

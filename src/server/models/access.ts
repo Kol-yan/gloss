@@ -88,8 +88,9 @@ export function resolveTextRoute(access: ProviderAccess, config: AppConfig, tier
   };
 }
 
-// Hosted OpenRouter routing must use a model with a published local price. An
-// opaque preset or a manually asserted low price cannot establish a hard cap.
+// Hosted OpenRouter routing must use a model or preset with a published local
+// price. An unpriced opaque preset or a manually asserted low price cannot
+// establish a hard cap; the known gpt-oss preset uses the gpt-oss bound.
 export function hostedFastRoute(config: AppConfig): { model: string; price: TextPrice } {
   const model = config.openRouter.fastModel;
   const base = model === `${FAST_MODEL_DEFAULT}:floor` || model === `${FAST_MODEL_DEFAULT}:nitro`

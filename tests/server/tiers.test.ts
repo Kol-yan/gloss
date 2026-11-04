@@ -144,32 +144,27 @@ describe("routing of operator-funded jobs", () => {
     timeout.mockRestore();
   });
 
-  it("refuses a configured opaque preset even with arbitrary prices", async () => {
+  it("serves the known gpt-oss preset at the conservative gpt-oss bound", async () => {
     start();
-    vi.spyOn(console, "error").mockImplementation(() => {});
     process.env.OPENROUTER_FAST_MODEL = PRESET;
-    process.env.OPENROUTER_FAST_PRICE_IN_PER_M = "2";
-    process.env.OPENROUTER_FAST_PRICE_OUT_PER_M = "10";
-    expect(ApiError.parse(await (await check()).json()).error.code).toBe("ai_disabled");
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(count("usage_reservations")).toEqual({ n: 0 });
-    vi.restoreAllMocks();
+    fetchMock.mockResolvedValueOnce(proofreadReply([]));
+    expect((await check()).status).toBe(200);
+    expect(sentBody(0).model).toBe(PRESET);
+    expect(proofreadReservation().max_cost_micros).toBeGreaterThan(0);
   });
 
   it("reads the legacy OPENROUTER_PROOFREAD_MODEL as an alias, with the new name winning", async () => {
     start();
-    vi.spyOn(console, "error").mockImplementation(() => {});
     delete process.env.OPENROUTER_FAST_MODEL;
     process.env.OPENROUTER_PROOFREAD_MODEL = PRESET;
-    expect(ApiError.parse(await (await check()).json()).error.code).toBe("ai_disabled");
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(count("usage_reservations")).toEqual({ n: 0 });
+    fetchMock.mockResolvedValueOnce(proofreadReply([]));
+    expect((await check()).status).toBe(200);
+    expect(sentBody(0).model).toBe(PRESET);
 
     process.env.OPENROUTER_FAST_MODEL = "openai/gpt-oss-120b:floor";
     fetchMock.mockResolvedValueOnce(proofreadReply([]));
     await check("Another text.");
-    expect(sentBody(0).model).toBe("openai/gpt-oss-120b:floor");
-    vi.restoreAllMocks();
+    expect(sentBody(1).model).toBe("openai/gpt-oss-120b:floor");
   });
 
   it("reserves a configured bound above the table floor for a known model, and retains the full bound without a reported cost", async () => {
@@ -179,10 +174,8 @@ describe("routing of operator-funded jobs", () => {
     const defaultBound = proofreadReservation().max_cost_micros;
 
     process.env.OPENROUTER_FAST_MODEL = PRESET;
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    expect(ApiError.parse(await (await check("Same text.")).json()).error.code).toBe("ai_disabled");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    vi.restoreAllMocks();
+    await check("Same text.");
+    expect(proofreadReservation().max_cost_micros).toBe(defaultBound);
 
     // Known model with configured prices above the table floor: the bound
     // grows (1.25 safety margin) and token counts without a monetary cost
@@ -218,8 +211,8 @@ describe("routing of operator-funded jobs", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect(count("usage_reservations")).toEqual({ n: 0 });
 
-    // Opaque presets cannot prove a bound even when the operator asserts prices.
-    process.env.OPENROUTER_FAST_MODEL = PRESET;
+    // Unpriced presets cannot prove a bound even when the operator asserts prices.
+    process.env.OPENROUTER_FAST_MODEL = "@preset/unknown-routing";
     process.env.OPENROUTER_FAST_PRICE_IN_PER_M = "2";
     process.env.OPENROUTER_FAST_PRICE_OUT_PER_M = "10";
     expect(ApiError.parse(await (await check()).json()).error.code).toBe("ai_disabled");
@@ -468,6 +461,26 @@ describe("resolveTextRoute", () => {
     });
   });
 
+  it("serves the fast tier with the owner's exact development model ids", () => {
+    const devConfig = loadConfig({
+      AI_ENABLED: "true",
+      DAILY_BUDGET_USD: "5",
+      META_API_KEY: "test-key",
+      META_API_BASE_URL: "https://api.meta.ai/v1",
+      META_TEXT_MODEL: "muse-spark-1.3",
+      META_ASR_MODEL: "muse-voice-transcribe-1.0",
+      OPENROUTER_PROOFREAD_MODEL: PRESET,
+      OPENROUTER_API_KEY: OWNER_OPENROUTER_KEY,
+      GLOSSY_PUBLIC_URL: "http://localhost:3000",
+    });
+    expect(resolveTextRoute(hosted, devConfig, "fast")).toMatchObject({
+      provider: "openrouter", model: PRESET, price: FAST_PRICE_DEFAULT,
+    });
+    expect(resolveTextRoute(hosted, devConfig, "smart")).toMatchObject({
+      provider: "meta", model: "muse-spark-1.3",
+    });
+  });
+
   it("takes the fast model and price from configuration above the table floor", () => {
     const route = resolveTextRoute(hosted, config({
       OPENROUTER_FAST_MODEL: "openai/gpt-oss-120b", OPENROUTER_FAST_PRICE_IN_PER_M: "2", OPENROUTER_FAST_PRICE_OUT_PER_M: "10",
@@ -476,10 +489,13 @@ describe("resolveTextRoute", () => {
     // One price alone keeps the default for the other.
     expect(resolveTextRoute(hosted, config({ OPENROUTER_FAST_MODEL: "openai/gpt-oss-120b", OPENROUTER_FAST_PRICE_IN_PER_M: "2" }), "fast").price)
       .toMatchObject({ inputUsdPerMTok: 2, outputUsdPerMTok: 1.9 });
-    // Opaque presets cannot prove a bound even with explicit prices.
-    expect(() => resolveTextRoute(hosted, config({
+    // The known gpt-oss preset has a conservative local bound.
+    expect(resolveTextRoute(hosted, config({ OPENROUTER_FAST_MODEL: PRESET }), "fast"))
+      .toMatchObject({ model: PRESET, price: FAST_PRICE_DEFAULT });
+    // Explicit prices above the bound still apply.
+    expect(resolveTextRoute(hosted, config({
       OPENROUTER_FAST_MODEL: PRESET, OPENROUTER_FAST_PRICE_IN_PER_M: "2", OPENROUTER_FAST_PRICE_OUT_PER_M: "10",
-    }), "fast")).toThrow(UnknownModelError);
+    }), "fast").price).toMatchObject({ inputUsdPerMTok: 2, outputUsdPerMTok: 10 });
     // Configured prices below the table floor are refused.
     expect(() => resolveTextRoute(hosted, config({
       OPENROUTER_FAST_MODEL: "openai/gpt-oss-120b", OPENROUTER_FAST_PRICE_IN_PER_M: "0.2", OPENROUTER_FAST_PRICE_OUT_PER_M: "0.9",

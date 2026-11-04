@@ -80,7 +80,11 @@ export async function openRouterChat(
     : input.reasoningEffort ? { reasoning_effort: input.reasoningEffort } : {};
   const provider = route.tier === "fast"
     ? route.model.startsWith("@preset/")
-      ? { require_parameters: true }
+      ? {
+        require_parameters: true,
+        data_collection: "deny",
+        max_price: { prompt: route.price.inputUsdPerMTok, completion: route.price.outputUsdPerMTok },
+      }
       : {
         require_parameters: true,
         allow_fallbacks: true,

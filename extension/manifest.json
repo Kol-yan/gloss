@@ -8,7 +8,6 @@
   "optional_host_permissions": ["http://127.0.0.1/*", "https://*/*"],
   "background": {
     "service_worker": "background.js",
-    "scripts": ["background.js"],
     "type": "module"
   },
   "action": {

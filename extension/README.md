@@ -1,7 +1,7 @@
 # gloss browser extension
 
-A Manifest V3 extension for Chrome and Firefox that brings gloss to the pages
-you read and the fields you write in:
+A Manifest V3 extension for Chrome that brings gloss to the pages you read and
+the fields you write in:
 
 - **Add to gloss**: select a word or a short phrase on any site, right-click,
   and choose **Add to gloss**. It is saved to My words, and a small toast
@@ -37,6 +37,10 @@ root, which serves `http://localhost:3000`), then load the extension.
    Firefox has not granted it. Highlighting and checks need it.
 
 A temporary Firefox add-on is removed when Firefox quits.
+
+Firefox support is a follow-up: this manifest carries Chrome's
+`background.service_worker` only. A Firefox build needs its own manifest with a
+`background.scripts` entry.
 
 ## Set up
 

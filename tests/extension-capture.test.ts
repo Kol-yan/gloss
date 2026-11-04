@@ -108,8 +108,8 @@ describe("extension manifest", () => {
     for (const file of [...script.js, ...(script.css ?? [])]) expect(() => readFileSync(`extension/${file}`)).not.toThrow();
   });
 
-  it("works as a Chrome service worker and a Firefox background script", () => {
-    expect(manifest.background).toEqual({ service_worker: "background.js", scripts: ["background.js"], type: "module" });
+  it("uses a Chrome service worker without the Manifest V2 background scripts entry", () => {
+    expect(manifest.background).toEqual({ service_worker: "background.js", type: "module" });
     expect(manifest.browser_specific_settings.gecko.id).toMatch(/^\{[0-9a-f-]{36}\}$/);
     expect(manifest).not.toHaveProperty("web_accessible_resources");
     expect(manifest).not.toHaveProperty("externally_connectable");
