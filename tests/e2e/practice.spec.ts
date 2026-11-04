@@ -1,7 +1,7 @@
 import { MOCK_SITUATION } from "@/server/models/mock-provider";
 import { expect, saveExpression, test } from "./fixtures";
 
-test("a new learner finds practice empty and is sent to the editor", async ({ editor, page }) => {
+test("a learner with no practice words is sent to the editor", async ({ editor, page }) => {
   await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Practice" }).click();
   await expect(page).toHaveURL("/practice");
   await expect(page.getByRole("heading", { name: "Nothing to practice yet" })).toBeVisible();

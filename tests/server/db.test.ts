@@ -82,6 +82,7 @@ describe("openDatabase", () => {
       "0015_practice_sessions.sql",
       "0016_guest_access.sql",
       "0017_budget_hardening.sql",
+      "0018_onboarding_completion.sql",
     ]);
     const again = openDatabase(temp.path);
     expect(migrate(again)).toEqual([]);
@@ -130,6 +131,7 @@ describe("openDatabase", () => {
         "0015_practice_sessions.sql",
         "0016_guest_access.sql",
         "0017_budget_hardening.sql",
+        "0018_onboarding_completion.sql",
       ]);
       expect(db.prepare("SELECT * FROM evidence_events WHERE id = 'old'").get()).toEqual({ ...before, document_id: null });
       db.exec(`INSERT INTO evidence_events (id, learner_id, expression_id, kind, document_id, created_at)
@@ -189,9 +191,12 @@ describe("openDatabase", () => {
       const practiceBefore = db.prepare("SELECT * FROM practice_sessions WHERE id = 'practice'").get();
       const itemBefore = db.prepare("SELECT * FROM practice_session_items WHERE id = 'practice-item'").get();
 
-      expect(migrate(db, source)).toEqual(["0016_guest_access.sql", "0017_budget_hardening.sql"]);
-      expect(db.prepare("PRAGMA table_info(learners)").all()).toEqual(learnerColumnsBefore);
-      expect(db.prepare("SELECT * FROM learners WHERE id = 'preserved'").get()).toEqual(learnerBefore);
+      expect(migrate(db, source)).toEqual(["0016_guest_access.sql", "0017_budget_hardening.sql", "0018_onboarding_completion.sql"]);
+      const learnerColumnsAfter = db.prepare("PRAGMA table_info(learners)").all() as { name: string }[];
+      expect(learnerColumnsAfter.slice(0, learnerColumnsBefore.length)).toEqual(learnerColumnsBefore);
+      expect(learnerColumnsAfter.map((column) => column.name)).toContain("onboarding_completed_at");
+      expect(db.prepare("SELECT * FROM learners WHERE id = 'preserved'").get())
+        .toEqual({ ...(learnerBefore as Record<string, unknown>), onboarding_completed_at: null });
       expect(db.prepare("SELECT * FROM invites WHERE label = 'Stored invite'").get()).toEqual(inviteBefore);
       expect(db.prepare("SELECT * FROM sessions WHERE learner_id = 'preserved'").get()).toEqual(sessionBefore);
       expect(db.prepare(`SELECT id, learner_id, kind, request_id, units, max_cost_micros, actual_cost_micros,
@@ -274,6 +279,7 @@ describe("openDatabase", () => {
         "0015_practice_sessions.sql",
         "0016_guest_access.sql",
         "0017_budget_hardening.sql",
+        "0018_onboarding_completion.sql",
       ]);
 
       const row = db.prepare("SELECT * FROM check_runs WHERE id = 'run-old'").get() as Record<string, unknown>;
@@ -370,6 +376,7 @@ describe("openDatabase", () => {
         "0015_practice_sessions.sql",
         "0016_guest_access.sql",
         "0017_budget_hardening.sql",
+        "0018_onboarding_completion.sql",
       ]);
       const row = db.prepare("SELECT * FROM check_runs WHERE id = 'pre-routing-run'").get() as Record<string, unknown>;
       expect(row).toMatchObject({

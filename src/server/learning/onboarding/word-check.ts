@@ -40,6 +40,7 @@ export interface WordCheckEntryView {
   text: string;
   level: CefrLevel;
   definition: string;
+  example: string;
   answer: WordCheckAnswer | null;
 }
 
@@ -237,7 +238,7 @@ function asAnswer(value: string | null): WordCheckAnswer | null {
 }
 
 function toView(id: string, entry: StarterEntry, answer: WordCheckAnswer | null): WordCheckEntryView {
-  return { id, text: entry.text, level: entry.level, definition: entry.definition, answer };
+  return { id, text: entry.text, level: entry.level, definition: entry.definition, example: entry.example, answer };
 }
 
 // The round this learner was served today, in the order it was served.

@@ -99,6 +99,7 @@ describe("word engine migrations", () => {
         "0015_practice_sessions.sql",
         "0016_guest_access.sql",
         "0017_budget_hardening.sql",
+        "0018_onboarding_completion.sql",
       ]);
       expect(db.prepare("SELECT * FROM expressions WHERE id = 'expression'").get()).toEqual(before);
       expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
@@ -156,6 +157,7 @@ describe("word engine migrations", () => {
         "0015_practice_sessions.sql",
         "0016_guest_access.sql",
         "0017_budget_hardening.sql",
+        "0018_onboarding_completion.sql",
       ]);
       expect(pickSessionWords("old", 8, { db, now: NOW })).toEqual([]);
       expect(

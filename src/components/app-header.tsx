@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { BrandLockup } from "./brand";
 import { buttonClasses } from "./ui/button";
 
 const NAV = [
@@ -12,6 +13,8 @@ const NAV = [
 
 export function AppHeader() {
   const pathname = usePathname();
+
+  if (pathname === "/onboarding") return null;
 
   if (pathname === "/practice") {
     return (
@@ -25,7 +28,7 @@ export function AppHeader() {
     <header className="relative z-40 shrink-0 border-b border-line bg-paper/90 backdrop-blur">
       <div className="mx-auto flex min-h-13 w-full max-w-6xl flex-wrap items-center justify-between gap-1 px-4">
         <Link href="/" className="text-lg font-bold tracking-tight text-ink" aria-label="gloss, go to the editor">
-          gloss
+          <BrandLockup />
         </Link>
         <nav aria-label="Main">
           <ul className="flex items-center gap-0.5 text-sm font-semibold">

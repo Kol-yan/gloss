@@ -1,5 +1,18 @@
 @import "tailwindcss";
 
+@font-face {
+  font-family: "Brygada 1918";
+  src: url("/fonts/brygada-1918.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+.brand-word { color: var(--color-accent); }
+.brand-lockup { display: inline-flex; align-items: center; gap: 10px; color: var(--color-accent); }
+.brand-tile { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: #0d7a72; color: #fffdf8; font: 28px/1 "Brygada 1918", Georgia, serif; }
+.brand-name { font: 32px/1 "Brygada 1918", Georgia, serif; letter-spacing: -.04em; }
+
 /*
  * Design tokens. Every colour used in the UI comes from this block, so a text
  * role is checked for contrast in one place (tests/design-tokens.test.ts).

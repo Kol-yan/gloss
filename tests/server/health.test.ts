@@ -54,6 +54,7 @@ describe("GET /api/health", () => {
       "0015_practice_sessions.sql",
       "0016_guest_access.sql",
       "0017_budget_hardening.sql",
+      "0018_onboarding_completion.sql",
     ]);
   });
 
