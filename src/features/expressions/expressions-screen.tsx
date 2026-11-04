@@ -9,6 +9,7 @@ const KIND_LABEL: Record<HistoryEntryKind, string> = {
   assisted_use: "Used with help",
   written_attempt: "Written attempt",
   spoken_attempt: "Spoken attempt",
+  independent_writing: "Used on your own in real writing",
 };
 
 // Small facts about how an attempt went. They are never scores.

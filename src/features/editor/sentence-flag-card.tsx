@@ -16,7 +16,7 @@ const BADGE: Record<FlagCategory, { className: string; Icon: typeof ErrorIcon }>
 };
 
 const JOB_MESSAGE: Record<Exclude<SentenceJobState, "analyzing">, string> = {
-  failed: "We couldn't review this sentence just now. Select a label to try again.",
+  failed: "We couldn't review this sentence just now.",
   quota: "You've used all of today's AI checks. They come back tomorrow.",
   unavailable: "AI checking isn't available today.",
 };
@@ -36,7 +36,6 @@ export function SentenceFlagCard({
   onActivate,
   onDeactivate,
   onFocusCard,
-  onReview,
   onDismiss,
 }: {
   flag: SentenceFlag;
@@ -45,8 +44,6 @@ export function SentenceFlagCard({
   onActivate: (id: string) => void;
   onDeactivate: (id: string) => void;
   onFocusCard: (id: string) => void;
-  // Clicking any badge runs the generator for the whole sentence.
-  onReview: (flag: SentenceFlag) => void;
   onDismiss: (id: string) => void;
 }) {
   const analyzing = job === "analyzing";
@@ -75,17 +72,13 @@ export function SentenceFlagCard({
         {flag.categories.map((category) => {
           const { className, Icon } = BADGE[category];
           return (
-            <button
+            <span
               key={category}
-              type="button"
-              disabled={analyzing}
-              onClick={() => onReview(flag)}
-              aria-label={`${FLAG_LABEL[category]}: review this sentence`}
-              className={`inline-flex min-h-8 items-center gap-1.5 rounded-full border border-current/30 px-2.5 text-xs font-bold transition duration-150 hover:border-current disabled:opacity-70 ${className}`}
+              className={`inline-flex items-center gap-1.5 text-xs font-semibold ${className}`}
             >
               <Icon size={14} />
               {FLAG_LABEL[category]}
-            </button>
+            </span>
           );
         })}
       </div>
@@ -107,7 +100,7 @@ export function SentenceFlagCard({
             <span>{JOB_MESSAGE[job]}</span>
           </p>
         ) : (
-          <p className="text-xs leading-snug text-ink-muted">Select a label to see suggestions.</p>
+          <p className="text-xs leading-snug text-ink-muted">Preparing analysis…</p>
         )}
         <Button
           size="sm"

@@ -18,7 +18,7 @@ import type { ServerDeps } from "../deps";
 import { ConflictError, InvalidRequestError } from "../errors";
 import { newId } from "../ids";
 import { staleBefore } from "../stale";
-import { ModelHttpError, ModelOutputError, ModelTimeoutError } from "../models/errors";
+import { ModelHttpError, ModelNotConfiguredError, ModelOutputError, ModelTimeoutError } from "../models/errors";
 import { estimateMaxCostMicros, type MetaChatResult } from "../models/meta";
 import { resolveProviderAccess, resolveTextRoute } from "../models/access";
 import { chatWithRoute } from "../models/dispatch";
@@ -41,10 +41,40 @@ export async function proofread(
   input: ProofreadRequest,
   deps: ProofreadDeps = {},
 ): Promise<ProofreadResponse> {
+  const mode = deps.mode ?? "check";
+  return runCheckJob(learner, input, {
+    purpose: "proofread",
+    quotaKind: "proofread",
+    role: PROOFREAD_ROLE,
+    messages: buildProofreadMessages(splitSentences(normalizeText(input.text)), mode),
+    jsonSchema: PROOFREAD_JSON_SCHEMA,
+    parse: (content) => {
+      const output = parseProofreadOutput(content);
+      return output ? resolveProofread(splitSentences(normalizeText(input.text)), output, mode) : null;
+    },
+  }, deps);
+}
+
+// Both jobs share atomic reservation, persistence and decision handling. Only
+// the Learning entry point can supply a personal expression list in messages.
+export interface CheckJob {
+  purpose: "proofread" | "learning";
+  quotaKind: "proofread" | "detect";
+  role: { tier: "fast"; maxTokens: number; temperature: number };
+  messages: { role: "system" | "user" | "assistant"; content: string }[];
+  jsonSchema: { name: string; schema: Record<string, unknown> };
+  parse: (content: string) => Suggestion[] | null;
+}
+
+export async function runCheckJob(
+  learner: Learner,
+  input: ProofreadRequest,
+  job: CheckJob,
+  deps: ProofreadDeps = {},
+): Promise<ProofreadResponse> {
   const config = deps.config ?? getConfig();
   const db = deps.db ?? getDb();
   const now = deps.now ?? new Date();
-  const mode = deps.mode ?? "check";
   const access = resolveProviderAccess(learner.id, deps.providerAccess, db);
 
   const text = normalizeText(input.text);
@@ -61,6 +91,7 @@ export async function proofread(
     params: { requestId: input.requestId },
   });
   if (existing) {
+    if (existing.purpose !== job.purpose) throw new ConflictError();
     // A run still 'pending' after two minutes was abandoned by a dead process:
     // record it as failed. Its reservation is swept to 'unknown' by the next
     // reservation, so the cost stays counted.
@@ -74,20 +105,25 @@ export async function proofread(
     return {
       checkRunId,
       textHash,
-      suggestions: storedSuggestions(db, learner.id, checkRunId),
-      quota: getQuotaUsage(learner, { db, now }).proofread,
+      suggestions: storedSuggestions(db, learner.id, checkRunId).map((suggestion) =>
+        job.purpose === "learning" ? { ...suggestion, origin: "learning" as const } : suggestion),
+      quota: getQuotaUsage(learner, { db, now })[job.quotaKind],
     };
   }
 
   // Routine job: the fast tier. Throws before any reservation when it cannot
   // be served (no key, or a model without a cost bound).
-  const route = resolveTextRoute(access, config, PROOFREAD_ROLE.tier);
-  const messages = buildProofreadMessages(sentences, mode);
+  const route = resolveTextRoute(access, config, job.role.tier);
+  // An opaque preset cannot guarantee that this operation never uses Spark.
+  if (job.purpose === "learning" && (/spark/i.test(route.model) || route.model.startsWith("@preset/"))) {
+    throw new ModelNotConfiguredError();
+  }
+  const messages = job.messages;
   const inputChars =
     messages.reduce((total, message) => total + message.content.length, 0) +
-    JSON.stringify(PROOFREAD_JSON_SCHEMA).length;
+    JSON.stringify(job.jsonSchema).length;
   // Throws for a model without a price: no cost bound, no call.
-  const maxCostMicros = estimateMaxCostMicros(route.model, inputChars, PROOFREAD_ROLE.maxTokens, route.price);
+  const maxCostMicros = estimateMaxCostMicros(route.model, inputChars, job.role.maxTokens, route.price);
 
   // Reservation and check run appear together or not at all. A reservation
   // that already exists means another attempt with this request id is in
@@ -97,7 +133,7 @@ export async function proofread(
     const reserved = reserve(
       {
         learnerId: learner.id,
-        kind: "proofread",
+        kind: job.quotaKind,
         requestId: input.requestId,
         units: 1,
         maxCostMicros,
@@ -107,8 +143,8 @@ export async function proofread(
     if (reserved.replay) throw new ConflictError();
     tx.prepare(
       `INSERT INTO check_runs
-         (id, learner_id, request_id, text_hash, text_length, provider, model, status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+         (id, learner_id, request_id, text_hash, text_length, provider, model, status, created_at, purpose)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
     ).run(
       runId,
       learner.id,
@@ -118,6 +154,7 @@ export async function proofread(
       route.provider,
       route.model,
       now.toISOString(),
+      job.purpose,
     );
     return reserved;
   }, db);
@@ -134,9 +171,9 @@ export async function proofread(
       {
         model: route.model,
         messages,
-        jsonSchema: PROOFREAD_JSON_SCHEMA,
-        maxTokens: PROOFREAD_ROLE.maxTokens,
-        temperature: PROOFREAD_ROLE.temperature,
+        jsonSchema: job.jsonSchema,
+        maxTokens: job.role.maxTokens,
+        temperature: job.role.temperature,
       },
       route,
       config,
@@ -146,13 +183,14 @@ export async function proofread(
     throw error;
   }
 
-  const output = parseProofreadOutput(result.content);
-  if (!output) {
+  const parsedSuggestions = job.parse(result.content);
+  if (!parsedSuggestions) {
     const error = new ModelOutputError("invalid_output", result.usage, result.latencyMs, result.servingProvider);
     closeFailedRun(bookkeeping, error, result.latencyMs);
     throw error;
   }
-  const suggestions = resolveProofread(sentences, output, mode);
+  const suggestions = parsedSuggestions.map((suggestion) =>
+    job.purpose === "learning" ? { ...suggestion, origin: "learning" as const } : suggestion);
   const settledCostMicros = settledTextCostMicros(route.price, result.usage, maxCostMicros);
 
   immediate((tx) => {
@@ -182,7 +220,8 @@ export async function proofread(
     settle(reservation.id, settledCostMicros, { db: tx, now });
   }, db);
 
-  console.info("[gloss] proofread served", JSON.stringify({
+  console.info("[gloss] check served", JSON.stringify({
+    purpose: job.purpose,
     provider: result.servingProvider ?? "unknown",
     model: route.model,
     latencyMs: result.latencyMs,
@@ -193,7 +232,7 @@ export async function proofread(
     checkRunId: runId,
     textHash,
     suggestions,
-    quota: getQuotaUsage(learner, { db, now }).proofread,
+    quota: getQuotaUsage(learner, { db, now })[job.quotaKind],
   };
 }
 

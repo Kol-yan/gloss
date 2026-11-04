@@ -91,6 +91,7 @@ export function SuggestionCard({
   onFocusCard,
   onApply,
   onDismiss,
+  compact = false,
 }: {
   suggestion: Suggestion;
   // The current text, so the card can show the words around the change.
@@ -102,6 +103,7 @@ export function SuggestionCard({
   onFocusCard: (id: string) => void;
   onApply: (id: string) => void;
   onDismiss: (id: string) => void;
+  compact?: boolean;
 }) {
   const { id, category, original, replacement, reason, meaningChange } = suggestion;
   const change = describeChange(text, suggestion);
@@ -129,13 +131,18 @@ export function SuggestionCard({
       }
     >
       <div className="flex items-center justify-between gap-2">
-        <CategoryBadge category={category} />
-        <SourceLabel source={suggestion.source} />
+        {compact ? (
+          <span className="inline-flex items-center gap-2 text-xs font-semibold text-ink-muted">
+            <span aria-hidden="true" className={`h-2 w-2 rounded-full ${category === "error" ? "bg-error" : category === "style" ? "bg-caution" : "bg-accent"}`} />
+            {CATEGORY[category].label}
+          </span>
+        ) : <CategoryBadge category={category} />}
+        {!compact ? <SourceLabel source={suggestion.source} /> : null}
       </div>
 
       <ChangeSummary suggestion={suggestion} change={change} className="mt-2" />
 
-      {change.before || change.after ? (
+      {!compact && (change.before || change.after) ? (
         <p className="mt-1 text-sm leading-snug text-ink-muted [overflow-wrap:anywhere]">
           <span className="sr-only">In your text: </span>
           {change.before}

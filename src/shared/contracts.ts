@@ -22,6 +22,8 @@ export type SuggestionSource = z.infer<typeof SuggestionSource>;
 export const Suggestion = z.object({
   id: z.string(),
   source: SuggestionSource,
+  // Saved-list proposals come exclusively from the separate Learning call.
+  origin: z.literal("learning").optional(),
   category: SuggestionCategory,
   // UTF-16 indices into the normalized text the suggestion was computed for.
   start: z.number().int().nonnegative(),
@@ -247,7 +249,7 @@ export const Evaluation = z.object({
 export type Evaluation = z.infer<typeof Evaluation>;
 
 // GET /api/expressions
-export const HistoryEntryKind = z.enum(["assisted_use", "written_attempt", "spoken_attempt"]);
+export const HistoryEntryKind = z.enum(["assisted_use", "written_attempt", "spoken_attempt", "independent_writing"]);
 export type HistoryEntryKind = z.infer<typeof HistoryEntryKind>;
 
 export const HistoryEntry = z.object({
@@ -272,6 +274,22 @@ export type ExpressionHistory = z.infer<typeof ExpressionHistory>;
 
 export const ExpressionsResponse = z.object({ expressions: z.array(ExpressionHistory) });
 export type ExpressionsResponse = z.infer<typeof ExpressionsResponse>;
+
+export const MAX_LEARNING_EXPRESSIONS = 30;
+export const LearningRequest = ProofreadRequest.strict();
+export type LearningRequest = z.infer<typeof LearningRequest>;
+export const LearningResponse = z.object({ suggestions: z.array(Suggestion).max(2), quota: QuotaState }).strict();
+export type LearningResponse = z.infer<typeof LearningResponse>;
+
+// Local matching has already excluded accepted help; the server repeats the
+// match against the authenticated learner's list before recording evidence.
+export const WritingEvidenceRequest = z.object({
+  documentId: z.uuid(),
+  text: z.string().min(1).max(MAX_TEXT_LENGTH),
+  assistedRanges: z.array(DetectLocalRange).max(MAX_TEXT_LENGTH),
+}).strict();
+export type WritingEvidenceRequest = z.infer<typeof WritingEvidenceRequest>;
+export const WritingEvidenceResponse = z.object({ expressionIds: z.array(z.string()) }).strict();
 
 // ---------------------------------------------------------------------------
 

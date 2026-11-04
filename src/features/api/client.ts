@@ -9,6 +9,8 @@ import {
   DictationResponse,
   Evaluation,
   ExpressionsResponse,
+  LearningResponse,
+  WritingEvidenceResponse,
   MeResponse,
   PracticeTask,
   ProofreadResponse,
@@ -20,6 +22,7 @@ import {
   type PracticeKind,
   type SubmitAttemptRequest,
   type SuggestionDecision,
+  type WritingEvidenceRequest,
 } from "@/shared/contracts";
 
 // "network": the request never got an answer. "bad_response": the answer did
@@ -157,6 +160,14 @@ export function createExpression(request: CreateExpressionRequest) {
 
 export function listExpressions() {
   return call("/api/expressions", { method: "GET" }, ExpressionsResponse);
+}
+
+export function learnExpressions(text: string, requestId: string = newRequestId()) {
+  return paidCall("/api/learning", postJson({ requestId, text }), LearningResponse);
+}
+
+export function recordWritingEvidence(input: WritingEvidenceRequest) {
+  return call("/api/expressions/writing", postJson(input), WritingEvidenceResponse);
 }
 
 export function createTask(expressionId: string, kind: PracticeKind, requestId: string = newRequestId()) {

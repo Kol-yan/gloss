@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { InviteRequired } from "@/components/invite-required";
 import {
@@ -13,6 +13,10 @@ import {
   isUnauthorized,
   proofread,
   recordDecision,
+  listExpressions,
+  learnExpressions,
+  recordWritingEvidence,
+  newRequestId,
 } from "@/features/api/client";
 import { getAccessSnapshot } from "@/features/api/access-store";
 import { useLoad } from "@/features/api/use-load";
@@ -22,6 +26,7 @@ import { getSelectionSnapshot, getServerSelectionSnapshot, subscribeSelection } 
 import type { Familiarity, PracticeOffer } from "@/features/practice/types";
 import { hashText } from "@/lib/text";
 import type { Suggestion } from "@/shared/contracts";
+import type { WritingRange } from "@/lib/expression-matches";
 import { EditorScreen } from "./editor-screen";
 import { checkLocal, getLocalCheckerStatus, getServerLocalCheckerStatus, subscribeLocalChecker } from "./local-checker";
 import { bindToLearner, type DetectOutcome, type DetectSentences } from "./sentence-detect";
@@ -61,11 +66,12 @@ async function safeHash(text: string): Promise<string> {
 // `recheckSentences` receives the sentences an applied cloud suggestion changed;
 // it does nothing until a sentence-level check is plugged in.
 export function EditorSession({ recheckSentences = NO_RECHECK }: { recheckSentences?: RecheckSentences } = {}) {
-  const router = useRouter();
   const access = useAccess();
   const capture = useSyncExternalStore(subscribeSelection, getSelectionSnapshot, getServerSelectionSnapshot);
   const localCheckStatus = useSyncExternalStore(subscribeLocalChecker, getLocalCheckerStatus, getServerLocalCheckerStatus);
   const { result: me, reload } = useLoad(getMe);
+  const { result: savedExpressions, reload: reloadExpressions } = useLoad(listExpressions);
+  const documentIds = useRef(new Map<string, string>());
   const [sessionLost, setSessionLost] = useState(false);
   // Decisions are fire-and-forget, but "start practice" must wait for the matching "accepted".
   const decisions = useRef(new Map<string, Promise<unknown>>());
@@ -119,6 +125,25 @@ export function EditorSession({ recheckSentences = NO_RECHECK }: { recheckSenten
   // The text belongs to the learner who is signed in now. Every request re-checks
   // that, so a queue that outlives a sign-out or an account switch sends nothing.
   const learnerId = access.session?.learner.id ?? null;
+  const learnWithAi = useCallback(async (text: string) => {
+    if (!learnerId || getAccessSnapshot().session?.learner.id !== learnerId) return { ok: false as const, reason: "unavailable" as const };
+    const result = await learnExpressions(text);
+    if (result.ok) return { ok: true as const, suggestions: result.data.suggestions };
+    if (isUnauthorized(result)) setSessionLost(true);
+    return { ok: false as const, reason: isQuota(result) ? "quota" as const : isAiOff(result) ? "unavailable" as const : "failed" as const };
+  }, [learnerId]);
+  const onIndependentWriting = useCallback(async (text: string, assistedRanges: WritingRange[]) => {
+    if (!learnerId || getAccessSnapshot().session?.learner.id !== learnerId) return false;
+    const key = `${learnerId}:${capture.revision}`;
+    let documentId = documentIds.current.get(key);
+    if (!documentId) {
+      documentId = newRequestId();
+      documentIds.current.set(key, documentId);
+    }
+    const result = await recordWritingEvidence({ documentId, text, assistedRanges });
+    if (!result.ok && isUnauthorized(result)) setSessionLost(true);
+    return result.ok;
+  }, [learnerId, capture.revision]);
   const detectSentences = useMemo(
     () => bindToLearner(sendSentences, learnerId, () => getAccessSnapshot().session?.learner.id ?? null),
     [sendSentences, learnerId],
@@ -138,13 +163,13 @@ export function EditorSession({ recheckSentences = NO_RECHECK }: { recheckSenten
       await decisions.current.get(offer.suggestionId);
       const result = await createExpression({ suggestionId: offer.suggestionId, familiarity });
       if (result.ok) {
-        router.push(`/practice?expression=${encodeURIComponent(result.data.expression.id)}`);
+        reloadExpressions();
         return true;
       }
       if (isUnauthorized(result)) setSessionLost(true);
       return false;
     },
-    [router],
+    [reloadExpressions],
   );
 
   const unauthorized = sessionLost || (access.checked && !access.session) || (me?.ok === false && isUnauthorized(me));
@@ -174,6 +199,10 @@ export function EditorSession({ recheckSentences = NO_RECHECK }: { recheckSenten
           <EditorScreen
             key={`${learnerId ?? "pending"}:${capture.revision}`}
             initialText={capture.result?.status === "accepted" ? capture.result.text : ""}
+            expressions={savedExpressions?.ok ? savedExpressions.data.expressions.map((item) => item.expression) : []}
+            learningListFailed={savedExpressions?.ok === false}
+            learnWithAi={learnWithAi}
+            onIndependentWriting={onIndependentWriting}
             checksLeft={quota ? Math.max(0, quota.limit - quota.used) : null}
             aiAvailable={me?.ok ? me.data.aiEnabled && (me.data.accessMode !== "byok" || access.hasKey) : false}
             checkWithAi={checkWithAi}

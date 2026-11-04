@@ -5,6 +5,7 @@
 import { applyRange, canApply, splitSentences } from "@/lib/text";
 import type { Suggestion, SuggestionSource } from "@/shared/contracts";
 import type { RecheckSentences, SentenceRange } from "./types";
+import { moveAssistedRanges, type WritingRange } from "@/lib/expression-matches";
 
 export type UndoEntry = {
   // Document before the suggestion was applied.
@@ -47,6 +48,7 @@ export function reportApplied(reported: AppliedBatch, current: AppliedBatch, rec
 
 export type EditorDoc = {
   text: string;
+  assisted: WritingRange[];
   suggestions: Suggestion[];
   // Keys of suggestions the learner dismissed; a later check does not bring them back.
   dismissed: string[];
@@ -64,6 +66,7 @@ export type EditorAction =
   | { type: "dismiss"; id: string }
   | { type: "undo" }
   | { type: "receive"; source: SuggestionSource; forText: string; suggestions: Suggestion[] }
+  | { type: "receiveLearning"; forText: string; suggestions: Suggestion[] }
   // Cloud suggestions for one sentence. The suggestions are already ranges into
   // the current text; `sentenceText` must still sit at [start, end), otherwise the
   // learner changed it while the answer was on its way and the answer is dropped.
@@ -74,6 +77,7 @@ const MAX_UNDO = 50;
 export function createDoc(text = "", suggestions: Suggestion[] = []): EditorDoc {
   return {
     text,
+    assisted: [],
     suggestions: sortSuggestions(suggestions.filter((s) => canApply(text, s))),
     dismissed: [],
     undo: [],
@@ -193,7 +197,7 @@ function dedupe(all: Suggestion[]): Suggestion[] {
 function mergeBySource(doc: EditorDoc, source: SuggestionSource, incoming: Suggestion[]): Suggestion[] {
   const dismissed = new Set(doc.dismissed);
   const fresh = incoming.filter((s) => s.source === source && !dismissed.has(suggestionKey(s)) && canApply(doc.text, s));
-  const kept = doc.suggestions.filter((s) => s.source !== source);
+  const kept = doc.suggestions.filter((s) => s.source !== source || s.origin === "learning");
   return dedupe([...kept, ...fresh]);
 }
 
@@ -209,7 +213,7 @@ function mergeInSentence(doc: EditorDoc, range: SentenceRange, incoming: Suggest
       !dismissed.has(suggestionKey(s)) &&
       canApply(doc.text, s),
   );
-  const kept = doc.suggestions.filter((s) => !(s.source === "ai" && s.start < range.end && s.end > range.start));
+  const kept = doc.suggestions.filter((s) => !(s.source === "ai" && s.origin !== "learning" && s.start < range.end && s.end > range.start));
   return dedupe([...kept, ...fresh]);
 }
 
@@ -241,13 +245,14 @@ export function editorReducer(doc: EditorDoc, action: EditorAction): EditorDoc {
 function step(doc: EditorDoc, action: EditorAction): EditorDoc {
   switch (action.type) {
     case "replace":
-      return createDoc(action.text);
+      return { ...createDoc(action.text), assisted: action.text ? [{ start: 0, end: action.text.length }] : [] };
 
     case "edit": {
       if (action.text === doc.text) return doc;
       return {
         ...doc,
         text: action.text,
+        assisted: moveAssistedRanges(doc.text, action.text, doc.assisted),
         suggestions: rebaseSuggestions(doc.text, action.text, doc.suggestions),
         // Typing is undone with the textarea's own undo; ours only covers untouched text.
         undo: [],
@@ -271,6 +276,8 @@ function step(doc: EditorDoc, action: EditorAction): EditorDoc {
       return {
         ...doc,
         text: next,
+        assisted: [...moveAssistedRanges(doc.text, next, doc.assisted),
+          ...(target.replacement ? [{ start: target.start, end: target.start + target.replacement.length }] : [])],
         suggestions: shiftAfterApply(target, next, others),
         undo: [...doc.undo, entry].slice(-MAX_UNDO),
         applied:
@@ -288,7 +295,13 @@ function step(doc: EditorDoc, action: EditorAction): EditorDoc {
       if (plan.length === 0) return doc;
       // From the right, so the offsets of the fixes still to apply stay valid.
       let next = doc.text;
-      for (const fix of [...plan].reverse()) next = next.slice(0, fix.start) + fix.replacement + next.slice(fix.end);
+      let assisted = doc.assisted;
+      for (const fix of [...plan].reverse()) {
+        const changed = next.slice(0, fix.start) + fix.replacement + next.slice(fix.end);
+        assisted = [...moveAssistedRanges(next, changed, assisted),
+          ...(fix.replacement ? [{ start: fix.start, end: fix.start + fix.replacement.length }] : [])];
+        next = changed;
+      }
       const planned = new Set(plan.map((s) => s.id));
       const others = doc.suggestions
         .filter((s) => !planned.has(s.id) && plan.every((fix) => s.end <= fix.start || s.start >= fix.end))
@@ -316,6 +329,7 @@ function step(doc: EditorDoc, action: EditorAction): EditorDoc {
       return {
         ...doc,
         text: next,
+        assisted,
         suggestions: others,
         undo: [...doc.undo, entry].slice(-MAX_UNDO),
         applied: ranges.length > 0 ? { ranges, text: next } : NO_APPLIED,
@@ -346,6 +360,7 @@ function step(doc: EditorDoc, action: EditorAction): EditorDoc {
       return {
         ...doc,
         text: top.before.text,
+        assisted: moveAssistedRanges(doc.text, top.before.text, doc.assisted),
         suggestions: sortSuggestions([...restored, ...arrivedLater].filter((s) => canApply(top.before.text, s))),
         undo: doc.undo.slice(0, -1),
       };
@@ -355,6 +370,12 @@ function step(doc: EditorDoc, action: EditorAction): EditorDoc {
       // The checker may answer for an older version of the text.
       const incoming = rebaseSuggestions(action.forText, doc.text, action.suggestions);
       return { ...doc, suggestions: mergeBySource(doc, action.source, incoming) };
+    }
+
+    case "receiveLearning": {
+      if (doc.text !== action.forText) return doc;
+      const incoming = action.suggestions.filter((s) => s.origin === "learning" && canApply(doc.text, s) && !doc.dismissed.includes(suggestionKey(s)));
+      return { ...doc, suggestions: dedupe([...doc.suggestions.filter((s) => s.origin !== "learning"), ...incoming]) };
     }
 
     case "receiveSentence": {

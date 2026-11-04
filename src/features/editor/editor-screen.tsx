@@ -1,9 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type KeyboardEvent } from "react";
 import { canApply, normalizeText } from "@/lib/text";
-import { MAX_TEXT_LENGTH, type Suggestion } from "@/shared/contracts";
+import { MAX_TEXT_LENGTH, type Expression, type Suggestion } from "@/shared/contracts";
+import { unassistedMatches, type WritingRange } from "@/lib/expression-matches";
 import { TryYourselfCard } from "@/features/practice/try-yourself-card";
 import { offerFromSuggestion, type Familiarity, type PracticeOffer } from "@/features/practice/types";
 import { CheckBar } from "./check-bar";
@@ -14,7 +14,6 @@ import { pickSuggestion, popoverReducer, sortedIndex, suggestionForCaret, type P
 import {
   SentenceDetector,
   locateSentence,
-  nextPrefetch,
   offsetSuggestions,
   sentenceTextsIn,
   type DetectInput,
@@ -22,7 +21,8 @@ import {
   type SentenceFlag,
 } from "./sentence-detect";
 import type { SentenceJobState } from "./sentence-flag-card";
-import { SuggestionRail, type FocusRequest, type RailNotice } from "./suggestion-rail";
+import { SuggestionRail, type LearningStatus, type RailNotice } from "./suggestion-rail";
+import { tabForSuggestion, type RailTab } from "./rail-state";
 import { SamplePicker } from "./sample-picker";
 import type { CheckLocal, CheckStatus, CheckWithAi, Dictate, ProofreadOutcome, RecheckSentences } from "./types";
 import { WritingSurface, type WritingSurfaceHandle } from "./writing-surface";
@@ -31,6 +31,11 @@ import type { LocalCheckStatus } from "./local-checker";
 type OfferState = { phase: "ask" | "saving" | "error" | "started"; offer: PracticeOffer };
 
 export type EditorScreenProps = {
+  expressions?: Expression[];
+  learningListFailed?: boolean;
+  learnWithAi?: (text: string) => Promise<{ ok: true; suggestions: Suggestion[] } | { ok: false; reason: "failed" | "quota" | "unavailable" }>;
+  onIndependentWriting?: (text: string, assistedRanges: WritingRange[]) => Promise<boolean>;
+  practiceHref?: string;
   initialText?: string;
   // Must be ranges into initialText; anything that does not fit is dropped.
   initialSuggestions?: Suggestion[];
@@ -58,9 +63,6 @@ export type EditorScreenProps = {
   detectSentences?: DetectSentences;
   // Overrides the typing pause (milliseconds); the default is for real use.
   detectPauseMs?: number;
-  // Runs the generator on its own for a sentence the detector is almost sure
-  // needs a correction. Off by default: it spends a check the learner did not ask for.
-  prefetchCorrections?: boolean;
   // Voice input: turns speech into text inserted at the caret. No button without it.
   dictate?: Dictate;
 };
@@ -79,7 +81,11 @@ export function EditorScreen({
   recheckSentences,
   detectSentences,
   detectPauseMs,
-  prefetchCorrections = false,
+  expressions = [],
+  learningListFailed = false,
+  learnWithAi,
+  onIndependentWriting,
+  practiceHref = "/practice",
   dictate,
 }: EditorScreenProps) {
   const [doc, dispatch] = useReducer(editorReducer, undefined, () => createDoc(initialText, initialSuggestions));
@@ -95,7 +101,28 @@ export function EditorScreen({
   const [offerState, setOfferState] = useState<OfferState | null>(null);
   const [activeFlagId, setActiveFlagId] = useState<string | null>(null);
   const [jobs, setJobs] = useState<Record<string, SentenceJobState>>({});
-  const [focusRequest, setFocusRequest] = useState<FocusRequest | null>(null);
+  const [activeTab, setActiveTab] = useState<RailTab>("checks");
+  const [learningState, setLearningState] = useState<{ text: string; status: LearningStatus }>({ text: "", status: "idle" });
+  const learningRequests = useRef(new Map<string, { status: LearningStatus; suggestions?: Suggestion[] }>());
+  const independent = useMemo(() => {
+    const found = unassistedMatches(doc.text, expressions, doc.assisted);
+    return [...new Map(found.map((match) => [match.expression.id, match.expression])).values()];
+  }, [doc.text, expressions, doc.assisted]);
+  const recordedWriting = useRef(new Set<string>());
+  const composingRef = useRef(false);
+  useEffect(() => {
+    if (!onIndependentWriting || independent.length === 0) return;
+    const text = doc.text;
+    const assisted = doc.assisted;
+    const timer = setTimeout(() => {
+      if (composingRef.current || recordedWriting.current.has(text)) return;
+      recordedWriting.current.add(text);
+      void onIndependentWriting(text, assisted).then((ok) => {
+        if (!ok) recordedWriting.current.delete(text);
+      }).catch(() => recordedWriting.current.delete(text));
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [doc.text, doc.assisted, independent, onIndependentWriting]);
   const [popover, setPopover] = useState<PopoverState>(null);
   // Bumped when the text scrolls or resizes, so the popover follows its word.
   const [layoutTick, setLayoutTick] = useState(0);
@@ -148,7 +175,7 @@ export function EditorScreen({
     [doc.suggestions],
   );
   const holdRanges = useMemo(
-    () => doc.suggestions.filter((s) => s.source === "ai").map(({ start, end }) => ({ start, end })),
+    () => doc.suggestions.filter((s) => s.source === "ai" && s.origin !== "learning").map(({ start, end }) => ({ start, end })),
     [doc.suggestions],
   );
   useEffect(() => {
@@ -293,6 +320,7 @@ export function EditorScreen({
   };
 
   const handleChange = (raw: string, composing: boolean) => {
+    composingRef.current = composing;
     // Normalizing mid-composition would fight the input method.
     dispatch({ type: "edit", text: composing ? raw : normalizeText(raw) });
     setPopover(null);
@@ -338,7 +366,7 @@ export function EditorScreen({
     if (!applicable) return;
     showNotice(suggestion.replacement ? `Applied: ${suggestion.replacement}` : "Applied: removed");
     onDecision?.(suggestion, "accepted", doc.text);
-    const offer = offerFromSuggestion(suggestion);
+    const offer = suggestion.origin === "learning" ? null : offerFromSuggestion(suggestion);
     if (offer) setOfferState({ phase: "ask", offer });
     if (sheetOpen && doc.suggestions.length <= 1 && !offer && !offerState) closeSheet();
   };
@@ -369,6 +397,7 @@ export function EditorScreen({
   const openPopoverFor = (ids: string[]) => {
     const picked = pickSuggestion(doc.suggestions.filter((s) => ids.includes(s.id)));
     setPopover(picked ? { id: picked.id, via: "pointer" } : null);
+    if (picked) setActiveTab(tabForSuggestion(picked));
     // On a touch screen the keyboard would cover the sheet; tapping the text again brings it back.
     if (picked && window.matchMedia("(pointer: coarse)").matches) (document.activeElement as HTMLElement | null)?.blur();
   };
@@ -420,6 +449,7 @@ export function EditorScreen({
       return;
     }
     setPopover({ id: target.id, via: "keyboard" });
+    setActiveTab(tabForSuggestion(target));
   };
 
   // Prefer the server's number; otherwise count down locally.
@@ -435,6 +465,10 @@ export function EditorScreen({
   );
 
   const setJob = useCallback((id: string, state: SentenceJobState | null) => {
+    const updated = { ...jobsRef.current };
+    if (state === null) delete updated[id];
+    else updated[id] = state;
+    jobsRef.current = updated;
     setJobs((current) => {
       const next = { ...current };
       if (state === null) delete next[id];
@@ -484,9 +518,6 @@ export function EditorScreen({
         showNotice("Nothing to change in that sentence.");
         return;
       }
-      const first = [...placed].sort((a, b) => a.start - b.start)[0];
-      noticeCounter.current += 1;
-      setFocusRequest({ id: first.id, n: noticeCounter.current });
     },
     [checksLeft, detector, noteChecksUsed, setJob, showNotice],
   );
@@ -498,16 +529,50 @@ export function EditorScreen({
     showNotice("Dismissed.");
   };
 
-  // Optional: a sentence the detector is nearly sure needs correcting is
-  // reviewed without waiting for a click, one at a time.
-  const prefetched = useRef(new Set<string>());
+  // Opening AI is the generator action. One request at a time; closing the
+  // phone sheet stops the unsent queue, and failed sentences need an explicit retry.
+  const reviewedFlags = useRef(new Set<string>());
   useEffect(() => {
-    if (!prefetchCorrections || !checkWithAi || !aiAvailable) return;
-    const next = nextPrefetch(flags, prefetched.current, jobs);
+    if (activeTab !== "ai" || !checkWithAi || !aiAvailable || status === "pending") return;
+    if (railRef.current && getComputedStyle(railRef.current).display === "none") return;
+    if (Object.values(jobs).includes("analyzing")) return;
+    const next = flags.find((flag) => !reviewedFlags.current.has(flag.id));
     if (!next) return;
-    prefetched.current.add(next.id);
+    reviewedFlags.current.add(next.id);
     void reviewSentence(next);
-  }, [prefetchCorrections, checkWithAi, aiAvailable, flags, jobs, reviewSentence]);
+  }, [activeTab, sheetOpen, checkWithAi, aiAvailable, flags, jobs, status, reviewSentence]);
+
+  const runLearning = async (retry = false) => {
+    const text = docRef.current.text;
+    if (!text.trim()) return;
+    const cached = learningRequests.current.get(text);
+    if (cached && (!retry || cached.status === "pending")) {
+      setLearningState({ text, status: cached.status });
+      if (cached.suggestions) dispatch({ type: "receiveLearning", forText: text, suggestions: cached.suggestions });
+      return;
+    }
+    if (!learnWithAi || !aiAvailable) {
+      setLearningState({ text, status: "unavailable" });
+      return;
+    }
+    learningRequests.current.set(text, { status: "pending" });
+    setLearningState({ text, status: "pending" });
+    try {
+      const result = await learnWithAi(text);
+      const status = result.ok ? "ready" : result.reason;
+      learningRequests.current.set(text, { status, ...(result.ok ? { suggestions: result.suggestions } : {}) });
+      setLearningState((current) => current.text === text ? { text, status } : current);
+      if (result.ok && docRef.current.text === text) dispatch({ type: "receiveLearning", forText: text, suggestions: result.suggestions });
+    } catch {
+      learningRequests.current.set(text, { status: "failed" });
+      setLearningState((current) => current.text === text ? { text, status: "failed" } : current);
+    }
+  };
+
+  const selectTab = (tab: RailTab) => {
+    setActiveTab(tab);
+    if (tab === "learning") void runLearning();
+  };
 
   const runCheck = async () => {
     if (!checkWithAi || status === "pending") return;
@@ -515,6 +580,7 @@ export function EditorScreen({
     if (text.trim() === "") return;
     if (text !== doc.text) dispatch({ type: "edit", text });
     setStatus("pending");
+    setActiveTab("ai");
     let outcome: ProofreadOutcome;
     try {
       outcome = await checkWithAi(text);
@@ -563,6 +629,7 @@ export function EditorScreen({
   const offerSlot = offerState ? (
     offerState.phase !== "started" ? (
       <TryYourselfCard
+        saveOnly
         offer={offerState.offer}
         status={offerState.phase === "saving" ? "saving" : offerState.phase === "error" ? "error" : "idle"}
         onStart={(familiarity) => void startPractice(offerState.offer, familiarity)}
@@ -575,9 +642,6 @@ export function EditorScreen({
       <section aria-label="Practice ready" className="rounded-tile border border-success/40 bg-success-soft p-3 text-sm text-success">
         <p className="font-semibold">Added to your practice list.</p>
         <p className="mt-1">
-          <Link href="/practice" className="font-semibold underline underline-offset-2">
-            Go to practice
-          </Link>
           <button
             type="button"
             onClick={() => setOfferState(null)}
@@ -607,16 +671,10 @@ export function EditorScreen({
           <WritingSurface
             value={doc.text}
             suggestions={doc.suggestions}
-            flags={flags}
             activeId={popoverId ?? activeId}
             activeFlagId={activeFlagId}
             onChange={handleChange}
             onTextClick={openPopoverFor}
-            onFlagClick={(flagId) => {
-              setActiveFlagId(flagId);
-              // Below the rail breakpoint the closed rail is hidden, so show it as a sheet.
-              if (!sheetOpen && railRef.current && getComputedStyle(railRef.current).display === "none") openSheet();
-            }}
             onEditorKeyDown={handleEditorKeyDown}
             onLayoutChange={popoverId ? bumpLayout : undefined}
             handleRef={surfaceRef}
@@ -647,7 +705,7 @@ export function EditorScreen({
             checksLeft={checksLeft}
             textIsEmpty={textIsEmpty}
             length={doc.text.length}
-            suggestionCount={doc.suggestions.length + flags.length}
+            suggestionCount={doc.suggestions.length + flags.length + independent.length}
             detectStatus={detectEnabled ? detectStatus : "idle"}
             onCheck={runCheck}
             onOpenSheet={openSheet}
@@ -677,12 +735,26 @@ export function EditorScreen({
           }
         >
           <SuggestionRail
+            activeTab={activeTab}
+            onTabChange={selectTab}
+            learningExpressions={independent}
+            learningStatus={learningState.text === doc.text ? learningState.status : "idle"}
+            learningListFailed={learningListFailed}
+            onRetryLearning={() => void runLearning(true)}
+            onRetryAi={() => {
+              for (const flag of flags) {
+                if (jobs[flag.id] === "failed") {
+                  reviewedFlags.current.delete(flag.id);
+                  setJob(flag.id, null);
+                }
+              }
+            }}
+            practiceHref={practiceHref}
             suggestions={doc.suggestions}
             flags={flags}
             jobs={jobs}
             activeFlagId={activeFlagId}
             autoDetect={detectEnabled}
-            focusRequest={focusRequest}
             text={doc.text}
             activeId={activeId}
             canUndo={undoAvailable}
@@ -699,7 +771,6 @@ export function EditorScreen({
             onDismiss={dismiss}
             onActivateFlag={setActiveFlagId}
             onDeactivateFlag={(id) => setActiveFlagId((current) => (current === id ? null : current))}
-            onReviewFlag={(flag) => void reviewSentence(flag)}
             onDismissFlag={dismissFlag}
             onFixAll={fixAllSafe}
             onUndo={undo}

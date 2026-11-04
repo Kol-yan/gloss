@@ -12,19 +12,21 @@ export function TryYourselfCard({
   status = "idle",
   onStart,
   onSkip,
+  saveOnly = false,
 }: {
   offer: PracticeOffer;
   // "saving" while the expression is being added to the learner's list.
   status?: "idle" | "saving" | "error";
   onStart: (familiarity: Familiarity) => void;
   onSkip: () => void;
+  saveOnly?: boolean;
 }) {
   const [familiarity, setFamiliarity] = useState<Familiarity>("new");
   const groupName = useId();
 
   return (
     <section aria-label="Try using this yourself" className="rounded-tile border border-accent/40 bg-surface p-3">
-      <p className="eyebrow">Try using this yourself</p>
+      <p className="eyebrow">{saveOnly ? "Keep this expression" : "Try using this yourself"}</p>
       <p className="mt-1.5 text-xl font-semibold leading-tight [overflow-wrap:anywhere]">{offer.expression}</p>
       <VocabularyPronunciation text={offer.expression} ipa={offer.ipa} />
       <p className="mt-0.5 text-sm leading-snug text-ink-muted">{offer.meaning}</p>
@@ -58,7 +60,7 @@ export function TryYourselfCard({
 
       <div className="mt-3 flex items-center gap-1">
         <Button variant="soft" onClick={() => onStart(familiarity)} pending={status === "saving"}>
-          {status === "saving" ? "Saving…" : "Start practice"}
+          {status === "saving" ? "Saving…" : saveOnly ? "Save expression" : "Start practice"}
         </Button>
         <Button variant="quiet" onClick={onSkip} disabled={status === "saving"}>
           Skip

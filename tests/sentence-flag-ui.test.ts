@@ -29,7 +29,6 @@ function card(props: Partial<Parameters<typeof SentenceFlagCard>[0]> = {}) {
       onActivate: noop,
       onDeactivate: noop,
       onFocusCard: noop,
-      onReview: noop,
       onDismiss: noop,
       ...props,
     }),
@@ -37,21 +36,21 @@ function card(props: Partial<Parameters<typeof SentenceFlagCard>[0]> = {}) {
 }
 
 describe("sentence flag card", () => {
-  it("shows the three badges as buttons and no suggestion until the generator has run", () => {
+  it("shows categories as status labels, with no click-to-analyze buttons", () => {
     const html = card();
     for (const label of ["Correction", "Clarity", "Word choice"]) {
-      expect(html).toContain(`${label}</button>`);
-      expect(html).toContain(`aria-label="${label}: review this sentence"`);
+      expect(html).toContain(`${label}</span>`);
+      expect(html).not.toContain(`aria-label="${label}: review this sentence"`);
     }
     expect(html).toContain("I go to school every day.");
     expect(html).not.toContain(">Apply<");
     expect(html).not.toContain("Analyzing");
-    expect(html).toContain("Select a label to see suggestions.");
+    expect(html).toContain("Preparing analysis");
   });
 
   it("shows only the badges the detector raised", () => {
     const html = card({ flag: flag({ categories: ["clarity"] }) });
-    expect(html).toContain("Clarity</button>");
+    expect(html).toContain("Clarity</span>");
     expect(html).not.toContain("Correction");
     expect(html).not.toContain("Word choice");
   });
@@ -60,8 +59,7 @@ describe("sentence flag card", () => {
     const html = card({ job: "analyzing" });
     expect(html).toContain("Analyzing…");
     expect(html).toContain('aria-busy="true"');
-    // Three badges and Dismiss.
-    expect(html.match(/disabled=""/g)?.length).toBe(4);
+    expect(html.match(/disabled=""/g)?.length).toBe(1);
     expect(html).not.toContain("%");
   });
 
@@ -116,18 +114,20 @@ describe("suggestion rail with flagged sentences", () => {
     );
   }
 
-  it("lists flagged sentences and suggestions in text order and counts both", () => {
+  it("shows detection only in the AI indicator before the tab opens", () => {
     const html = rail();
-    expect(html).toContain("(3)");
-    const order = [html.indexOf("I go to school"), html.indexOf("data-suggestion-id"), html.indexOf("We eat lunch")];
-    expect(order.every((i) => i > -1)).toBe(true);
-    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(html).toContain('data-tab-indicator="ai"');
+    expect(html).toContain('aria-label="3 sentences or suggestions"');
+    expect(html).not.toContain("data-flag-card");
+    expect(html).not.toContain("data-suggestion-id");
+    expect(rail({ activeTab: "ai" })).toContain("data-suggestion-id");
+    expect(rail({ activeTab: "ai" })).toContain("data-flag-card");
   });
 
   it("explains the automatic flow in the empty state", () => {
-    const html = rail({ suggestions: [], flags: [], autoDetect: true });
+    const html = rail({ activeTab: "ai", suggestions: [], flags: [], autoDetect: true });
     expect(html).toContain("when you pause typing");
-    expect(rail({ suggestions: [], flags: [], autoDetect: false })).toContain("Press Check with AI for a closer look.");
+    expect(rail({ activeTab: "ai", suggestions: [], flags: [], autoDetect: false })).toContain("Press Check with AI for a closer look.");
   });
 });
 

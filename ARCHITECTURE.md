@@ -92,6 +92,8 @@ Money is stored in micro-dollars (integers). Dates are UTC ISO strings; "today" 
 | `GET /api/me` | Learner, quotas, whether cloud features are available |
 | `POST /api/detect` | Classify changed sentences for correction, clarity and word choice |
 | `POST /api/proofread` | Cloud proofreading of the current text |
+| `POST /api/learning` | On-request opportunities to use saved expressions |
+| `POST /api/expressions/writing` | Record deterministic, unassisted real-writing matches |
 | `POST /api/suggestions/{id}` | Record accepted, rejected or stale |
 
 Request and response schemas are in `src/shared/contracts.ts`. Errors use `{ error: { code, message } }` with a short learner-safe message.
@@ -116,6 +118,7 @@ another provider or tier: a job whose tier cannot be served is refused.
 | Role | Tier |
 |---|---|
 | Sentence detection | fast |
+| Saved-expression opportunities | fast (2048 output tokens, detect quota) |
 | Proofreading | fast |
 | Practice situations | fast |
 | Evaluation of learner answers | smart |
@@ -170,9 +173,41 @@ suggestions.
 
 ## Two-stage checking in the editor
 
-Stage 0 is the in-browser rule checker with the dictionary spelling rule switched off; it marks grammar and punctuation instantly. Stage 1 starts when the learner stops typing for about 800 ms. Sentences whose text changed, however short and with or without final punctuation, are sent in batches to `POST /api/detect`, together with the spans Stage 0 already marks. A sentence is identified by the SHA-256 of its normalized text, and the answer is cached under that hash, so unchanged sentences are never sent again and sentences that still have pending cloud suggestions are skipped. Probabilities of at least 0.5 become small badges (Correction, Clarity, Word choice) on a card in the suggestion rail and a bar under the sentence in the text. A badge carries no suggestion.
+Stage 0 is the in-browser rule checker with the dictionary spelling rule switched off; it marks grammar and punctuation instantly in Checks. Stage 1 starts when the learner stops typing for about 800 ms. Sentences whose text changed, however short and with or without final punctuation, are sent in batches to `POST /api/detect`, together with the spans Stage 0 already marks. A sentence is identified by the SHA-256 of its normalized text, and the answer is cached under that hash, so unchanged sentences are never sent again and sentences that still have pending proofreading suggestions are skipped. Probabilities of at least 0.5 light the AI tab's count indicator. A detected sentence has no proposed edit and adds no underline of its own.
 
-Stage 2 runs when the learner presses a badge: that single sentence goes to the proofreading generator and the resulting suggestions are placed back at the sentence's position, while suggestions in other sentences stay as they were. The card says "Analyzing…" until the answer arrives. Applying a cloud fix re-checks only the sentence it changed, after every fix, even when another cloud fix is still waiting in that sentence. Leaving the page or switching learner drops the unsent queue, and every detector request is checked against the signed-in learner just before it is sent. When the detector quota is used up or AI is off, automatic scanning stops for the session and the Check with AI button keeps working. Failed detector calls are not repeated for the same sentence.
+Stage 2 runs when the learner opens AI. Flagged sentences go to the proofreading generator one at a time and the resulting suggestions are placed back at each sentence's position, while other sentences' suggestions stay as they were. There is no per-flag analysis button. The card says "Analyzing…" until the answer arrives. Closing the phone sheet or leaving AI stops the unsent queue. Applying a cloud fix re-checks only the sentence it changed, after every fix, even when another cloud fix is still waiting in that sentence. Leaving the page or switching learner drops the unsent queue, and every detector request is checked against the signed-in learner just before it is sent. When the detector quota is used up or AI is off, automatic scanning stops for the session and the Check with AI button keeps working. Failed detector calls are not repeated for the same sentence.
+
+## Learning in the editor
+
+The suggestion panel is a controlled component with Checks, AI and Learning tabs.
+Its host supplies data, callbacks, tab state and the website practice URL; it has
+no session, routing or network dependency. It is reused in the phone bottom sheet.
+Inline review, Apply, Dismiss, Undo and safe bulk corrections use the same editor
+state across tabs. Learning has one website practice link. Saving a newly accepted
+expression remains optional and does not navigate away from the editor.
+
+Saved expressions are matched locally with whole-token English inflection rules,
+including bounded irregular-verb forms. Independent matches light Learning and
+produce short comments without a model call. Accepted replacement spans are
+tracked through edits and Undo and excluded from these matches. Samples are
+marked as supplied text. The server repeats matching against the authenticated
+learner's expressions and excluded ranges before writing `independent_writing`
+evidence, once per expression and editor document. This event has no attempt,
+verdict or cue, does not change practice scheduling, and stores no draft text.
+Accepting a suggestion containing an already-saved expression records assisted
+use instead, once for that suggestion's acceptance.
+
+Only opening Learning requests list-aware proposals. A separate fast-tier role
+reserves 2048 output tokens and its maximum cost atomically against the detect
+quota and normal daily ceiling. Spark and opaque model presets are refused for
+this role because they cannot guarantee a non-Spark call. The server selects at
+most 30 active saved expressions (currently all saved rows, newest first), and
+sends their text and meaning as data alongside the current text. Nothing fitting
+is the normal outcome; at most two proposals may specify exact UTF-16 replacement
+spans. Code verifies the expression, exact span and the existing meaning guard.
+The detector and proofreading prompt never receive the saved list. Opening an
+unchanged text reuses the in-memory Learning result, including an empty answer;
+editing while a request is pending cannot attach its answer to the wrong text.
 
 ## Word pronunciation
 

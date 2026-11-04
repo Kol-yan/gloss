@@ -3,6 +3,9 @@ import type { Learner } from "../auth/sessions";
 import { getDb, immediate, learnerScope } from "../db";
 import type { ServerDeps } from "../deps";
 import { ConflictError, NotFoundError } from "../errors";
+import { matchExpressions } from "@/lib/expression-matches";
+import { toExpression } from "../practice/expressions";
+import { newId } from "../ids";
 
 export interface DecisionResult {
   id: string;
@@ -35,6 +38,16 @@ export function decideSuggestion(
         `UPDATE suggestions SET status = ?, decided_at = ?
          WHERE id = ? AND learner_id = ? AND status = 'pending'`,
       ).run(decision, now.toISOString(), suggestionId, learner.id);
+      if (decision === "accepted") {
+        // Reusing an already-saved expression with a suggestion is assisted
+        // use too. Recording it here keeps it distinct from real writing and
+        // remains idempotent with the pending-to-accepted transition.
+        const expressions = learnerScope(learner.id, db).select("expressions").map(toExpression);
+        const ids = new Set(matchExpressions(String(row.replacement), expressions).map((match) => match.expression.id));
+        const insert = db.prepare(`INSERT INTO evidence_events
+          (id, learner_id, expression_id, kind, created_at) VALUES (?, ?, ?, 'assisted_use', ?)`);
+        for (const id of ids) insert.run(newId(), learner.id, id, now.toISOString());
+      }
       return { id: suggestionId, status: decision };
     }
     if (current === decision) return { id: suggestionId, status: decision };

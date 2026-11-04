@@ -45,6 +45,7 @@ describe("GET /api/health", () => {
       "0006_word_pronunciation.sql",
       "0007_check_run_routing.sql",
       "0008_sentence_detection.sql",
+      "0009_writing_evidence.sql",
     ]);
   });
 

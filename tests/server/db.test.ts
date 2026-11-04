@@ -61,6 +61,7 @@ describe("openDatabase", () => {
       "0004_task_generation_claims.sql", "0005_byok_funding.sql",
       "0006_word_pronunciation.sql", "0007_check_run_routing.sql",
       "0008_sentence_detection.sql",
+      "0009_writing_evidence.sql",
     ]);
     const again = openDatabase(temp.path);
     expect(migrate(again)).toEqual([]);
@@ -74,6 +75,43 @@ describe("openDatabase", () => {
     expect(types.serving_provider).toBe("TEXT");
     // Money stays in whole micro-dollars.
     expect(types.settled_cost_micros).toBe("INTEGER");
+  });
+
+  it("preserves existing evidence and its constraints when adding independent writing", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "glossy-evidence-upgrade-"));
+    const oldMigrations = path.join(dir, "m");
+    mkdirSync(oldMigrations);
+    const source = defaultMigrationsDir();
+    for (const file of readdirSync(source).filter((name) => /^000[1-8]_.*\.sql$/.test(name))) {
+      copyFileSync(path.join(source, file), path.join(oldMigrations, file));
+    }
+    const db = new DatabaseSync(path.join(dir, "existing.db"));
+    db.exec("PRAGMA foreign_keys = ON");
+    try {
+      migrate(db, oldMigrations);
+      db.exec(`INSERT INTO learners (id, display_name, quota_profile, created_at) VALUES ('writer', 'Writer', 'pilot', '2026-11-03');
+        INSERT INTO check_runs (id, learner_id, request_id, text_hash, text_length, provider, model, status, created_at)
+          VALUES ('run', 'writer', 'request', 'h', 1, 'openrouter', 'model', 'ok', '2026-11-03');
+        INSERT INTO suggestions (id, check_run_id, learner_id, start, end, original, replacement, category, reason, meaning_change, status)
+          VALUES ('suggestion', 'run', 'writer', 0, 1, 'x', 'bottleneck', 'expression', 'A fit.', 0, 'accepted');
+        INSERT INTO expressions (id, learner_id, suggestion_id, text, meaning, familiarity, created_at)
+          VALUES ('expression', 'writer', 'suggestion', 'bottleneck', 'A delay.', 'new', '2026-11-03');
+        INSERT INTO evidence_events (id, learner_id, expression_id, kind, hint_used, transcript_edited, created_at)
+          VALUES ('old', 'writer', 'expression', 'assisted_use', 1, 1, '2026-11-03');`);
+      const before = db.prepare("SELECT * FROM evidence_events WHERE id = 'old'").get();
+      expect(migrate(db, source)).toEqual(["0009_writing_evidence.sql"]);
+      expect(db.prepare("SELECT * FROM evidence_events WHERE id = 'old'").get()).toEqual({ ...before, document_id: null });
+      db.exec(`INSERT INTO evidence_events (id, learner_id, expression_id, kind, document_id, created_at)
+        VALUES ('independent', 'writer', 'expression', 'independent_writing', 'document', '2026-11-03')`);
+      expect(() => db.exec(`INSERT INTO evidence_events (id, learner_id, expression_id, kind, document_id, verdict, created_at)
+        VALUES ('scored', 'writer', 'expression', 'independent_writing', 'document-2', 'used_well', '2026-11-03')`)).toThrow();
+      expect(() => db.exec(`INSERT INTO evidence_events (id, learner_id, expression_id, kind, document_id, created_at)
+        VALUES ('duplicate', 'writer', 'expression', 'independent_writing', 'document', '2026-11-03')`)).toThrow();
+      expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    } finally {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("upgrades a pre-detect database and preserves every funding and reservation field", () => {
@@ -120,7 +158,7 @@ describe("openDatabase", () => {
       }
 
       const applied = migrate(db, source);
-      expect(applied).toEqual(["0008_sentence_detection.sql"]);
+      expect(applied).toEqual(["0008_sentence_detection.sql", "0009_writing_evidence.sql"]);
 
       const row = db.prepare("SELECT * FROM check_runs WHERE id = 'run-old'").get() as Record<string, unknown>;
       expect(row).toMatchObject({
@@ -205,6 +243,7 @@ describe("openDatabase", () => {
       expect(migrate(db, source)).toEqual([
         "0007_check_run_routing.sql",
         "0008_sentence_detection.sql",
+        "0009_writing_evidence.sql",
       ]);
       const row = db.prepare("SELECT * FROM check_runs WHERE id = 'pre-routing-run'").get() as Record<string, unknown>;
       expect(row).toMatchObject({
