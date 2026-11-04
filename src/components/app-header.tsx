@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { AccountControls } from "./provider-access";
+import { BrandLockup } from "./brand";
 
 const NAV = [
   { href: "/", label: "Editor" },
@@ -13,13 +14,13 @@ const NAV = [
 export function AppHeader() {
   const pathname = usePathname();
 
-  if (pathname === "/practice") return null;
+  if (pathname === "/practice" || pathname === "/onboarding") return null;
 
   return (
     <header className="relative z-40 shrink-0 border-b border-line bg-paper/90 backdrop-blur">
       <div className="mx-auto flex min-h-13 w-full max-w-6xl flex-wrap items-center justify-between gap-1 px-4">
         <Link href="/" className="text-lg font-bold tracking-tight text-ink" aria-label="gloss, go to the editor">
-          gloss
+          <BrandLockup />
         </Link>
         <nav aria-label="Main">
           <ul className="flex items-center gap-0.5 text-sm font-semibold">

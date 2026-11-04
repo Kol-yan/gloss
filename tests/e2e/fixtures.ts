@@ -18,6 +18,23 @@ export async function joinAsNewLearner(page: Page): Promise<void> {
   await expect(page.getByText(/\d+ checks? left today/)).toBeVisible();
 }
 
+// Editor and expression tests start after onboarding; onboarding itself has a
+// separate browser suite that follows every learner-facing step.
+async function finishOnboardingSetup(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    const roundResponse = await fetch("/api/onboarding/word-check");
+    if (!roundResponse.ok) throw new Error("Could not prepare onboarding");
+    const round = await roundResponse.json();
+    const answersResponse = await fetch("/api/onboarding/word-check", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ answers: round.entries.map((entry: { id: string }) => ({ id: entry.id, answer: "use" })) }),
+    });
+    if (!answersResponse.ok) throw new Error("Could not answer onboarding");
+    const completeResponse = await fetch("/api/onboarding/complete", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    if (!completeResponse.ok) throw new Error("Could not complete onboarding");
+  });
+}
+
 export class Editor {
   readonly text: Locator;
   readonly rail: Locator;
@@ -95,6 +112,7 @@ function escapeRegExp(text: string): string {
 export const test = base.extend<{ editor: Editor }>({
   editor: async ({ page }, provide) => {
     await joinAsNewLearner(page);
+    await finishOnboardingSetup(page);
     await provide(new Editor(page));
   },
 });

@@ -68,6 +68,7 @@ describe("Word check migrations", () => {
         "0013_practice_word_progress.sql",
         "0014_practice_exercise_pool.sql",
         "0015_practice_sessions.sql",
+        "0017_onboarding_completion.sql",
       ]);
       expect(db.prepare("SELECT level FROM learners WHERE id = ?").get(learner)).toEqual({ level: null });
       expect(

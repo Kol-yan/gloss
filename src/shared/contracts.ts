@@ -436,6 +436,8 @@ export const WordCheckEntry = z
     text: z.string(),
     level: CefrLevel,
     definition: z.string(),
+    example: z.string().optional(),
+    ipa: z.string().nullable().optional(),
     answer: WordCheckAnswer.nullable(),
   })
   .strict();
@@ -569,6 +571,9 @@ export function resolveOnboardingEngineLevel(input: OnboardingLevelInput): CefrL
 
 export const OnboardingLevelRequest = z.object({ level: OnboardingLevelInput }).strict();
 export type OnboardingLevelRequest = z.infer<typeof OnboardingLevelRequest>;
+
+export const OnboardingCompletionRequest = z.object({}).strict();
+export const OnboardingCompletionResponse = z.object({ completed: z.literal(true) }).strict();
 
 // ---------------------------------------------------------------------------
 

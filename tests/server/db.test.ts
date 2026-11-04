@@ -77,6 +77,7 @@ describe("openDatabase", () => {
       "0013_practice_word_progress.sql",
       "0014_practice_exercise_pool.sql",
       "0015_practice_sessions.sql",
+      "0017_onboarding_completion.sql",
     ]);
     const again = openDatabase(temp.path);
     expect(migrate(again)).toEqual([]);
@@ -123,6 +124,7 @@ describe("openDatabase", () => {
         "0013_practice_word_progress.sql",
         "0014_practice_exercise_pool.sql",
         "0015_practice_sessions.sql",
+        "0017_onboarding_completion.sql",
       ]);
       expect(db.prepare("SELECT * FROM evidence_events WHERE id = 'old'").get()).toEqual({ ...before, document_id: null });
       db.exec(`INSERT INTO evidence_events (id, learner_id, expression_id, kind, document_id, created_at)
@@ -191,6 +193,7 @@ describe("openDatabase", () => {
         "0013_practice_word_progress.sql",
         "0014_practice_exercise_pool.sql",
         "0015_practice_sessions.sql",
+        "0017_onboarding_completion.sql",
       ]);
 
       const row = db.prepare("SELECT * FROM check_runs WHERE id = 'run-old'").get() as Record<string, unknown>;
@@ -283,6 +286,7 @@ describe("openDatabase", () => {
         "0013_practice_word_progress.sql",
         "0014_practice_exercise_pool.sql",
         "0015_practice_sessions.sql",
+        "0017_onboarding_completion.sql",
       ]);
       const row = db.prepare("SELECT * FROM check_runs WHERE id = 'pre-routing-run'").get() as Record<string, unknown>;
       expect(row).toMatchObject({

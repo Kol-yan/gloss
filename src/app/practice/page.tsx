@@ -3,6 +3,11 @@ import { Suspense } from "react";
 import { PracticeSession, PracticeSessionLoading } from "@/components/practice-session";
 import { PracticeRoute } from "@/features/practice/practice-route";
 import type { PracticeFixtureName } from "@/lib/practice-session-fixtures";
+import { redirect } from "next/navigation";
+import { connection } from "next/server";
+import { requireLearner } from "@/server/auth/request";
+import { UnauthorizedError } from "@/server/errors";
+import { hasCompletedOnboarding } from "@/server/learning/onboarding/completion";
 
 export const metadata: Metadata = { title: "Practice" };
 
@@ -27,9 +32,16 @@ export default function PracticePage({ searchParams }: { searchParams: SearchPar
 
 async function PracticePageContent({ searchParams }: { searchParams: SearchParams }) {
   const query = await searchParams;
+  const fixture = process.env.NODE_ENV !== "production" ? fixtureName(query.fixture) : undefined;
+  if (!fixture) {
+    await connection();
+    let learner;
+    try { learner = await requireLearner(); }
+    catch (error) { if (!(error instanceof UnauthorizedError)) throw error; }
+    if (learner && !hasCompletedOnboarding(learner.id)) redirect("/onboarding");
+  }
   const expressionId = typeof query.expression === "string" ? query.expression : undefined;
   if (expressionId) return <PracticeRoute />;
 
-  const fixture = process.env.NODE_ENV !== "production" ? fixtureName(query.fixture) : undefined;
   return <PracticeSession initialFixture={fixture} />;
 }

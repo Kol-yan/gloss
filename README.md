@@ -143,6 +143,26 @@ What needs which key:
 More detail is in [docs/development.md](docs/development.md). Docker and
 backups are in [SELF_HOSTING.md](SELF_HOSTING.md).
 
+## Browser extension
+
+Until a store listing is available, install from this repository:
+
+1. Open `chrome://extensions` in Chrome and turn on **Developer mode**.
+2. Choose **Load unpacked** and select the repository's `extension` folder.
+3. Open the extension settings, set your gloss server address, then choose
+   **Check connection**. Sign in to the same server in your browser first.
+
+See the [extension installation and setup guide](extension/README.md#install).
+
+## Desktop app
+
+Until a signed download is available, use the macOS build from the
+**Desktop app (macOS)** GitHub Actions workflow or build it from source.
+Move `gloss.app` to Applications and follow the desktop guide to sign in and
+allow Accessibility and microphone access when needed.
+
+See the [Mac installation and build guide](desktop/README.md#run-it-on-macos).
+
 ## Tests and checks
 
 ```bash

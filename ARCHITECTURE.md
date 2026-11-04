@@ -478,6 +478,35 @@ separate history. The rule is deliberately coarse: it separates adjacent
 levels and nothing more. It never flatters a learner (a mean of 1.9 is B1) and
 is documented here so the product can change it in one place.
 
+### Onboarding interface and completion
+
+The six-step interface lives at `/onboarding`: Welcome, Level, Word check,
+Word map, Your tools and All set. Only `/practice` checks completion and
+redirects an unfinished learner to onboarding. The editor, saved expressions,
+extension and dictation remain available independently. Development-only
+practice fixtures remain local previews.
+
+The interface submits each answer through the existing Word check API before
+moving on. Reloading retrieves the stored round and continues with its first
+unanswered entry. Word map places only entries answered `know_unused` on the
+line; it does not pretend that a new or already active word is on that edge.
+The response optionally includes the curated example sentence. Missing IPA
+remains visibly unavailable, and pronunciation uses the existing local voice
+controller.
+
+`POST /api/onboarding/complete` accepts an empty object and records completion
+for the current learner only, after a served Word check round is fully answered.
+Completion persists in SQLite and is idempotent. The final button waits for
+that response before navigating to `/practice`, which starts the existing
+practice session flow. Completion requires no model request.
+
+The word-line illustration is a client component with a bounded dot population,
+animation-frame drift, word labels, crossings and an eight-segment closing morph.
+It cancels its frames and Web Animations on cleanup. Reduced motion uses a
+static arrow and the final progress bar; resizing resets the illustration and
+finishes the closing morph immediately. The shared brand lockup uses a teal
+tile and a locally served Brygada 1918 font (SIL Open Font License).
+
 ## Word pronunciation
 
 Single-word expression suggestions can carry American English IPA from the same
