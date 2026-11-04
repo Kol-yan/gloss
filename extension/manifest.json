@@ -30,7 +30,6 @@
         "content/checks.js",
         "content/main.js"
       ],
-      "css": ["content/page.css"],
       "run_at": "document_idle"
     }
   ],

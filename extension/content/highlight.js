@@ -1,22 +1,33 @@
 // "Highlight my words": marks the learner's saved words in the page's text
-// with the CSS Custom Highlight API. The page's DOM is never changed, so
-// pages that manage their own DOM (React and the like) are not disturbed.
+// with overlay boxes drawn inside a closed shadow root owned by the extension.
+// The page's DOM text is never changed and nothing about the matches is
+// registered anywhere the page can read (no CSS.highlights, no attributes).
 // Hovering a marked word shows its saved meaning.
 (() => {
   const { buildWordMatcher, findWordMatches, isSkippedTag } = globalThis.glossWords;
   const ui = globalThis.glossUi;
-  const NAME = "gloss-word";
+  const STYLE = `
+    :host { all: initial; }
+    .layer { position: fixed; top: 0; left: 0; width: 0; height: 0; pointer-events: none; }
+    .box {
+      position: fixed; box-sizing: border-box; pointer-events: none;
+      background: rgb(13 122 114 / 0.18);
+      border-bottom: 1px dotted rgb(13 122 114 / 0.9);
+    }
+  `;
   // Bounds for very long pages: highlighting stops growing, the page does not slow down.
   const MAX_RANGES = 5000;
   const MAX_NODE_LENGTH = 100_000;
   const SETTLE_MS = 500;
 
-  const supported = typeof Highlight === "function" && typeof CSS !== "undefined" && Boolean(CSS.highlights);
+  const supported = typeof document.createRange === "function" && typeof Element.prototype.attachShadow === "function";
 
   let on = false;
   let error = null;
   let matcher = null;
-  let highlight = null;
+  let host = null;
+  let layer = null;
+  let drawFrame = 0;
   let count = 0;
   const marks = new Map();
   let observer = null;
@@ -27,7 +38,7 @@
   let shown = null;
 
   function skipElement(element) {
-    return isSkippedTag(element.tagName) || element.isContentEditable || ui.isOwnNode(element);
+    return isSkippedTag(element.tagName) || element.isContentEditable || ui.isOwnNode(element) || element === host;
   }
 
   function insideSkipped(node) {
@@ -40,7 +51,6 @@
   function unmark(node) {
     const list = marks.get(node);
     if (!list) return;
-    for (const mark of list) highlight.delete(mark.range);
     count -= list.length;
     marks.delete(node);
   }
@@ -54,7 +64,6 @@
       const range = document.createRange();
       range.setStart(node, match.start);
       range.setEnd(node, match.end);
-      highlight.add(range);
       list.push({ ...match, range });
     }
     if (list.length) {
@@ -85,6 +94,7 @@
     const roots = [...pending];
     pending.clear();
     for (const root of roots) scan(root);
+    scheduleDraw();
   }
 
   function observe(records) {
@@ -93,6 +103,7 @@
       else record.addedNodes.forEach((node) => pending.add(node));
     }
     if (!settleTimer) settleTimer = setTimeout(settle, SETTLE_MS);
+    scheduleDraw();
   }
 
   function caretAt(x, y) {
@@ -117,6 +128,47 @@
     return null;
   }
 
+  function ensureLayer() {
+    if (!host) {
+      host = document.createElement("gloss-marks");
+      host.setAttribute("style", "all: initial !important; position: fixed !important; top: 0 !important; left: 0 !important; width: 0 !important; height: 0 !important; pointer-events: none !important; z-index: 2147483646 !important;");
+      const shadow = host.attachShadow({ mode: "closed" });
+      const style = document.createElement("style");
+      style.textContent = STYLE;
+      layer = document.createElement("div");
+      layer.className = "layer";
+      shadow.append(style, layer);
+    }
+    // A page that re-renders <html> may drop the host; put it back.
+    if (!host.isConnected) document.documentElement.append(host);
+  }
+
+  function draw() {
+    drawFrame = 0;
+    if (!on || !layer) return;
+    ensureLayer();
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    const boxes = document.createDocumentFragment();
+    for (const list of marks.values()) {
+      for (const item of list) {
+        for (const rect of item.range.getClientRects()) {
+          if (rect.width <= 0 || rect.height <= 0) continue;
+          if (rect.bottom < 0 || rect.top > height || rect.right < 0 || rect.left > width) continue;
+          const box = document.createElement("div");
+          box.className = "box";
+          box.style.cssText = `left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;height:${rect.height}px`;
+          boxes.append(box);
+        }
+      }
+    }
+    layer.replaceChildren(boxes);
+  }
+
+  function scheduleDraw() {
+    if (on && !drawFrame) drawFrame = requestAnimationFrame(draw);
+  }
+
   function updateTip() {
     frame = 0;
     if (!pointer) return;
@@ -135,6 +187,7 @@
   function onScroll() {
     shown = null;
     ui.hideTip();
+    scheduleDraw();
   }
 
   function reset() {
@@ -143,7 +196,7 @@
     pending.clear();
     marks.clear();
     count = 0;
-    highlight?.clear();
+    layer?.replaceChildren();
   }
 
   function stop() {
@@ -153,9 +206,13 @@
     observer = null;
     document.removeEventListener("mousemove", onPointerMove, true);
     window.removeEventListener("scroll", onScroll, true);
+    window.removeEventListener("resize", onScroll);
+    cancelAnimationFrame(drawFrame);
+    drawFrame = 0;
     reset();
-    if (highlight) CSS.highlights.delete(NAME);
-    highlight = null;
+    host?.remove();
+    host = null;
+    layer = null;
     shown = null;
     ui.hideTip();
   }
@@ -176,18 +233,17 @@
     }
     reset();
     matcher = buildWordMatcher(result.words);
-    if (!highlight) {
-      highlight = new Highlight();
-      CSS.highlights.set(NAME, highlight);
-    }
     if (!on) {
       on = true;
+      ensureLayer();
       observer = new MutationObserver(observe);
       observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
       document.addEventListener("mousemove", onPointerMove, { capture: true, passive: true });
       window.addEventListener("scroll", onScroll, { capture: true, passive: true });
+      window.addEventListener("resize", onScroll, { passive: true });
     }
     if (matcher && document.body) scan(document.body);
+    scheduleDraw();
     return state();
   }
 

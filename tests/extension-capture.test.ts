@@ -105,7 +105,7 @@ describe("extension manifest", () => {
     expect(script.all_frames).toBeUndefined();
     expect(script.js[0]).toBe("content/words.js");
     expect(script.js.at(-1)).toBe("content/main.js");
-    for (const file of [...script.js, ...script.css]) expect(() => readFileSync(`extension/${file}`)).not.toThrow();
+    for (const file of [...script.js, ...(script.css ?? [])]) expect(() => readFileSync(`extension/${file}`)).not.toThrow();
   });
 
   it("works as a Chrome service worker and a Firefox background script", () => {
