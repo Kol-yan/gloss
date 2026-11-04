@@ -1,5 +1,6 @@
 import { DEFAULT_SETTINGS, readSettings, withSiteChecks } from "./lib/settings.mjs";
 import { accountLines, checksLine, highlightLine } from "./lib/status.mjs";
+import { brandFragment } from "./lib/brand.mjs";
 
 const ext = globalThis.browser ?? globalThis.chrome;
 const $ = (id) => document.getElementById(id);
@@ -28,20 +29,21 @@ async function tabMessage(message) {
 
 function showHighlight(state) {
   $("highlight").checked = Boolean(state?.on);
-  $("highlight-status").textContent = highlightLine(state);
+  $("highlight-status").replaceChildren(brandFragment(highlightLine(state)));
 }
 
 function showChecks(checks) {
-  $("site").textContent = page?.host ? `(${page.host})` : "";
-  $("site-off").checked = Boolean(checks?.offHere);
+  $("site").textContent = page?.host ?? "";
+  // The switch shows whether checks run on this site, so on means not off.
+  $("site-off").checked = Boolean(page?.host) && !checks?.offHere;
   $("site-off").disabled = !page?.host || Boolean(checks?.isApp);
-  $("checks-status").textContent = checksLine(checks);
+  $("checks-status").replaceChildren(brandFragment(checksLine(checks)));
 }
 
 async function loadAccount() {
   const lines = accountLines(await send({ type: "status" }));
-  $("account").textContent = lines.text;
-  $("account-note").textContent = lines.note;
+  $("account").replaceChildren(brandFragment(lines.text));
+  $("account-note").replaceChildren(brandFragment(lines.note));
   $("account-note").hidden = !lines.note;
   $("account-actions").hidden = !lines.openApp;
 }
@@ -56,7 +58,7 @@ async function init() {
   page = await tabMessage({ type: "page-state" });
   if (!page?.ok) {
     page = null;
-    $("highlight-status").textContent = "gloss cannot run on this page. If the page was open before gloss was installed or updated, reload it.";
+    $("highlight-status").replaceChildren(brandFragment("gloss cannot run on this page. If the page was open before gloss was installed or updated, reload it."));
     showChecks(null);
     return;
   }
@@ -75,7 +77,7 @@ $("highlight").addEventListener("change", async () => {
 });
 
 $("site-off").addEventListener("change", async () => {
-  const off = $("site-off").checked;
+  const off = !$("site-off").checked;
   try {
     const settings = readSettings(await ext.storage.local.get({ ...DEFAULT_SETTINGS, checksOffSites: [] }));
     await ext.storage.local.set({ checksOffSites: withSiteChecks(settings, page.host, off) });

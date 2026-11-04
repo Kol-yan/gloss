@@ -9,6 +9,7 @@
 body { width: 330px; margin: 0; padding: 14px 16px 16px; font-size: 14px; line-height: 1.45; }
 header { display: flex; align-items: center; justify-content: space-between; }
 .brand { margin: 0; color: #0a665f; font-size: 18px; font-weight: 750; }
+.brand-word { color: #0a665f; font-weight: 600; }
 p { margin: 6px 0 0; }
 h2 { margin: 0 0 6px; font-size: 13px; font-weight: 700; letter-spacing: 0.02em; color: #51656e; text-transform: uppercase; }
 .account { font-weight: 600; }
@@ -16,6 +17,7 @@ h2 { margin: 0 0 6px; font-size: 13px; font-weight: 700; letter-spacing: 0.02em;
 .note:empty { display: none; }
 section { margin-top: 14px; border-top: 1px solid #d6cec1; padding-top: 12px; }
 .switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.switch-label { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
 label { font-size: 15px; font-weight: 650; }
 .site { color: #51656e; font-weight: 500; font-size: 13px; overflow-wrap: anywhere; }
 footer { margin-top: 14px; border-top: 1px solid #d6cec1; padding-top: 12px; }
@@ -38,7 +40,7 @@ input[role="switch"]:disabled { cursor: default; opacity: 0.5; }
 
 @media (prefers-color-scheme: dark) {
   :root { color: #e9efed; background: #18272c; }
-  .brand, button.link { color: #8fd9cf; }
+  .brand, .brand-word, button.link { color: #8fd9cf; }
   .note, .site, h2 { color: #c0cdcc; }
   section, footer { border-color: #526462; }
   button.secondary { color: #e9efed; border-color: #809e9c; }

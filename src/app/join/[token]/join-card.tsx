@@ -1,5 +1,6 @@
 import { cookies, headers } from "next/headers";
 import { connection } from "next/server";
+import { BrandName } from "@/components/brand";
 import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
 import { getSessionCookieName, findLearnerBySessionToken } from "@/server/auth/sessions";
@@ -38,7 +39,7 @@ export async function JoinCard({ params }: { params: Promise<{ token: string }> 
   return (
     <EmptyState
       eyebrow="Invite"
-      title="You are invited to gloss"
+      title={<>You are invited to <BrandName /></>}
         action={continueAction}
     >
       Continue to start your session in this browser.

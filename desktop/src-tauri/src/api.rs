@@ -4,8 +4,9 @@
 //!
 //! Signing in reuses the web app's own session: the invite link is redeemed
 //! through `POST /join/{token}/continue`, exactly like the Continue button on
-//! the invite page, and the `glossy_session` cookie it sets is the credential
-//! for every later request.
+//! the invite page, and the `glossy_session` (or `glossy_session_<port>` on a
+//! development server) cookie it sets is the credential for every later
+//! request.
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -134,6 +135,9 @@ pub type ApiResult<T> = Result<T, ApiError>;
 pub struct Session {
     pub server: Url,
     pub token: String,
+    /// The cookie name the server issued. Development servers include their
+    /// port in the name so several local workspaces keep separate sessions.
+    pub cookie_name: String,
     /// Created by this app from an invite (see `credentials::StoredSession`).
     pub owned: bool,
 }
@@ -145,10 +149,10 @@ impl Session {
 
     fn cookie(&self) -> ApiResult<String> {
         // Never place anything but a well-formed token in a header.
-        if !looks_like_token(&self.token) {
+        if !looks_like_token(&self.token) || !is_session_cookie_name(&self.cookie_name) {
             return Err(ApiError::Server { code: "unauthorized".into(), message: String::new() });
         }
-        Ok(format!("{SESSION_COOKIE}={}", self.token))
+        Ok(format!("{}={}", self.cookie_name, self.token))
     }
 }
 
@@ -176,8 +180,8 @@ impl Client {
     }
 
     /// Redeems an invite exactly like the invite page's Continue button and
-    /// returns the session token from the cookie the server sets.
-    pub async fn redeem_invite(&self, server: &Url, invite_token: &str) -> ApiResult<String> {
+    /// returns the cookie name and session token the server sets.
+    pub async fn redeem_invite(&self, server: &Url, invite_token: &str) -> ApiResult<(String, String)> {
         if !looks_like_token(invite_token) {
             return Err(ApiError::InvalidInvite);
         }
@@ -315,18 +319,42 @@ fn error_from_body(status: StatusCode, body: Option<&[u8]>) -> ApiError {
     }
 }
 
-/// Finds a non-empty, well-formed session cookie among `Set-Cookie` headers.
-fn session_from_set_cookie<'a>(headers: impl Iterator<Item = &'a str>) -> Option<String> {
+/// Whether `name` is the session cookie name the server uses. Production
+/// keeps `glossy_session`; a development server adds its port.
+fn is_session_cookie_name(name: &str) -> bool {
+    if name == SESSION_COOKIE {
+        return true;
+    }
+    name.strip_prefix(SESSION_COOKIE)
+        .and_then(|rest| rest.strip_prefix('_'))
+        .is_some_and(|port| !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// Finds a non-empty, well-formed session cookie among `Set-Cookie` headers
+/// and keeps its name so later requests send it back unchanged.
+fn session_from_set_cookie<'a>(headers: impl Iterator<Item = &'a str>) -> Option<(String, String)> {
     for header in headers {
         let pair = header.split(';').next().unwrap_or("").trim();
-        if let Some((name, value)) = pair.split_once('=')
-            && name.trim() == SESSION_COOKIE
-            && looks_like_token(value.trim())
-        {
-            return Some(value.trim().to_owned());
+        if let Some((name, value)) = pair.split_once('=') {
+            let name = name.trim();
+            let value = value.trim();
+            if is_session_cookie_name(name) && looks_like_token(value) {
+                return Some((name.to_owned(), value.to_owned()));
+            }
         }
     }
     None
+}
+
+/// Accepts a bare session token or a `name=value` pair copied from the
+/// browser's cookie list. The session cookie name is preserved when present.
+pub fn session_from_input(input: &str) -> Option<(String, String)> {
+    let trimmed = input.trim();
+    let (name, value) = match trimmed.split_once('=') {
+        Some((name, value)) if is_session_cookie_name(name.trim()) => (name.trim(), value.trim()),
+        _ => (SESSION_COOKIE, trimmed),
+    };
+    looks_like_token(value).then(|| (name.to_owned(), value.to_owned()))
 }
 
 /// Accepts an invite link (`https://host/join/<token>`) or the bare token.
@@ -363,8 +391,45 @@ mod tests {
             "other=1; Path=/",
             "glossy_session=abcdefghijklmnopqrstuvwxyzABCDEFGHIJ0123-_Q; Path=/; HttpOnly; SameSite=lax",
         ];
-        assert_eq!(session_from_set_cookie(headers.into_iter()), Some(TOKEN.to_owned()));
+        assert_eq!(session_from_set_cookie(headers.into_iter()), Some(("glossy_session".to_owned(), TOKEN.to_owned())));
         assert_eq!(session_from_set_cookie(["glossy_session=; Max-Age=0"].into_iter()), None);
+    }
+
+    #[test]
+    fn reads_a_port_scoped_session_cookie() {
+        let headers = ["glossy_session_3621=abcdefghijklmnopqrstuvwxyzABCDEFGHIJ0123-_Q; Path=/"];
+        assert_eq!(
+            session_from_set_cookie(headers.into_iter()),
+            Some(("glossy_session_3621".to_owned(), TOKEN.to_owned()))
+        );
+    }
+
+    #[test]
+    fn rejects_cookie_names_that_only_look_like_sessions() {
+        for name in ["glossy_session_", "glossy_session_abc", "glossy_session_12x", "session_3000"] {
+            assert!(!is_session_cookie_name(name), "{name}");
+        }
+        assert!(is_session_cookie_name("glossy_session"));
+        assert!(is_session_cookie_name("glossy_session_3000"));
+    }
+
+    #[test]
+    fn reads_a_session_from_browser_input() {
+        assert_eq!(session_from_input(TOKEN), Some((SESSION_COOKIE.to_owned(), TOKEN.to_owned())));
+        assert_eq!(
+            session_from_input(&format!("glossy_session_3000={TOKEN}")),
+            Some(("glossy_session_3000".to_owned(), TOKEN.to_owned()))
+        );
+        assert_eq!(session_from_input("short"), None);
+        assert_eq!(session_from_input("other=abcdefghijklmnopqrstuvwxyzABCDEFGHIJ0123-_Q"), None);
+    }
+
+    #[test]
+    fn sends_the_cookie_back_under_the_name_it_was_issued_with() {
+        let server = Url::parse("http://localhost:3000").unwrap();
+        let session =
+            Session { server, token: TOKEN.to_owned(), cookie_name: "glossy_session_3000".to_owned(), owned: true };
+        assert_eq!(session.cookie().unwrap(), format!("glossy_session_3000={TOKEN}"));
     }
 
     #[test]
@@ -405,8 +470,8 @@ mod tests {
         tauri::async_runtime::block_on(async {
             let client = Client::new();
             let invite = invite_token_from_input(&link, &server).unwrap();
-            let token = client.redeem_invite(&server, &invite).await.expect("redeem");
-            let session = Session { server: server.clone(), token, owned: true };
+            let (cookie_name, token) = client.redeem_invite(&server, &invite).await.expect("redeem");
+            let session = Session { server: server.clone(), token, cookie_name, owned: true };
 
             let me = client.me(&session).await.expect("me");
             println!("signed in as {} ({}), AI enabled: {}", me.learner.display_name, me.access_mode, me.ai_enabled);

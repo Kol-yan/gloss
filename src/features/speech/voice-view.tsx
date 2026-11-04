@@ -2,6 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import Link from "next/link";
+import { BrandName } from "@/components/brand";
 import { Button } from "@/components/ui/button";
 import { AlertIcon, MicIcon, StopIcon } from "@/components/ui/icons";
 import { FeedbackPanel } from "@/features/practice/feedback-panel";
@@ -36,7 +37,7 @@ const ERROR_COPY: Record<VoiceErrorReason, { title: string; body: ReactNode }> =
   },
   unsupported: {
     title: "This browser can't record audio",
-    body: "Type your answer instead, or open gloss in another browser.",
+    body: <>Type your answer instead, or open <BrandName /> in another browser.</>,
   },
   nothing_recorded: {
     title: "We didn't catch that",

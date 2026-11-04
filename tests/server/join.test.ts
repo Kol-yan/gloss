@@ -207,7 +207,8 @@ describe("the join page (GET /join/[token])", () => {
     expect(html).toMatch(new RegExp(`<form [^>]*action="/join/${token}/continue"`));
     expect(html).toMatch(/<form [^>]*method="post"/);
     expect(html).toMatch(/<button[^>]*type="submit"[^>]*>Continue<\/button>/);
-    expect(html).toContain("You are invited to gloss");
+    expect(html).toContain("You are invited to");
+    expect(html).toContain('<span class="brand-word">gloss</span>');
     expect(uses(token)).toBe(0);
     expect(learnerCount()).toBe(before);
     // Rendering twice (a preview bot, then the visitor) still spends nothing.

@@ -1,3 +1,4 @@
+import { brandFragment } from "./brand";
 import { byId, errorMessage, invoke, listen } from "./bridge";
 import { remaining, type Overview } from "./types";
 
@@ -29,7 +30,7 @@ const edited = new Set<HTMLInputElement>();
 
 function line(text: string, className?: string): HTMLParagraphElement {
   const p = document.createElement("p");
-  p.textContent = text;
+  p.append(brandFragment(text));
   if (className) p.className = className;
   return p;
 }

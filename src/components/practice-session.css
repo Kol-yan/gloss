@@ -52,6 +52,10 @@
   animation: barGlow 1.8s ease-in-out infinite;
 }
 
+.practice-session-progress-fill {
+  transition: width 500ms ease-out;
+}
+
 .practice-session-progress-indeterminate {
   width: 38%;
   animation-name: barTravel, barGlow;

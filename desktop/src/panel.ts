@@ -1,5 +1,6 @@
 import { byId, errorMessage, invoke, listen } from "./bridge";
 import { remaining, type PanelAction, type PanelView, type Suggestion } from "./types";
+import { brandFragment } from "./brand";
 
 const title = byId<HTMLSpanElement>("title");
 const content = byId<HTMLElement>("content");
@@ -105,7 +106,9 @@ function renderChecking(preview: string) {
   spinner.setAttribute("role", "progressbar");
   spinner.setAttribute("aria-label", "Checking");
   const status = element("div", "centered");
-  status.append(spinner, element("p", "hint", "gloss is reading your text."));
+  const reading = element("p", "hint");
+  reading.append(brandFragment("gloss is reading your text."));
+  status.append(spinner, reading);
   content.replaceChildren(status, element("blockquote", "quote", preview));
   actions.replaceChildren(button("Cancel", dismiss));
 }

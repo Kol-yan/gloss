@@ -9,7 +9,7 @@ export function EmptyState({
   className = "",
 }: {
   eyebrow: string;
-  title: string;
+  title: ReactNode;
   children: ReactNode;
   action: ReactNode;
   className?: string;

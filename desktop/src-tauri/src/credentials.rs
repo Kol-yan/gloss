@@ -14,10 +14,19 @@ const SERVICE: &str = "gloss desktop session";
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StoredSession {
     pub token: String,
+    /// The cookie name the server issued (`glossy_session`, or
+    /// `glossy_session_<port>` on a development server). Sessions saved before
+    /// this field existed keep working with the production name.
+    #[serde(default = "default_session_cookie_name")]
+    pub cookie_name: String,
     /// True when this app created the session from an invite, so signing out
     /// ends it on the server. A session borrowed from the browser is only
     /// forgotten here, which keeps the browser signed in.
     pub owned: bool,
+}
+
+fn default_session_cookie_name() -> String {
+    "glossy_session".to_owned()
 }
 
 /// Tokens issued by the server are 43 base64url characters
@@ -108,6 +117,19 @@ impl Credentials {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_older_sessions_without_a_cookie_name() {
+        let old = r#"{"token":"abcdefghijklmnopqrstuvwxyzABCDEFGHIJ0123-_Q","owned":true}"#;
+        let session: StoredSession = serde_json::from_str(old).unwrap();
+        assert_eq!(session.cookie_name, "glossy_session");
+        assert!(session.owned);
+
+        let port_session = StoredSession { cookie_name: "glossy_session_3000".into(), ..session };
+        let stored = serde_json::to_string(&port_session).unwrap();
+        let read_back: StoredSession = serde_json::from_str(&stored).unwrap();
+        assert_eq!(read_back.cookie_name, "glossy_session_3000");
+    }
 
     #[test]
     fn checks_the_server_token_shape() {

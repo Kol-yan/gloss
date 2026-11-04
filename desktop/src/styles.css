@@ -231,6 +231,11 @@ label {
   color: var(--ink-muted);
 }
 
+.brand-word {
+  color: var(--accent);
+  font-weight: 600;
+}
+
 .card {
   background: var(--surface);
   border: 1px solid var(--line);

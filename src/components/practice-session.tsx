@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useId, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { BrandName } from "@/components/brand";
 import { AccessUnavailable, DemoSpentNotice } from "@/components/invite-required";
 import { VocabularyPronunciation } from "@/components/vocabulary-pronunciation";
 import { Button } from "@/components/ui/button";
@@ -106,7 +107,7 @@ type Screen =
   | { name: "answer" }
   | { name: "end" }
   | { name: "invite" }
-  | { name: "error"; title: string; detail: ReactNode; retry: "prepare" | "next" | "answer" | "finish" };
+  | { name: "error"; title: ReactNode; detail: ReactNode; retry: "prepare" | "next" | "answer" | "finish" };
 
 type RetryAction = "prepare" | "next" | "answer" | "finish";
 type ActiveRun = { controller: AbortController; generation: number };
@@ -257,7 +258,7 @@ function initialState(fixture?: PracticeFixtureName): InitialState {
   };
 }
 
-function friendlyFailure(failure: ApiFailure, action: RetryAction): { title: string; detail: ReactNode } {
+function friendlyFailure(failure: ApiFailure, action: RetryAction): { title: ReactNode; detail: ReactNode } {
   if (isQuota(failure) || failure.code === "budget_exhausted") {
     return {
       title: "The free demo is used up.",
@@ -265,7 +266,7 @@ function friendlyFailure(failure: ApiFailure, action: RetryAction): { title: str
     };
   }
   if (isAiOff(failure)) return { title: "Practice is paused right now.", detail: "Please come back later." };
-  if (failure.code === "network") return { title: "We couldn't reach gloss.", detail: "Check your connection, then try again." };
+  if (failure.code === "network") return { title: <>{"We couldn't reach "}<BrandName />.</>, detail: "Check your connection, then try again." };
   if (failure.code === "not_found") return { title: "This practice has ended.", detail: "Start a new round." };
   if (action === "answer") return { title: "We couldn't check that answer.", detail: "Please try again." };
   if (action === "next") return { title: "The next exercise isn't ready.", detail: "Try again in a moment." };
@@ -367,7 +368,7 @@ function PracticeSessionBody({ client, initialFixture }: PracticeSessionProps) {
   const [hint, setHint] = useState<string | null>(null);
   const [usedHint, setUsedHint] = useState(false);
   const [hintPending, setHintPending] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<ReactNode | null>(null);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
   const mountedRef = useRef(false);

@@ -4,7 +4,7 @@ use tauri::{AppHandle, Manager, State};
 
 use crate::api::{self, Session};
 use crate::check::{self, PanelAction, PanelView};
-use crate::credentials::{StoredSession, looks_like_token};
+use crate::credentials::StoredSession;
 use crate::platform::PrivacyPane;
 use crate::settings::{self, Settings};
 use crate::shortcuts;
@@ -41,8 +41,9 @@ pub async fn sign_in_with_invite(app: AppHandle, link: String) -> CommandResult<
     let server = state.server();
     let origin = settings::origin_string(&server);
     let invite = api::invite_token_from_input(&link, &server)?;
-    let token = state.client.redeem_invite(&server, &invite).await.map_err(|error| error.learner_message(&origin))?;
-    replace_session(&app, Session { server, token, owned: true }).await;
+    let (cookie_name, token) =
+        state.client.redeem_invite(&server, &invite).await.map_err(|error| error.learner_message(&origin))?;
+    replace_session(&app, Session { server, token, cookie_name, owned: true }).await;
     Ok(app.state::<AppState>().overview())
 }
 
@@ -54,11 +55,10 @@ pub async fn sign_in_with_session(app: AppHandle, token: String) -> CommandResul
     let state = app.state::<AppState>();
     let server = state.server();
     let origin = settings::origin_string(&server);
-    let token = token.trim().trim_start_matches(&format!("{}=", api::SESSION_COOKIE)).trim().to_owned();
-    if !looks_like_token(&token) {
+    let Some((cookie_name, token)) = api::session_from_input(&token) else {
         return Err("A session value is 43 letters, digits, - or _. Copy the whole value.".into());
-    }
-    let session = Session { server, token, owned: false };
+    };
+    let session = Session { server, token, cookie_name, owned: false };
     match state.client.me(&session).await {
         Ok(_) => {}
         Err(error) if error.is_unauthorized() => {
@@ -80,7 +80,10 @@ async fn replace_session(app: &AppHandle, session: Session) {
     {
         let _ = state.client.sign_out(&previous).await;
     }
-    state.credentials.save(&origin, &StoredSession { token: session.token.clone(), owned: session.owned });
+    state.credentials.save(
+        &origin,
+        &StoredSession { token: session.token.clone(), cookie_name: session.cookie_name.clone(), owned: session.owned },
+    );
     state::refresh_account(app).await;
 }
 

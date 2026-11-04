@@ -94,7 +94,7 @@ impl AppState {
     pub fn session(&self) -> Option<Session> {
         let server = self.server();
         let stored = self.credentials.load(&settings::origin_string(&server))?;
-        Some(Session { server, token: stored.token, owned: stored.owned })
+        Some(Session { server, token: stored.token, cookie_name: stored.cookie_name, owned: stored.owned })
     }
 
     pub fn overview(&self) -> Overview {

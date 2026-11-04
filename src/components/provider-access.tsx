@@ -4,6 +4,7 @@ import { useId, useState, type FormEvent } from "react";
 import { enrollByok } from "@/features/api/client";
 import { forgetProviderKey, isProviderKey } from "@/features/api/access-store";
 import { useAccess } from "@/features/api/use-access";
+import { BrandName, BrandedText } from "./brand";
 import { Button } from "./ui/button";
 
 export function ProviderKeyForm({ onReady, compact = false }: { onReady?: () => void; compact?: boolean }) {
@@ -34,8 +35,8 @@ export function ProviderKeyForm({ onReady, compact = false }: { onReady?: () => 
     <form onSubmit={(event) => void submit(event)} className="flex flex-col gap-3 text-left">
       {!compact ? <h2 className="text-xl font-semibold">Use your own OpenRouter key</h2> : null}
       <p id={descriptionId} className="text-sm leading-snug text-ink-muted">
-        Your key is stored only in this browser. For cloud requests, it passes temporarily through gloss to OpenRouter.
-        The gloss server never saves it. OpenRouter charges your account for model use.
+        Your key is stored only in this browser. For cloud requests, it passes temporarily through <BrandName /> to OpenRouter.
+        The <BrandName /> server never saves it. OpenRouter charges your account for model use.
       </p>
       <div className="flex flex-col gap-1.5">
         <label htmlFor={inputId} className="text-sm font-semibold">OpenRouter key</label>
@@ -56,7 +57,7 @@ export function ProviderKeyForm({ onReady, compact = false }: { onReady?: () => 
       <Button type="submit" variant="primary" disabled={!isProviderKey(draft)} pending={pending}>
         {pending ? "Connecting…" : access.session?.accessMode === "byok" ? "Use this key" : "Start with my key"}
       </Button>
-      {message ? <p role="status" className="text-sm leading-snug text-ink-muted">{message}</p> : null}
+      {message ? <p role="status" className="text-sm leading-snug text-ink-muted"><BrandedText text={message} /></p> : null}
       {access.storageNotice ? <p role="status" className="text-sm leading-snug text-caution">{access.storageNotice}</p> : null}
     </form>
   );
@@ -72,9 +73,6 @@ export function SettingsPanel() {
         <p className="eyebrow">Settings</p>
         <h1 id="settings-title" className="mt-1 text-2xl font-semibold tracking-tight">Cloud access</h1>
       </div>
-      <p className="text-sm leading-relaxed text-ink-muted">
-        Your key is saved only in this browser and passes temporarily through gloss for cloud requests. OpenRouter charges your account for model use. Your workspace stays in this browser when you add your key.
-      </p>
       {access.session ? (
         <p className="text-sm text-ink-muted">
           {byok

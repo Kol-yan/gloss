@@ -14,7 +14,7 @@
     </header>
     <p id="account" class="account" role="status" aria-live="polite">Checking your sign-in…</p>
     <p id="account-note" class="note" hidden></p>
-    <p id="account-actions" hidden><button id="open-app" class="secondary" type="button">Open gloss</button></p>
+    <p id="account-actions" hidden><button id="open-app" class="secondary" type="button">Open <span class="brand-word">gloss</span></button></p>
 
     <section aria-labelledby="highlight-label">
       <div class="switch-row">
@@ -27,7 +27,10 @@
     <section aria-labelledby="checks-title">
       <h2 id="checks-title">Writing checks</h2>
       <div class="switch-row">
-        <label for="site-off">Off on this site <span id="site" class="site"></span></label>
+        <div class="switch-label">
+          <label for="site-off">Check writing on this site</label>
+          <span id="site" class="site"></span>
+        </div>
         <input id="site-off" type="checkbox" role="switch" disabled />
       </div>
       <p id="checks-status" class="note" aria-live="polite"></p>

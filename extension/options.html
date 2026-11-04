@@ -14,9 +14,9 @@
 
       <form id="settings">
         <fieldset id="controls" disabled>
-          <label for="app-origin">Your gloss server</label>
+          <label for="app-origin">Your <span class="brand-word">gloss</span> server</label>
           <input id="app-origin" name="appOrigin" type="url" value="http://localhost:3000" placeholder="http://localhost:3000" required autocomplete="url" aria-describedby="address-help status" />
-          <p id="address-help">An HTTPS address without a path, or HTTP on localhost or 127.0.0.1 for a local server. Saving asks your browser to let gloss reach this address.</p>
+          <p id="address-help">An HTTPS address without a path, or HTTP on localhost or 127.0.0.1 for a local server. Saving asks your browser to let <span class="brand-word">gloss</span> reach this address.</p>
           <div class="actions">
             <button type="submit">Save address</button>
             <button id="use-default" class="secondary" type="button">Use localhost:3000</button>
@@ -28,19 +28,19 @@
 
       <section aria-labelledby="sign-in-title">
         <h2 id="sign-in-title">Signing in</h2>
-        <p>The extension uses your gloss session in this browser. Open your invite link once in this browser, then come back here and check the connection.</p>
+        <p>The extension uses your <span class="brand-word">gloss</span> session in this browser. Open your invite link once in this browser, then come back here and check the connection.</p>
       </section>
 
       <section aria-labelledby="checks-title">
         <h2 id="checks-title">Writing checks</h2>
         <label class="check"><input id="checks-enabled" type="checkbox" disabled /> Check my writing in text fields on all sites</label>
-        <p class="hint">After you pause typing, the text of the field you are writing in is sent to your gloss server for a cloud check. Each check counts toward your daily allowance. Password and other structured fields are never checked.</p>
+        <p class="hint">After you pause typing, the text of the field you are writing in is sent to your <span class="brand-word">gloss</span> server for a cloud check. Each check counts toward your daily allowance. Password and other structured fields are never checked.</p>
         <h3>Sites where checks are off</h3>
         <ul id="off-sites"></ul>
         <p id="no-off-sites" class="hint">None. Use “Off on this site” in the toolbar popup to add one.</p>
       </section>
 
-      <p class="privacy">This extension stores only your server address, whether writing checks are on, and the sites where you turned them off. Saved words travel to your server with fetch requests; nothing is put in page addresses or browser history. “Check with gloss” still opens the editor with the selection in the address fragment.</p>
+      <p class="privacy">This extension stores only your server address, whether writing checks are on, and the sites where you turned them off. Saved words travel to your server with fetch requests; nothing is put in page addresses or browser history. “Check with <span class="brand-word">gloss</span>” still opens the editor with the selection in the address fragment.</p>
     </main>
   </body>
 </html>

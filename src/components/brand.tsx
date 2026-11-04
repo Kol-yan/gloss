@@ -2,6 +2,17 @@ export function BrandName() {
   return <span className="brand-word">gloss</span>;
 }
 
+// Renders a message string with the brand word in its teal, semibold style.
+export function BrandedText({ text }: { text: string }) {
+  return (
+    <>
+      {text.split(/(\bgloss\b)/).map((part, index) =>
+        part === "gloss" ? <BrandName key={index} /> : part,
+      )}
+    </>
+  );
+}
+
 export function BrandLockup() {
   return (
     <span className="brand-lockup" aria-label="gloss">

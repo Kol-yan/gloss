@@ -3,7 +3,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { BrandLockup, BrandName } from "@/components/brand";
+import { BrandLockup, BrandName, BrandedText } from "@/components/brand";
 import { VocabularyPronunciation } from "@/components/vocabulary-pronunciation";
 import { bootstrapGuestAccess } from "@/features/api/client";
 import { ONBOARDING_LEVEL_GROUP_LIST, type OnboardingLevelGroup, type WordCheckAnswer, type WordCheckResponse } from "@/shared/contracts";
@@ -184,7 +184,7 @@ export function Onboarding({ client = onboardingClient, initialRound = null, ini
         </div></>}
         {step === "ready" && <><h1>{hasReady ? "Your first practice is ready" : "You're all set"}</h1><p className="onb-lede ready-lede">{readyEntries.length >= 8 ? "8 words, about 6 minutes. We start with the words on the line." : hasReady ? "We start with the words on the line." : "Add words while you write, then come back to practice."}</p><WordLine mode="ready" words={readyWords} /></>}
       </div>
-      {error && <p className="onb-error" role="alert">{error}</p>}
+      {error && <p className="onb-error" role="alert"><BrandedText text={error} /></p>}
       <footer className="onb-actions">
         {step !== "welcome" && <button className="onb-back" type="button" onClick={back} disabled={busy}>{step === "ready" ? "Install tools" : "Back"}</button>}
         <button className="onb-next" type="button" onClick={next} disabled={busy || (step === "check" && !selectedAnswer)}>{busy ? "Saving…" : step === "welcome" ? "Get started" : step === "ready" ? hasReady ? "Start first practice" : "Open practice" : step === "check" ? "Next" : "Continue"}</button>

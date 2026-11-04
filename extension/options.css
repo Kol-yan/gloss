@@ -9,6 +9,7 @@
 body { margin: 0; padding: 32px 20px; }
 main { max-width: 620px; margin: 0 auto; }
 .brand { color: #0a665f; font-size: 20px; font-weight: 750; }
+.brand-word { color: #0a665f; font-weight: 600; }
 h1 { font-size: 30px; line-height: 1.15; }
 p { font-size: 15px; line-height: 1.55; }
 fieldset { border: 0; padding: 0; margin: 28px 0 0; }
@@ -34,7 +35,7 @@ button.small { padding: 6px 12px; font-size: 13px; }
 
 @media (prefers-color-scheme: dark) {
   :root { color: #e9efed; background: #18272c; }
-  .brand { color: #8fd9cf; }
+  .brand, .brand-word { color: #8fd9cf; }
   input { color: #e9efed; background: #203139; border-color: #809e9c; }
   #address-help, .privacy, .hint { color: #c0cdcc; }
   button.secondary { color: #e9efed; border-color: #809e9c; }
