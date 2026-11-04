@@ -7,7 +7,7 @@ Browser                                   Server (Next.js route handlers)
 ├─ Editor + rule checker (WASM worker)    ├─ Session and invites
 │   local suggestions, never uploaded     ├─ Budget: quotas + daily spend ceiling
 ├─ Practice: writing and voice            ├─ Proofread, practice situations (fast tier)
-└─ History                                ├─ Evaluation of answers (smart tier: Meta Muse Spark)
+└─ History                                ├─ Evaluation of answers, dictation clean-up (smart tier: Meta Muse Spark)
                                           ├─ Speech-to-text (Meta Muse Voice Transcribe)
                                           └─ SQLite
 ```
@@ -45,7 +45,7 @@ object, and enrollment is rate limited.
 
 Two independent limits protect the operator's API credits:
 
-1. **Per-learner daily quotas** by kind: `proofread`, `detect` and `evaluate` (operations) and `asrSeconds`. Detector and generator operations count separately; each profile's `detect` limit matches its existing `proofread` limit.
+1. **Per-learner daily quotas** by kind: `proofread`, `detect` and `evaluate` (operations) and `asrSeconds`. Detector and generator operations count separately, and each profile sets both limits (`QUOTA_PROFILES` in `src/server/config.ts`). Writing a practice situation counts toward `evaluate`; dictation clean-up counts toward `proofread`.
 2. **A daily spend ceiling** for the whole instance (`DAILY_BUDGET_USD`).
 
 Before a model call, `reserve()` runs in one `BEGIN IMMEDIATE` transaction: it checks the kill switch, the learner quota and `reserved + actual + maxCost <= ceiling`, then inserts a reservation. `maxCost` is an upper bound from the input size, the role's `max_tokens` and the configured price. After the call, `settle()` records the actual cost from reported usage. If the outcome is unknown (timeout, dropped connection), the reservation stays counted, because the provider may have done the work. Retries are new reservations.
@@ -98,7 +98,7 @@ Money is stored in micro-dollars (integers). Dates are UTC ISO strings; "today" 
 
 Request and response schemas are in `src/shared/contracts.ts`. Errors use `{ error: { code, message } }` with a short learner-safe message.
 
-`POST /api/detect` accepts 1–8 hashed sentences with at most 6,000 UTF-16 text units total and optional local-rule ranges. Its response contains probabilities only; `detect_runs` retains a fingerprint and decisions, not sentence text. Detector calls use their own quota, equal to the profile's existing proofreading limit. `/api/me` reports hosted AI disabled when the owner OpenRouter key is missing or malformed; BYOK availability still uses the visitor's browser-held key and the global kill switch.
+`POST /api/detect` accepts 1–8 hashed sentences with at most 6,000 UTF-16 text units total and optional local-rule ranges. Its response contains probabilities only; `detect_runs` retains a fingerprint and decisions, not sentence text. Detector calls use their own `detect` quota. `/api/me` reports hosted AI disabled when the owner OpenRouter key is missing or malformed; BYOK availability still uses the visitor's browser-held key and the global kill switch.
 
 ## Models
 
@@ -122,6 +122,7 @@ another provider or tier: a job whose tier cannot be served is refused.
 | Proofreading | fast |
 | Practice situations | fast |
 | Evaluation of learner answers | smart |
+| Dictation clean-up | smart |
 | Speech-to-text | Meta Muse Voice Transcribe (`meta/muse-voice-transcribe-1.0` for visitors) |
 
 The fast tier asks OpenRouter for a strict `json_schema` response, `reasoning`
