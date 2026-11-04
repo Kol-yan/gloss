@@ -275,6 +275,101 @@ export type ExpressionHistory = z.infer<typeof ExpressionHistory>;
 export const ExpressionsResponse = z.object({ expressions: z.array(ExpressionHistory) });
 export type ExpressionsResponse = z.infer<typeof ExpressionsResponse>;
 
+// POST /api/practice/sessions. `requestId` makes session creation safe to retry.
+export const PracticeSessionPrepareRequest = z.object({
+  requestId: z.uuid(),
+  size: z.number().int().min(1).max(8).optional(),
+}).strict();
+export type PracticeSessionPrepareRequest = z.infer<typeof PracticeSessionPrepareRequest>;
+
+export const PracticeSessionStatus = z.enum(["preparing", "ready", "failed", "finished", "empty"]);
+export type PracticeSessionStatus = z.infer<typeof PracticeSessionStatus>;
+export const PracticeFrequencyBand = z.enum(["core", "common", "uncommon", "rare"]);
+export type PracticeFrequencyBand = z.infer<typeof PracticeFrequencyBand>;
+
+export const PracticeSessionReadiness = z.object({
+  sessionId: z.uuid(),
+  ready: z.number().int().nonnegative(),
+  total: z.number().int().nonnegative(),
+  status: PracticeSessionStatus,
+  canStart: z.boolean(),
+}).strict();
+export type PracticeSessionReadiness = z.infer<typeof PracticeSessionReadiness>;
+
+export const PracticeSessionExercise = z.object({
+  exerciseId: z.uuid(),
+  rung: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
+  sentence: z.string(),
+  prompt: z.string(),
+  options: z.array(z.string()).length(4).nullable(),
+}).strict().superRefine((exercise, context) => {
+  if ((exercise.rung === 4) !== (exercise.options === null)) {
+    context.addIssue({ code: "custom", message: "Only rung four uses typed recall." });
+  }
+});
+export type PracticeSessionExercise = z.infer<typeof PracticeSessionExercise>;
+
+export const PracticeSessionNextResponse = z.object({
+  status: z.enum(["ready", "waiting", "complete"]),
+  exercise: PracticeSessionExercise.nullable(),
+}).strict();
+export type PracticeSessionNextResponse = z.infer<typeof PracticeSessionNextResponse>;
+
+export const PracticeSessionAnswerRequest = z.object({
+  exerciseId: z.uuid(),
+  answer: z.string().max(500),
+  usedHint: z.boolean(),
+  dontKnow: z.boolean().optional(),
+}).strict();
+export type PracticeSessionAnswerRequest = z.infer<typeof PracticeSessionAnswerRequest>;
+
+export const PracticeReaction = z.enum(["already_know", "too_easy", "not_relevant", "too_hard"]);
+export type PracticeReaction = z.infer<typeof PracticeReaction>;
+
+export const PracticeSessionReactionRequest = z.object({
+  exerciseId: z.uuid(),
+  reaction: PracticeReaction,
+}).strict();
+export type PracticeSessionReactionRequest = z.infer<typeof PracticeSessionReactionRequest>;
+
+export const PracticeSessionAnswerView = z.object({
+  exerciseId: z.uuid(),
+  correct: z.boolean(),
+  word: z.string(),
+  frequency: PracticeFrequencyBand,
+  ipa: z.string().max(MAX_IPA_LENGTH).nullable(),
+  meaning: z.string(),
+  example: z.string(),
+  comesBackText: z.string(),
+  allowedReactions: z.array(PracticeReaction),
+  reaction: PracticeReaction.nullable(),
+}).strict();
+export type PracticeSessionAnswerView = z.infer<typeof PracticeSessionAnswerView>;
+
+export const PracticeSessionAnswerResponse = z.object({
+  answer: PracticeSessionAnswerView,
+}).strict();
+export type PracticeSessionAnswerResponse = z.infer<typeof PracticeSessionAnswerResponse>;
+
+export const PracticeSessionHintRequest = z.object({ exerciseId: z.uuid() }).strict();
+export type PracticeSessionHintRequest = z.infer<typeof PracticeSessionHintRequest>;
+export const PracticeSessionHintResponse = z.object({
+  exerciseId: z.uuid(),
+  hint: z.string().max(200),
+}).strict();
+export type PracticeSessionHintResponse = z.infer<typeof PracticeSessionHintResponse>;
+
+export const PracticeSessionFinishResponse = z.object({
+  sessionId: z.uuid(),
+  summary: z.string(),
+  correct: z.number().int().nonnegative(),
+  answered: z.number().int().nonnegative(),
+  total: z.number().int().nonnegative(),
+  durationSeconds: z.number().int().nonnegative(),
+  durationMinutes: z.number().int().nonnegative(),
+}).strict();
+export type PracticeSessionFinishResponse = z.infer<typeof PracticeSessionFinishResponse>;
+
 export const MAX_LEARNING_EXPRESSIONS = 30;
 export const LearningRequest = ProofreadRequest.strict();
 export type LearningRequest = z.infer<typeof LearningRequest>;

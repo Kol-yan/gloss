@@ -58,6 +58,11 @@ const EnvSchema = z.object({
   OPENROUTER_FAST_PRICE_OUT_PER_M: optionalPrice,
   BYOK_TRUST_PROXY_HEADERS: z.preprocess(blankAsUndefined, z.stringbool().default(false)),
   AI_ENABLED: z.preprocess(blankAsUndefined, z.stringbool().default(true)),
+  PRACTICE_GENERATION_TIER: z.preprocess(blankAsUndefined, z.enum(["fast", "smart"]).default("fast")),
+  PRACTICE_GENERATION_MAX_COST_MICROS: z.preprocess(
+    blankAsUndefined,
+    z.coerce.number().int().min(1).max(1_000_000).default(50_000),
+  ),
   DAILY_BUDGET_USD: z.preprocess(
     blankAsUndefined,
     z.coerce.number().finite().min(0).max(100_000).default(5),
@@ -87,6 +92,8 @@ export interface AppConfig {
   byokTrustProxyHeaders: boolean;
   // Env-level kill switch. The runtime switch lives in the settings table.
   aiEnabled: boolean;
+  practiceGenerationTier: "fast" | "smart";
+  practiceGenerationMaxCostMicros: number;
   dailyBudgetUsd: number;
   // Integer micro-dollars; the unit all budget arithmetic uses.
   dailyBudgetMicros: number;
@@ -127,6 +134,8 @@ export function loadConfig(env: Record<string, string | undefined>): AppConfig {
     },
     byokTrustProxyHeaders: v.BYOK_TRUST_PROXY_HEADERS,
     aiEnabled: v.AI_ENABLED,
+    practiceGenerationTier: v.PRACTICE_GENERATION_TIER,
+    practiceGenerationMaxCostMicros: v.PRACTICE_GENERATION_MAX_COST_MICROS,
     dailyBudgetUsd: v.DAILY_BUDGET_USD,
     dailyBudgetMicros: Math.round(v.DAILY_BUDGET_USD * 1_000_000),
     databasePath: v.GLOSSY_DATABASE_PATH,

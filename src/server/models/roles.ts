@@ -26,6 +26,11 @@ export const BUILD_PRACTICE_ROLE = { tier: "fast", maxTokens: 4096, temperature:
   maxTokens: number;
   temperature: number;
 };
+export const PRACTICE_GENERATION_ROLE = { tier: "fast", maxTokens: 4096, temperature: 0.2 } as const satisfies {
+  tier: ModelTier;
+  maxTokens: number;
+  temperature: number;
+};
 // Tidies dictated speech: punctuation and fillers only, so little reasoning is needed.
 export const DICTATION_CLEANUP_ROLE = {
   tier: "smart",

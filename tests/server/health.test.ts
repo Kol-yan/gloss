@@ -46,6 +46,9 @@ describe("GET /api/health", () => {
       "0007_check_run_routing.sql",
       "0008_sentence_detection.sql",
       "0009_writing_evidence.sql",
+      "0010_practice_word_progress.sql",
+      "0011_practice_exercise_pool.sql",
+      "0012_practice_sessions.sql",
     ]);
   });
 
