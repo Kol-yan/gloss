@@ -4,6 +4,7 @@ import { PracticeSessionReadiness } from "@/shared/contracts";
 const harness = vi.hoisted(() => ({
   afterTasks: [] as Array<() => Promise<void>>,
   failGeneration: false,
+  fallbackRung: null as 1 | 2 | 3 | 4 | null,
   waitForGeneration: null as Promise<void> | null,
   generationStarted: null as (() => void) | null,
 }));
@@ -35,6 +36,7 @@ vi.mock("@/server/practice/exercise-pool", async () => {
         return curated ? { text: curated.text, meaning: curated.definition } : undefined;
       })();
       if (!word) throw new Error("Practice word is unavailable");
+      rung = harness.fallbackRung ?? rung;
       const options = rung === 1
         ? [word.meaning, "a different idea", "another meaning", "a final meaning"]
         : [word.text, "another word", "a third word", "a fourth word"];
@@ -94,6 +96,7 @@ function seedEngineWord(
 beforeEach(() => {
   harness.afterTasks = [];
   harness.failGeneration = false;
+  harness.fallbackRung = null;
   harness.waitForGeneration = null;
   harness.generationStarted = null;
 });
@@ -308,6 +311,26 @@ describe("practice session API", () => {
     const progress = db().prepare("SELECT productive_answers, consecutive_errors FROM word_progress WHERE learner_id = ? AND expression_id = ?")
       .get(learner.learner.id, expressionId) as { productive_answers: number; consecutive_errors: number };
     expect(progress).toEqual({ productive_answers: 0, consecutive_errors: 1 });
+  });
+
+  it("serves a surviving lower rung and records its actual learning evidence", async () => {
+    const learner = login();
+    const { expressionId } = seedExpression(learner.learner.id, { text: "careful", meaning: "paying attention" });
+    seedEngineWord(learner.learner.id, expressionId, "careful", "active", 4);
+    harness.fallbackRung = 1;
+    const prepared = preparePracticeSession(learner.learner, { requestId: crypto.randomUUID(), size: 1 });
+    await (await import("@/server/practice/sessions")).continuePracticePreparation(
+      learner.learner.id, prepared.sessionId, { provider: "meta" },
+    );
+    const next = nextPracticeExercise(learner.learner.id, prepared.sessionId);
+    expect(next.exercise).toMatchObject({ rung: 1 });
+    const response = await answerRoute(
+      post({ exerciseId: next.exercise?.exerciseId, answer: "paying attention", usedHint: false }),
+      params(prepared.sessionId),
+    );
+    expect(response.status).toBe(200);
+    expect(db().prepare("SELECT rung, productive FROM word_practice_events WHERE learner_id = ? AND expression_id = ?")
+      .get(learner.learner.id, expressionId)).toEqual({ rung: 1, productive: 0 });
   });
 
   it("maps engine rungs five and six to the served rung-four recall exercise", async () => {

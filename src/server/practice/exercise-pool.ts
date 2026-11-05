@@ -11,6 +11,7 @@ import type { ChatMessage } from "../models/meta";
 import { resolveProviderAccess, resolveTextRoute } from "../models/access";
 import { estimateMaxCostMicros } from "../models/meta";
 import { PRACTICE_GENERATION_ROLE } from "../models/roles";
+import { ModelOutputError } from "../models/errors";
 import { runReservedChat } from "../models/reserved-chat";
 import { reserve } from "../budget";
 import { starterEntry } from "../learning/starter";
@@ -90,78 +91,102 @@ function readAnswer(exercise: GeneratedExercise, expression: string, meaning: st
   return exercise.options.find((option) => normalizeForMatch(option) === normalizeForMatch(expression)) ?? exercise.answer;
 }
 
-function parseBundle(content: string, expression: string, meaning: string, recent: Set<string>): ExerciseBundle | null {
-  const parsed = parseModelJson(content) as { exercises?: unknown } | undefined;
-  if (!parsed || !Array.isArray(parsed.exercises) || parsed.exercises.length !== 8) return null;
-  const result: GeneratedExercise[] = [];
-  const seenSentences = new Set<string>();
-  const counts = new Map<number, number>();
-  for (const raw of parsed.exercises) {
-    if (!raw || typeof raw !== "object") return null;
-    const value = raw as Record<string, unknown>;
-    const rung = value.rung;
-    const keys = ["rung", "sentence", "prompt", "options", "answer", "hint", "example"];
-    if (Object.keys(value).some((key) => !keys.includes(key)) || keys.some((key) => !(key in value)) ||
-      typeof rung !== "number" || !Number.isInteger(rung) || ![1, 2, 3, 4].includes(rung) ||
-      !["sentence", "prompt", "answer", "hint", "example"].every((k) => typeof value[k] === "string")) return null;
-    // A model may return null for a field it was not asked to fill (a hint,
-    // or the options of a rung 4 recall); an empty string is the absent value.
-    for (const key of ["sentence", "prompt", "answer", "hint", "example"]) {
-      if (value[key] === null) value[key] = "";
-    }
-    // Option rungs use four short options; recall uses no options at all.
-    const rawOptions = value.options === null && rung === 4 ? [] : value.options;
-    const options = Array.isArray(rawOptions) && rawOptions.every((x) => typeof x === "string")
-      ? rawOptions.map((x) => clean(x as string)) : rawOptions === null ? null : undefined;
-    if (options === undefined) return null;
-    const exercise = {
-      rung: Number(rung) as 1 | 2 | 3 | 4,
-      sentence: clean(value.sentence as string),
-      prompt: clean(value.prompt as string),
-      answer: clean(value.answer as string),
-      hint: clean(value.hint as string),
-      // The example sentence lives on the practice card, not in the exercise,
-      // so a model that leaves it out does not lose the whole round.
-      example: clean(value.example as string) || clean(value.sentence as string),
-      options: rung === 4 ? null : options,
-    };
-    exercise.answer = readAnswer(exercise, expression, meaning);
-    if (exercise.sentence.length < 12 || exercise.sentence.length > 320 || exercise.prompt.length < 4 || exercise.prompt.length > 240 || exercise.answer.length > 120 || !exercise.answer || exercise.hint.length > 200 || exercise.example.length < 12 || exercise.example.length > 320) return null;
-    if (exercise.options && exercise.options.some((option) => !option || option.length > 120)) return null;
-    const normalizedTarget = normalizeForMatch(expression);
-    if (exercise.rung === 1) {
-      // A model may write the sentence with a gap instead of the expression.
-      // Showing the expression is what rung 1 is about, so the gap is filled
-      // with the target rather than losing the exercise.
-      if ((exercise.sentence.match(/___/g) ?? []).length === 1 && !containsPhrase(exercise.sentence, expression)) {
-        exercise.sentence = exercise.sentence.replace("___", expression);
-      }
-      if (!containsPhrase(exercise.sentence, expression) || !exercise.options || exercise.options.length !== 4 || normalizeForMatch(exercise.answer) !== normalizeForMatch(meaning)) return null;
-    } else if (exercise.rung === 2) {
-      if (!exercise.options || exercise.options.length !== 4 || normalizeForMatch(exercise.answer) !== normalizedTarget ||
-        containsPhrase(exercise.sentence, expression) || containsPhrase(exercise.prompt, expression)) return null;
-    } else if (exercise.rung === 3) {
-      if (!exercise.options || exercise.options.length !== 4 || (exercise.sentence.match(/___/g) ?? []).length !== 1 ||
-        containsPhrase(exercise.sentence.replace("___", ""), expression) || containsPhrase(exercise.prompt, expression) ||
-        normalizeForMatch(exercise.answer) !== normalizedTarget) return null;
-    } else {
-      if (exercise.options !== null || normalizeForMatch(exercise.answer) !== normalizedTarget || [exercise.sentence, exercise.prompt, exercise.hint].some((s) => containsPhrase(s, expression))) return null;
-    }
-    if (exercise.options) {
-      if (new Set(exercise.options.map(normalizeForMatch)).size !== 4) return null;
-      if (exercise.options.filter((option) => normalizeForMatch(option) === normalizeForMatch(exercise.answer)).length !== 1) return null;
-    }
-    // A rung 1 sentence shows the expression; the card marks it, so emphasis
-    // the model added around it is dropped rather than shown as text.
-    if (exercise.rung === 1) exercise.sentence = exercise.sentence.replace(/[*_`]+/g, "");
-    const key = sentenceHash(exercise.sentence);
-    if (!normalizeForMatch(exercise.sentence) || seenSentences.has(key) || recent.has(key)) return null;
-    seenSentences.add(key);
-    counts.set(exercise.rung, (counts.get(exercise.rung) ?? 0) + 1);
-    result.push(exercise);
+// One item, or null when it cannot be repaired. Every check is about this
+// item alone, so one malformed exercise costs one exercise, not the round.
+function parseExercise(raw: unknown, expression: string, meaning: string): GeneratedExercise | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const value = raw as Record<string, unknown>;
+  const rung = value.rung;
+  const keys = ["rung", "sentence", "prompt", "options", "answer", "hint", "example"];
+  if (Object.keys(value).some((key) => !keys.includes(key)) || keys.some((key) => !(key in value)) ||
+    typeof rung !== "number" || !Number.isInteger(rung) || ![1, 2, 3, 4].includes(rung) ||
+    !["sentence", "prompt", "answer", "hint", "example"].every((k) => typeof value[k] === "string" || value[k] === null)) return null;
+  // A model may return null for a field it was not asked to fill (a hint,
+  // or the options of a rung 4 recall); an empty string is the absent value.
+  for (const key of ["sentence", "prompt", "answer", "hint", "example"]) {
+    if (value[key] === null) value[key] = "";
   }
-  if ([1, 2, 3, 4].some((rung) => counts.get(rung) !== 2)) return null;
-  return { exercises: result };
+  // Option rungs use four short options; recall uses no options at all.
+  const rawOptions = value.options === null && rung === 4 ? [] : value.options;
+  const options = Array.isArray(rawOptions) && rawOptions.every((x) => typeof x === "string")
+    ? rawOptions.map((x) => clean(x)) : rawOptions === null ? null : undefined;
+  if (options === undefined) return null;
+  const exercise: GeneratedExercise = {
+    rung: Number(rung) as 1 | 2 | 3 | 4,
+    sentence: clean(value.sentence as string),
+    prompt: clean(value.prompt as string),
+    answer: clean(value.answer as string),
+    hint: clean(value.hint as string),
+    // The example sentence lives on the practice card, not in the exercise,
+    // so a model that leaves it out does not lose the item.
+    example: clean(value.example as string) || clean(value.sentence as string),
+    options: Number(rung) === 4 ? null : options,
+  };
+  exercise.answer = readAnswer(exercise, expression, meaning);
+  const normalizedTarget = normalizeForMatch(expression);
+  if (exercise.rung === 1) {
+    // A model may write the sentence with a gap instead of the expression.
+    // Showing the expression is what rung 1 is about, so the gap is filled
+    // with the target rather than losing the exercise.
+    if ((exercise.sentence.match(/___/g) ?? []).length === 1 && !containsPhrase(exercise.sentence, expression)) {
+      exercise.sentence = exercise.sentence.replace("___", expression);
+    }
+    if (!containsPhrase(exercise.sentence, expression) || !exercise.options || exercise.options.length !== 4 ||
+      normalizeForMatch(exercise.answer) !== normalizeForMatch(meaning)) return null;
+  } else if (exercise.rung === 2) {
+    if (!exercise.options || exercise.options.length !== 4 || normalizeForMatch(exercise.answer) !== normalizedTarget ||
+      containsPhrase(exercise.sentence, expression) || containsPhrase(exercise.prompt, expression)) return null;
+  } else if (exercise.rung === 3) {
+    if (!exercise.options || exercise.options.length !== 4 || (exercise.sentence.match(/___/g) ?? []).length !== 1 ||
+      containsPhrase(exercise.sentence.replace("___", ""), expression) || containsPhrase(exercise.prompt, expression) ||
+      normalizeForMatch(exercise.answer) !== normalizedTarget) return null;
+  } else {
+    if (exercise.options !== null || normalizeForMatch(exercise.answer) !== normalizedTarget ||
+      [exercise.sentence, exercise.prompt, exercise.hint].some((s) => containsPhrase(s, expression))) return null;
+  }
+  if (exercise.options) {
+    if (new Set(exercise.options.map(normalizeForMatch)).size !== 4) return null;
+    if (exercise.options.filter((option) => normalizeForMatch(option) === normalizeForMatch(exercise.answer)).length !== 1) return null;
+    if (exercise.options.some((option) => !option || option.length > 120)) return null;
+  }
+  if (exercise.sentence.length < 12 || exercise.sentence.length > 320 || exercise.prompt.length < 4 ||
+    exercise.prompt.length > 240 || exercise.answer.length > 120 || !exercise.answer ||
+    exercise.hint.length > 200 || exercise.example.length < 12 || exercise.example.length > 320) return null;
+  // A rung 1 sentence shows the expression; the card marks it, so emphasis
+  // the model added around it is dropped rather than shown as text.
+  if (exercise.rung === 1) exercise.sentence = exercise.sentence.replace(/[*_`]+/g, "");
+  if (!normalizeForMatch(exercise.sentence)) return null;
+  return exercise;
+}
+
+// Keep a partial round when four valid items survive, even if a rung is missing.
+export const MIN_ROUND_ITEMS = 4;
+
+export function parseBundle(content: string, expression: string, meaning: string, recent: Set<string>): ExerciseBundle | null {
+  const parsed = parseModelJson(content) as { exercises?: unknown } | undefined;
+  if (!parsed || !Array.isArray(parsed.exercises)) return null;
+  const accepted: GeneratedExercise[] = [];
+  const seenSentences = new Set<string>();
+  for (const raw of parsed.exercises) {
+    const exercise = parseExercise(raw, expression, meaning);
+    if (!exercise) continue;
+    const key = sentenceHash(exercise.sentence);
+    if (seenSentences.has(key) || recent.has(key)) continue;
+    seenSentences.add(key);
+    accepted.push(exercise);
+  }
+  if (!isUsableRound(accepted)) return null;
+  // Reserve a place for each available rung before filling the bounded pool.
+  const selected = new Set([1, 2, 3, 4].map(rung => accepted.find(item => item.rung === rung)).filter(item => item !== undefined));
+  for (const item of accepted) {
+    if (selected.size >= 8) break;
+    selected.add(item);
+  }
+  return { exercises: accepted.filter(item => selected.has(item)) };
+}
+
+export function isUsableRound(exercises: readonly GeneratedExercise[]): boolean {
+  return exercises.length >= MIN_ROUND_ITEMS;
 }
 
 function rowExercise(row: Record<string, unknown>): PoolExercise {
@@ -173,17 +198,18 @@ function rowExercise(row: Record<string, unknown>): PoolExercise {
   };
 }
 
-function claimCached(db: DatabaseSync, learnerId: string, expressionId: string, rung: PoolExercise["rung"], now: Date): PoolExercise | undefined {
+function claimCached(db: DatabaseSync, learnerId: string, expressionId: string, rung: PoolExercise["rung"], now: Date, allowFallback = false): PoolExercise | undefined {
   return immediate((tx) => {
     const cutoff = new Date(now.getTime() - DAY_MS).toISOString();
     const row = tx.prepare(`SELECT p.* FROM practice_exercise_pool p
-      WHERE p.learner_id = ? AND p.expression_id = ? AND p.rung = ?
+      WHERE p.learner_id = ? AND p.expression_id = ? AND (p.rung = ? OR ? = 1)
         AND NOT EXISTS (SELECT 1 FROM practice_exercise_history h WHERE h.learner_id = p.learner_id
           AND h.expression_id = p.expression_id AND h.sentence_hash = p.sentence_hash AND h.used_at >= ?)
-      ORDER BY p.created_at, p.id LIMIT 1`).get(learnerId, expressionId, rung, cutoff);
+      ORDER BY CASE WHEN p.rung = ? THEN 0 ELSE 1 END, ABS(p.rung - ?), p.rung, p.created_at, p.id LIMIT 1`)
+      .get(learnerId, expressionId, rung, allowFallback ? 1 : 0, cutoff, rung, rung);
     if (!row) return undefined;
     tx.prepare(`INSERT INTO practice_exercise_history (id, learner_id, expression_id, rung, sentence_hash, sentence, used_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)`).run(newId(), learnerId, expressionId, rung, row.sentence_hash, row.sentence, now.toISOString());
+      VALUES (?, ?, ?, ?, ?, ?, ?)`).run(newId(), learnerId, expressionId, row.rung, row.sentence_hash, row.sentence, now.toISOString());
     tx.prepare("DELETE FROM practice_exercise_pool WHERE learner_id = ? AND id = ?").run(learnerId, row.id);
     return rowExercise(row);
   }, db);
@@ -195,7 +221,7 @@ export async function takePoolExercise(
   const db = deps.db ?? getDb();
   const now = deps.now ?? new Date();
   const config = deps.config;
-  const cached = claimCached(db, learnerId, expressionId, rung, now);
+  const cached = claimCached(db, learnerId, expressionId, rung, now, true);
   if (cached) return cached;
   const savedExpression = db.prepare(`SELECT text, meaning FROM expressions WHERE learner_id = ? AND id = ?`).get(learnerId, expressionId) as
     | { text: string; meaning: string }
@@ -211,7 +237,7 @@ export async function takePoolExercise(
   }
   const access = resolveProviderAccess(learnerId, deps.providerAccess, db);
   const appConfig = config ?? getConfig();
-  const tier = appConfig.practiceGenerationTier;
+  const tier = PRACTICE_GENERATION_ROLE.tier;
   const route = resolveTextRoute(access, appConfig, tier);
   const generationId = newId();
   const recent = immediate((tx) => {
@@ -231,21 +257,29 @@ export async function takePoolExercise(
     { role: "system", content: SYSTEM_PROMPT },
     { role: "user", content: `<expression>${clean(target.text)}</expression>\n<meaning>${clean(target.meaning)}</meaning>\n<recent_sentences_json>${JSON.stringify(recent.sentences)}</recent_sentences_json>\nVariation nonce: ${generationId}. Avoid repeating these prior sentences and vary the new contexts.` },
   ];
-  const maxCostMicros = estimateMaxCostMicros(route.model, messages.reduce((n, m) => n + m.content.length, 0) + JSON.stringify(PRACTICE_POOL_JSON_SCHEMA).length, PRACTICE_GENERATION_ROLE.maxTokens, route.price);
-  if (maxCostMicros > appConfig.practiceGenerationMaxCostMicros) {
-    releaseLease(db, learnerId, expressionId, generationId);
-    throw new BudgetExhaustedError();
-  }
   try {
-    const reservation = immediate((tx) => {
-      assertLease(tx, learnerId, expressionId, generationId);
-      return reserve({ learnerId, kind: "detect", role: "practice_pool", requestId: `practice-pool:${generationId}`, units: 1, maxCostMicros }, { db: tx, now, config: appConfig });
-    }, db);
-    const { value } = await runReservedChat({
-      db, now, config: appConfig, reservation, providerAccess: access, tier,
-      chat: { messages, jsonSchema: PRACTICE_POOL_JSON_SCHEMA, maxTokens: PRACTICE_GENERATION_ROLE.maxTokens, temperature: PRACTICE_GENERATION_ROLE.temperature },
-      parse: (content) => parseBundle(content, target.text, target.meaning, recent.hashes),
-    });
+    let value: ExerciseBundle | undefined;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const maxCostMicros = estimateMaxCostMicros(route.model, messages.reduce((n, m) => n + m.content.length, 0) + JSON.stringify(PRACTICE_POOL_JSON_SCHEMA).length, PRACTICE_GENERATION_ROLE.maxTokens, route.price);
+      if (maxCostMicros > appConfig.practiceGenerationMaxCostMicros) throw new BudgetExhaustedError();
+      const reservation = immediate((tx) => {
+        assertLease(tx, learnerId, expressionId, generationId);
+        return reserve({ learnerId, kind: "detect", role: "practice_pool", requestId: `practice-pool:${generationId}:${attempt}`, units: 1, maxCostMicros }, { db: tx, now, config: appConfig });
+      }, db);
+      try {
+        ({ value } = await runReservedChat({
+          db, now, config: appConfig, reservation, providerAccess: access, tier,
+          chat: { messages, jsonSchema: PRACTICE_POOL_JSON_SCHEMA, maxTokens: PRACTICE_GENERATION_ROLE.maxTokens, temperature: PRACTICE_GENERATION_ROLE.temperature },
+          parse: (content) => parseBundle(content, target.text, target.meaning, recent.hashes),
+        }));
+        break;
+      } catch (error) {
+        // Only unusable output warrants a correction; transport and budget failures stop.
+        if (!(error instanceof ModelOutputError) || attempt === 1) throw error;
+        messages.push({ role: "user", content: "The bundle was unusable. Return eight valid, unique exercises, two per rung. Check answers, four distinct choices for rungs 1-3, one ___ gap for rung 3, and no target revealed in rungs 2-4. Return JSON only." });
+      }
+    }
+    if (!value) throw new ModelOutputError("invalid_output", null, 0);
     const claimed = immediate((tx) => {
       assertLease(tx, learnerId, expressionId, generationId);
       const cutoff = new Date(now.getTime() - DAY_MS).toISOString();
@@ -265,7 +299,7 @@ export async function takePoolExercise(
         .run(learnerId, expressionId, learnerId, expressionId, MAX_POOL_ROWS);
       tx.prepare("DELETE FROM practice_exercise_generation_leases WHERE learner_id = ? AND expression_id = ? AND generation_id = ?")
         .run(learnerId, expressionId, generationId);
-      return claimCached(tx, learnerId, expressionId, rung, now);
+      return claimCached(tx, learnerId, expressionId, rung, now, true);
     }, db);
     if (!claimed) throw new ConflictError();
     return claimed;

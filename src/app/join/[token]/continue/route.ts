@@ -36,7 +36,7 @@ export async function POST(request: Request, context: { params: Promise<{ token:
   try {
     const upgrade = redeemInviteForSession(token, sessionToken);
     if (upgrade && sessionToken) {
-      const response = see("/");
+      const response = see("/editor");
       response.cookies.set({
         name: cookieName,
         value: sessionToken,
@@ -49,20 +49,20 @@ export async function POST(request: Request, context: { params: Promise<{ token:
       return response;
     }
   } catch (error) {
-    if (error instanceof InvalidInviteError) return see("/?invite=invalid");
+    if (error instanceof InvalidInviteError) return see("/editor?invite=invalid");
     throw error;
   }
-  if (findLearnerBySessionToken(sessionToken)) return see("/");
+  if (findLearnerBySessionToken(sessionToken)) return see("/editor");
 
   let redemption;
   try {
     redemption = redeemInvite(token);
   } catch (error) {
-    if (error instanceof InvalidInviteError) return see("/?invite=invalid");
+    if (error instanceof InvalidInviteError) return see("/editor?invite=invalid");
     throw error;
   }
 
-  const response = see("/");
+  const response = see("/editor");
   response.cookies.set({
     name: cookieName,
     value: redemption.sessionToken,

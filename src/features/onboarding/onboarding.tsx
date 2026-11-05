@@ -37,7 +37,7 @@ export function OnboardingSignIn() {
     return () => { active = false; };
   }, [router]);
   return <div className="onboarding-page"><section className="onboarding-window">
-    <header className="onb-header"><Link href="/" aria-label="gloss, go to the editor"><BrandLockup /></Link></header>
+    <header className="onb-header"><Link href="/" aria-label="gloss, home"><BrandLockup /></Link></header>
     <div className="onb-content">
       <h1>{unavailable ? "We couldn't start a workspace" : "Getting your workspace ready…"}</h1>
       {unavailable && <p className="onb-lede">Free guest access is unavailable right now. Add your own OpenRouter key in Settings to keep going.</p>}
@@ -150,7 +150,7 @@ export function Onboarding({ client = onboardingClient, initialRound = null, ini
 
   return <div className="onboarding-page">
     <section className="onboarding-window" aria-label="Get started with gloss" data-step={step} aria-busy={busy}>
-      <header className="onb-header"><Link href="/" aria-label="gloss, go to the editor"><BrandLockup /></Link><span className="onb-step-label">{TITLES[step]}</span></header>
+      <header className="onb-header"><Link href="/" aria-label="gloss, home"><BrandLockup /></Link><span className="onb-step-label">{TITLES[step]}</span></header>
       <div className="onb-content" ref={heading} tabIndex={-1}>
         {step === "welcome" && <><h1>Nice to meet you.</h1><p className="onb-lede is-ink">Turn the words you know into words you use.</p><WordLine mode="welcome" /></>}
         {step === "level" && <><h1>What&apos;s your English level?</h1><p className="onb-lede">We&apos;ll pick words for a short check.</p>

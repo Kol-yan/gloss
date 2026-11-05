@@ -329,7 +329,7 @@ function PracticeSessionAccess() {
             <h1 className={styles.endTitle}>We couldn&apos;t check access.</h1>
             <p className={styles.endLine}>Try again in a moment.</p>
             <footer className={styles.errorActions}>
-              <Link className={styles.quietLink} href="/">Back to writing</Link>
+              <Link className={styles.quietLink} href="/editor">Back to writing</Link>
               <Button className={styles.primaryButton} onClick={reload}>Try again</Button>
             </footer>
           </div>
@@ -943,7 +943,7 @@ function PracticeSessionBody({ client, initialFixture }: PracticeSessionProps) {
             <p className={styles.endLine}>{summary.correct} correct from {summary.answered} answers.</p>
             <p className={styles.endLine}>We’ll bring these words back when they’re due.</p>
             <footer className={styles.endActions}>
-              <Link className={styles.quietLink} href="/">Back to writing</Link>
+              <Link className={styles.quietLink} href="/editor">Back to writing</Link>
               <button className={styles.primaryButton} type="button" onClick={() => void startSession()} disabled={busy}>
                 {busy ? "Preparing…" : "Start another round"}
               </button>
@@ -956,7 +956,7 @@ function PracticeSessionBody({ client, initialFixture }: PracticeSessionProps) {
             <h1 className={styles.endTitle}>{screen.title}</h1>
             <p className={styles.endLine}>{screen.detail}</p>
             <footer className={styles.errorActions}>
-              <Link className={styles.quietLink} href="/">Back to writing</Link>
+              <Link className={styles.quietLink} href="/editor">Back to writing</Link>
               <button className={styles.primaryButton} type="button" onClick={retry} disabled={busy}>
                 {busy ? "Trying…" : "Try again"}
               </button>

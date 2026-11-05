@@ -1,0 +1,232 @@
+/*
+ * Landing page: one quiet column of type over paper. No cards, no dashboard.
+ * The living word line flows edge to edge, so the page reads as one surface.
+ */
+.landing {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+.landing-inner {
+  width: min(920px, 100% - 32px);
+  margin-inline: auto;
+}
+
+.landing-hero {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: max(48px, 9vh) 0 0;
+}
+
+.landing-lockup {
+  display: inline-flex;
+  width: max-content;
+  border-radius: 12px;
+}
+
+.landing-hero h1 {
+  margin: 40px 0 0;
+  max-width: 16ch;
+  font-size: clamp(36px, 5.4vw, 64px);
+  font-weight: 600;
+  line-height: 1.04;
+  letter-spacing: -.04em;
+  text-wrap: balance;
+  color: var(--color-ink);
+}
+
+.landing-lede {
+  margin: 20px 0 0;
+  max-width: 52ch;
+  color: var(--color-ink-muted);
+  font-size: clamp(16px, 1.6vw, 19px);
+  line-height: 1.55;
+  text-wrap: pretty;
+}
+
+.landing-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 20px;
+  margin-top: 28px;
+}
+
+.landing-scroll {
+  text-decoration: underline;
+  text-underline-offset: 5px;
+  text-decoration-color: color-mix(in srgb, var(--color-ink-muted) 45%, transparent);
+}
+
+.landing-river {
+  margin-top: clamp(32px, 6vh, 64px);
+  padding-bottom: 4px;
+}
+
+/* The river spans the viewport. Only the labels and the bed keep the page gutter. */
+.landing-river .word-line {
+  --wl-gutter: max(16px, calc((100% - 920px) / 2));
+  margin: 0;
+}
+
+.landing-river .word-line .wl-labels {
+  margin-inline: var(--wl-gutter);
+}
+
+.landing-river .word-line .wl-band {
+  height: clamp(180px, 30vh, 300px);
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.landing-river .word-line .wl-dot {
+  width: 7px;
+  height: 7px;
+}
+
+.landing-river .word-line .wl-dot.is-active {
+  width: 8px;
+  height: 8px;
+}
+
+.landing-river .word-line .wl-labels {
+  font-size: 14px;
+  color: var(--color-ink-muted);
+}
+
+.landing-river .word-line .wl-labels b {
+  color: var(--color-ink);
+}
+
+.landing-tools {
+  margin-top: clamp(56px, 10vh, 112px);
+}
+
+.landing-tools h2 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--color-ink-muted);
+}
+
+.landing-tools ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.landing-tools li {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 16px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-line) 70%, transparent);
+  font-size: 16px;
+  line-height: 1.45;
+}
+
+.landing-tools li:first-child {
+  border-top: 1px solid color-mix(in srgb, var(--color-line) 70%, transparent);
+}
+
+.landing-tool-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-self: center;
+  color: var(--color-accent);
+}
+
+.landing-tool-text {
+  min-width: 0;
+  flex: 1 1 auto;
+  color: var(--color-ink-muted);
+}
+
+.landing-tool-text b {
+  color: var(--color-ink);
+  font-weight: 600;
+}
+
+.landing-tool-link {
+  flex: 0 0 auto;
+  color: var(--color-accent-strong);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  align-self: center;
+}
+
+.landing-tool-link:hover,
+.landing-tool-link:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.landing-footer {
+  margin-top: auto;
+  padding: clamp(48px, 9vh, 96px) 0 28px;
+}
+
+.landing-footer .landing-inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 20px;
+  padding-top: 20px;
+  border-top: 1px solid color-mix(in srgb, var(--color-line) 70%, transparent);
+  color: var(--color-ink-muted);
+  font-size: 14px;
+}
+
+.landing-footer a {
+  color: var(--color-accent-strong);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.landing-footer a:hover,
+.landing-footer a:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+@media (max-width: 480px) {
+  .landing-hero {
+    padding-top: 40px;
+  }
+
+  .landing-hero h1 {
+    margin-top: 32px;
+  }
+
+  .landing-actions > a:first-child {
+    flex: 1 1 100%;
+  }
+
+  .landing-tools li {
+    flex-wrap: wrap;
+    gap: 6px 12px;
+  }
+
+  .landing-tool-text {
+    flex-basis: calc(100% - 28px);
+  }
+
+  .landing-tool-link {
+    margin-left: 28px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing *,
+  .landing *::before {
+    transition: none !important;
+  }
+}

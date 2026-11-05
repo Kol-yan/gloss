@@ -12,7 +12,7 @@ export async function joinAsNewLearner(page: Page): Promise<void> {
   await page.goto(inviteUrl());
   await expect(page.getByRole("heading", { name: "You are invited to gloss" })).toBeVisible();
   await page.getByRole("button", { name: "Continue" }).click();
-  await expect(page).toHaveURL("/");
+  await expect(page).toHaveURL("/editor");
   await expect(page.getByRole("textbox", { name: "Your text" })).toBeEditable();
   // The quota line appears once the session is known on the page.
   await expect(page.getByText(/\d+ checks? left today/)).toBeVisible();

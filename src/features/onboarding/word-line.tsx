@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { animateWordLine } from "./word-line-motion";
+import "./word-line.css";
 
 export type WordLineMode = "welcome" | "map" | "ready";
 

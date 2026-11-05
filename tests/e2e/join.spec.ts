@@ -2,15 +2,16 @@ import { expect, test } from "@playwright/test";
 import { inviteUrl } from "./env";
 
 test("an invite link starts a workspace and a second visit only raises its allowance", async ({ page, context }) => {
-  // There is no gate screen any more: the editor is the first page, with local
-  // checking available even before a session exists.
+  // The site root is the landing page; the editor lives at /editor and works on its own.
   await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Write it right. Then make the words your own." })).toBeVisible();
+  await page.goto("/editor");
   await expect(page.getByRole("textbox", { name: "Your text" })).toBeEditable();
 
   await page.goto(inviteUrl());
   await expect(page.getByRole("heading", { name: "You are invited to gloss" })).toBeVisible();
   await page.getByRole("button", { name: "Continue" }).click();
-  await expect(page).toHaveURL("/");
+  await expect(page).toHaveURL("/editor");
   await expect(page.getByText(/\d+ checks? left today/)).toBeVisible();
 
   // The production server uses the plain cookie name; only development adds a port.
@@ -28,6 +29,6 @@ test("an unknown invite link returns to the editor without a gate", async ({ pag
   // Well formed, but never issued.
   await page.goto(`/join/${"A".repeat(43)}`);
   await page.getByRole("button", { name: "Continue" }).click();
-  await expect(page).toHaveURL("/?invite=invalid");
+  await expect(page).toHaveURL("/editor?invite=invalid");
   await expect(page.getByRole("textbox", { name: "Your text" })).toBeEditable();
 });

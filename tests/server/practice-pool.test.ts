@@ -5,7 +5,7 @@ import { loadConfig } from "@/server/config";
 import { newId } from "@/server/ids";
 import { AiDisabledError, BudgetExhaustedError, NotFoundError, QuotaExceededError } from "@/server/errors";
 import { ModelOutputError } from "@/server/models/errors";
-import { takePoolExercise } from "@/server/practice/exercise-pool";
+import { parseBundle, takePoolExercise } from "@/server/practice/exercise-pool";
 import { normalizeForMatch } from "@/server/practice/text";
 import { starterSet } from "@/server/learning/starter";
 import { normalizeWord } from "@/server/learning/priority/intake";
@@ -202,7 +202,7 @@ describe("practice exercise pool", () => {
     } finally { state.cleanup(); }
   });
 
-  it("rejects cross-learner access and invalid duplicate output", async () => {
+  it("rejects cross-learner access and drops only a duplicate item", async () => {
     const state = setup();
     const fetchMock = installResponse(bundle());
     const otherLearner = insertLearner(state.db, "judge");
@@ -215,9 +215,75 @@ describe("practice exercise pool", () => {
       fetchMock.mockImplementationOnce(async () => new Response(JSON.stringify({
         choices: [{ message: { content: JSON.stringify(duplicateBundle) }, finish_reason: "stop" }], usage: { prompt_tokens: 100, completion_tokens: 100 },
       }), { status: 200 }));
-      await expect(takePoolExercise(state.learnerId, state.expressionId, 2, { db: state.db, now: AT, config: state.config })).rejects.toBeInstanceOf(ModelOutputError);
+      const result = await takePoolExercise(state.learnerId, state.expressionId, 2, { db: state.db, now: AT, config: state.config });
+      expect(result.sentence).toContain("duplicate context two");
       expect(fetchMock).toHaveBeenCalledTimes(2);
-      expect(state.db.prepare("SELECT COUNT(*) AS n FROM practice_exercise_history WHERE learner_id = ?").get(state.learnerId)?.n).toBe(1);
+      expect(state.db.prepare("SELECT COUNT(*) AS n FROM practice_exercise_history WHERE learner_id = ?").get(state.learnerId)?.n).toBe(2);
+    } finally { state.cleanup(); }
+  });
+
+  it("keeps four valid items after malformed items and a whole rung are dropped", async () => {
+    const state = setup();
+    const valid = bundle("partial").exercises;
+    const payload = { exercises: [valid[0], null, { ...valid[2], options: [TARGET, TARGET, "a", "b"] },
+      valid[1], valid[4], valid[5], { ...valid[6], hint: TARGET }, { ...valid[7], answer: "wrong" }] };
+    expect(parseBundle(JSON.stringify(payload), TARGET, MEANING, new Set())?.exercises).toHaveLength(4);
+    const fetchMock = installResponse(payload);
+    try {
+      const result = await takePoolExercise(state.learnerId, state.expressionId, 2, { db: state.db, now: AT, config: state.config });
+      expect([1, 3]).toContain(result.rung);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(state.db.prepare("SELECT rung FROM practice_exercise_history WHERE learner_id = ?").get(state.learnerId)?.rung).toBe(result.rung);
+    } finally { state.cleanup(); }
+  });
+
+  it("accepts four surviving items from one rung instead of discarding valid work", () => {
+    const item = bundle().exercises[0];
+    const exercises = Array.from({ length: 4 }, (_, i) => ({ ...item, sentence: `At meeting number ${i}, she decided to ${TARGET} until Friday.` }));
+    expect(parseBundle(JSON.stringify({ exercises }), TARGET, MEANING, new Set())?.exercises).toHaveLength(4);
+  });
+
+  it("drops broken fields, leaked targets, duplicates and recent sentences independently", () => {
+    const valid = bundle("mixed").exercises;
+    const recent = new Set([createHash("sha256").update(normalizeForMatch(valid[0].sentence)).digest("hex")]);
+    const payload = { exercises: [null, { rung: 1 }, { ...valid[2], prompt: 42 },
+      { ...valid[3], sentence: `You should ${TARGET} today.` }, valid[0], valid[1],
+      valid[2], valid[2], valid[4], valid[6]] };
+    const parsed = parseBundle(JSON.stringify(payload), TARGET, MEANING, recent);
+    expect(parsed?.exercises.map(item => item.rung)).toEqual([1, 2, 3, 4]);
+    expect(parseBundle(JSON.stringify({ exercises: valid.slice(0, 3) }), TARGET, MEANING, new Set())).toBeNull();
+    expect(parseBundle("not JSON", TARGET, MEANING, new Set())).toBeNull();
+  });
+
+  it("retries an unusable bundle once on FAST with a separately settled reservation", async () => {
+    const state = setup();
+    const fetchMock = installResponse(bundle("corrected"));
+    fetchMock.mockImplementationOnce(async () => new Response(JSON.stringify({
+      choices: [{ message: { content: JSON.stringify({ exercises: [null, { rung: 4 }] }) }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 100, completion_tokens: 200, cost: 0.001 },
+    }), { status: 200 }));
+    try {
+      await takePoolExercise(state.learnerId, state.expressionId, 1, {
+        db: state.db, now: AT, config: { ...state.config, practiceGenerationTier: "smart" },
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      const requests = fetchMock.mock.calls.map(call => JSON.parse(String(call[1]?.body)));
+      expect(requests.map(request => request.model)).toEqual(["openai/gpt-oss-120b", "openai/gpt-oss-120b"]);
+      expect(requests[1].messages.at(-1).content).toContain("The bundle was unusable");
+      expect(state.db.prepare("SELECT status FROM usage_reservations WHERE learner_id = ?").all(state.learnerId))
+        .toEqual([{ status: "settled" }, { status: "settled" }]);
+    } finally { state.cleanup(); }
+  });
+
+  it("stops after two unusable bundles and releases the generation lease", async () => {
+    const state = setup();
+    const fetchMock = installResponse({ exercises: [null] });
+    try {
+      await expect(takePoolExercise(state.learnerId, state.expressionId, 1, { db: state.db, now: AT, config: state.config }))
+        .rejects.toBeInstanceOf(ModelOutputError);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(state.db.prepare("SELECT COUNT(*) AS n FROM practice_exercise_generation_leases").get()?.n).toBe(0);
+      expect(state.db.prepare("SELECT COUNT(*) AS n FROM practice_exercise_pool").get()?.n).toBe(0);
     } finally { state.cleanup(); }
   });
 

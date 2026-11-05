@@ -1,0 +1,32 @@
+/* Placement is decided by the page that hosts the line; the illustration owns only its own look. */
+.word-line { --onb-ink: var(--color-ink, #203139); --onb-muted: var(--color-ink-muted, #51656e); --onb-teal: var(--color-accent, #0d7a72); --onb-soft: var(--color-accent-soft, #d6efe8); --onb-surface: var(--color-card, #fffdf9); }
+.wl-labels { margin-bottom: 10px; display: grid; grid-template-columns: 62fr 38fr; font-size: 14px; line-height: 1.4; }
+.wl-labels > div { min-width: 0; display: flex; flex-direction: column; }
+.wl-labels > div + div { padding-left: 12px; }
+.wl-labels b { font-weight: 600; color: var(--onb-ink); }
+.wl-labels span { color: var(--onb-muted); }
+.wl-band { position: relative; height: 112px; border-radius: 16px; overflow: hidden; display: grid; grid-template-columns: 62fr 38fr; }
+.wl-zone.is-passive { background: #f0e9dd; }
+.wl-zone.is-active { background: var(--onb-soft); }
+.wl-boundary { position: absolute; inset-block: 0; left: 62%; width: 2px; margin-left: -1px; background: repeating-linear-gradient(to bottom, var(--onb-teal) 0 6px, transparent 6px 11px); }
+.wl-dots, .wl-words { position: absolute; inset: 0; pointer-events: none; }
+.wl-dot { position: absolute; width: 6px; height: 6px; border-radius: 50%; background: #c8bca9; pointer-events: auto; }
+.wl-dot::before { content: ""; position: absolute; inset: -7px; border-radius: 50%; }
+.wl-dot.is-active { width: 7px; height: 7px; background: var(--onb-teal); }
+.wl-chips { position: absolute; left: 62%; top: 50%; width: max-content; max-width: 90%; margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; align-items: center; gap: 6px; transform: translate(-50%, -50%); }
+.wl-chip { padding: 2px 10px; border-radius: 999px; background: var(--onb-surface); color: #0a665f; font-size: 14px; font-weight: 600; line-height: 1.4; white-space: nowrap; box-shadow: 0 2px 6px #2031391f; }
+.wl-arrow { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.wl-arrow path { fill: none; stroke: var(--onb-teal); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.wl-arrow .wl-trail { stroke-width: 1.5; opacity: .5; }
+.wl-word { position: absolute; left: 0; top: 0; padding: 1px 8px; border-radius: 999px; background: var(--onb-surface); color: var(--onb-muted); font-size: 13px; font-weight: 600; line-height: 1.45; white-space: nowrap; box-shadow: 0 2px 6px #2031391f; opacity: 0; }
+.wl-word.is-active { color: #0a665f; }
+.morph-bar { position: absolute; display: flex; flex-direction: column; gap: 5px; }
+.morph-bar i { flex: 1 1 0; border-radius: 4px; background: var(--onb-soft); }
+.morph-bar i:first-child { background: var(--onb-teal); }
+.morph-caption { position: absolute; left: 0; right: 0; margin: 0; color: var(--onb-muted); font-size: 14px; text-align: center; }
+
+@media (prefers-reduced-motion: reduce) {
+  .word-line * {
+    transition: none !important;
+  }
+}

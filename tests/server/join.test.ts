@@ -39,11 +39,11 @@ const uses = (token: string) =>
 const learnerCount = () => (db().prepare("SELECT COUNT(*) AS n FROM learners").get() as { n: number }).n;
 
 describe("POST /join/[token]/continue", () => {
-  it("redeems, sets an httpOnly lax cookie and answers 303 home", async () => {
+  it("redeems, sets an httpOnly lax cookie and answers 303 to the editor", async () => {
     const token = newInvite();
     const response = await post(token);
     expect(response.status).toBe(303);
-    expect(response.headers.get("location")).toBe("/");
+    expect(response.headers.get("location")).toBe("/editor");
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(response.headers.get("referrer-policy")).toBe("no-referrer");
     const cookie = response.cookies.get(cookieName());
@@ -68,7 +68,7 @@ describe("POST /join/[token]/continue", () => {
     for (const attempt of [token, "garbage", "z".repeat(43)]) {
       const response = await post(attempt);
       expect(response.status).toBe(303);
-      expect(response.headers.get("location")).toBe("/?invite=invalid");
+      expect(response.headers.get("location")).toBe("/editor?invite=invalid");
       expect(response.cookies.get(cookieName())).toBeUndefined();
     }
   });
@@ -158,7 +158,7 @@ describe("POST /join/[token]/continue", () => {
       const second = newInvite();
       const response = await post(second);
       expect(response.status).toBe(303);
-      expect(response.headers.get("location")).toBe("/");
+      expect(response.headers.get("location")).toBe("/editor");
       expect(response.cookies.get(cookieName())?.value).toBe(session.cookie);
       expect(uses(second)).toBe(0);
       expect(learnerCount()).toBe(learnersBefore);

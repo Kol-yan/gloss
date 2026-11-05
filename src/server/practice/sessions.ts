@@ -186,7 +186,7 @@ export async function continuePracticePreparation(
           providerAccess,
           config,
         });
-        const stored = validateAndStoreExercise(generated, rung, String(claim.word_text));
+        const stored = validateAndStoreExercise(generated, generated.rung, String(claim.word_text));
         immediate((tx) => {
           const current = tx.prepare(
             `SELECT status FROM practice_sessions WHERE id = ? AND learner_id = ?`,
@@ -564,7 +564,7 @@ function hasRecentReveal(db: DatabaseSync, learnerId: string, expressionId: stri
   const sessionReveal = db.prepare(
     `SELECT 1 FROM practice_session_items WHERE learner_id = ? AND expression_id = ?
        AND ((status = 'answered' AND answered_at >= ?)
-         OR (start_rung BETWEEN 1 AND 3 AND issued_at >= ?)) LIMIT 1`,
+         OR (CAST(json_extract(exercise_json, '$.rung') AS INTEGER) BETWEEN 1 AND 3 AND issued_at >= ?)) LIMIT 1`,
   ).get(learnerId, expressionId, cutoff, cutoff);
   if (sessionReveal) return true;
   const shownTask = db.prepare(

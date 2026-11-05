@@ -30,7 +30,7 @@ export function ExpressionsScreen({ items }: { items: ExpressionHistory[] }) {
         eyebrow="My expressions"
         title="No expressions yet"
         action={
-          <Link href="/" className={buttonClasses("primary")}>
+          <Link href="/editor" className={buttonClasses("primary")}>
             Open the editor
           </Link>
         }

@@ -33,7 +33,7 @@ export function PracticePicker() {
         eyebrow="Practice"
         title="Nothing to practice yet"
         action={
-          <Link href="/" className={buttonClasses("primary")}>
+          <Link href="/editor" className={buttonClasses("primary")}>
             Open the editor
           </Link>
         }

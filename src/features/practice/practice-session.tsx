@@ -164,7 +164,7 @@ function PracticeForLearner({ expressionId }: { expressionId: string }) {
         <LoadError
           title="Practice isn't available today"
           action={
-            <Link href="/" className={buttonClasses("primary")}>
+            <Link href="/editor" className={buttonClasses("primary")}>
               Open the editor
             </Link>
           }
