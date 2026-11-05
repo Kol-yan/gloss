@@ -1,0 +1,159 @@
+# Versions and releases for the three products: the website (web-vX.Y.Z),
+# the browser extension (extension-vX.Y.Z) and the desktop app
+# (desktop-vX.Y.Z).
+#
+# Every push to main updates one combined release pull request from the
+# Conventional Commits since each product's last release. Merging it tags the
+# products whose version changed, creates their GitHub Releases and attaches
+# the downloads: the macOS .dmg and .app.zip for the desktop app and a zip of
+# the extension.
+#
+# Run it by hand with a tag to publish a release that already has its version
+# and changelog entry on the chosen branch (the first 1.0.0 releases), or to
+# attach the downloads again.
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish, such as desktop-v1.0.0
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      released: ${{ steps.release.outputs.releases_created || steps.manual.outputs.released }}
+      desktop_tag: ${{ steps.release.outputs['desktop--tag_name'] || steps.manual.outputs.desktop_tag }}
+      extension_tag: ${{ steps.release.outputs['extension--tag_name'] || steps.manual.outputs.extension_tag }}
+    steps:
+      # A personal token, so that the release pull request runs CI; pull
+      # requests opened with the workflow token start no workflows.
+      - id: release
+        if: github.event_name == 'push'
+        uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          target-branch: ${{ github.ref_name }}
+
+      - uses: actions/checkout@v6
+        if: github.event_name == 'workflow_dispatch'
+
+      - id: manual
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          if [[ ! "$TAG" =~ ^(web|extension|desktop)-v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            echo "::error::Expected a tag like web-v1.0.0, extension-v1.0.0 or desktop-v1.0.0"
+            exit 1
+          fi
+          component="${BASH_REMATCH[1]}"
+          version="${BASH_REMATCH[2]}"
+          case "$component" in
+            web) dir=.; version_file=package.json ;;
+            extension) dir=extension; version_file=extension/manifest.json ;;
+            desktop) dir=desktop; version_file=desktop/package.json ;;
+          esac
+
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "Release $TAG exists; attaching the downloads again."
+          else
+            if [ "$(jq -r .version "$version_file")" != "$version" ]; then
+              echo "::error::$version_file on $GITHUB_REF_NAME does not say $version"
+              exit 1
+            fi
+            # The notes are this version's section of the product's changelog.
+            awk -v ver="$version" '
+              /^## / {
+                if (found) exit
+                heading = $0
+                sub(/^## \[?/, "", heading)
+                if (index(heading, ver) == 1 && substr(heading, length(ver) + 1, 1) ~ /[] ]/) { found = 1; next }
+              }
+              found { print }
+            ' "$dir/CHANGELOG.md" > notes.md
+            if [ ! -s notes.md ]; then
+              echo "::error::$dir/CHANGELOG.md has no entry for $version"
+              exit 1
+            fi
+            if git ls-remote --exit-code --tags origin "refs/tags/$TAG" > /dev/null; then
+              gh release create "$TAG" --verify-tag --title "$TAG" --notes-file notes.md
+            else
+              gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --notes-file notes.md
+            fi
+          fi
+
+          echo "released=true" >> "$GITHUB_OUTPUT"
+          echo "${component}_tag=$TAG" >> "$GITHUB_OUTPUT"
+
+  desktop:
+    needs: plan
+    if: needs.plan.outputs.desktop_tag != ''
+    uses: ./.github/workflows/desktop-macos.yml
+    with:
+      release_tag: ${{ needs.plan.outputs.desktop_tag }}
+    secrets: inherit
+    permissions:
+      contents: write
+
+  extension:
+    needs: plan
+    if: needs.plan.outputs.extension_tag != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.plan.outputs.extension_tag }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.plan.outputs.extension_tag }}
+
+      # The zip is what a browser loads or a store reviews: the extension
+      # files only, with manifest.json at its root.
+      - name: Package the extension
+        run: |
+          version="${TAG#extension-v}"
+          test "$(jq -r .version extension/manifest.json)" = "$version"
+          (cd extension && zip -r -X "../gloss-extension-${version}.zip" . -x README.md CHANGELOG.md version.txt '*.DS_Store')
+          unzip -l "gloss-extension-${version}.zip"
+          gh release upload "$TAG" "gloss-extension-${version}.zip" --clobber
+
+  # A website or extension release becomes GitHub's latest release when it is
+  # created; give that place back to the newest desktop release.
+  keep-desktop-latest:
+    needs: plan
+    if: needs.plan.outputs.released == 'true' && needs.plan.outputs.desktop_tag == ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - run: |
+          tag=$(gh release list --limit 100 --exclude-drafts --exclude-pre-releases --json tagName \
+            --jq '[.[] | select(.tagName | startswith("desktop-v"))][0].tagName // empty')
+          if [ -n "$tag" ]; then gh release edit "$tag" --latest; fi
