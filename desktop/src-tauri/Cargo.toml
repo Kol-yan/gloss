@@ -1,6 +1,6 @@
 [package]
 name = "gloss-desktop"
-version = "0.1.0"
+version = "1.0.0"
 description = "gloss for the desktop: check selected text and dictate in any app"
 license = "AGPL-3.0-only"
 edition = "2024"
