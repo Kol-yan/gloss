@@ -64,12 +64,10 @@ impl Credentials {
         // refusal or inaccessible old item must not retry on the next launch.
         if !sessions.contains_key(origin) {
             sessions.insert(origin.to_owned(), None);
-            if self.write_file(&sessions).is_ok() {
-                if let Some(session) = migrate_without_prompt(origin) {
-                    sessions.insert(origin.to_owned(), Some(session));
-                    self.persist(&sessions);
-                }
-            } else {
+            // Sessions saved in the Keychain by older builds are not moved
+            // into the file: the app starts a fresh guest workspace instead,
+            // so no invite or owner session ever lands outside the Keychain.
+            if self.write_file(&sessions).is_err() {
                 self.store_unavailable.store(true, Ordering::Relaxed);
             }
         }
@@ -147,6 +145,7 @@ fn valid_session(session: &StoredSession) -> bool {
 /// Both legacy Keychain UI and authenticated-item UI are disabled. A locked or
 /// signature-protected item is skipped; guest enrollment handles the absence.
 #[cfg(target_os = "macos")]
+#[allow(dead_code)]
 fn migrate_without_prompt(origin: &str) -> Option<StoredSession> {
     use security_framework::item::{ItemClass, ItemSearchOptions, SearchResult};
     #[link(name = "Security", kind = "framework")]
@@ -192,6 +191,7 @@ fn migrate_without_prompt(origin: &str) -> Option<StoredSession> {
 }
 
 #[cfg(not(target_os = "macos"))]
+#[allow(dead_code)]
 fn migrate_without_prompt(_origin: &str) -> Option<StoredSession> {
     None
 }
