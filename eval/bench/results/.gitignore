@@ -1,0 +1,3 @@
+# Dry runs measure the mock provider, not a model.
+*-dry-run.md
+*-dry-run.jsonl

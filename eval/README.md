@@ -4,6 +4,9 @@ These corpus runs record model quality at the time they were executed. Results
 are historical measurements, not a guarantee for other models, prompts or
 inputs. Full methods and case-level details remain in each run report.
 
+To compare models per role on quality, latency and cost before a switch, use
+the [model bench](bench/README.md).
+
 ## Practice answer evaluation
 
 | Run | Model | Rows | Acceptable verdicts | Injection or wrong-meaning passes | Cue disagreements | p50 / p95 latency | Accounted cost |
