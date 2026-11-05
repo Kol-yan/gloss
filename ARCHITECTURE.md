@@ -7,7 +7,7 @@ Browser                                   Server (Next.js route handlers)
 ├─ Editor + rule checker (WASM worker)    ├─ Session and invites
 │   local suggestions, never uploaded     ├─ Budget: quotas + daily spend ceiling
 ├─ Practice: writing and voice            ├─ Proofread, practice situations (fast tier)
-└─ History                                ├─ Evaluation of answers, dictation clean-up (smart tier: Meta Muse Spark)
+└─ History                                ├─ Evaluation of answers (Muse Spark); dictation clean-up (fast tier: gpt-oss-120b)
                                           ├─ Speech-to-text (Meta Muse Voice Transcribe)
                                           └─ SQLite
 ```
@@ -55,13 +55,13 @@ Three independent limits protect the operator's API credits:
 2. **A daily spend ceiling** for the whole instance (`DAILY_BUDGET_USD`, default $5, UTC).
 3. **A persistent period ceiling** (`PERIOD_BUDGET_USD`, default $25). All hosted ledger history counts, so a restart or UTC day change cannot reset it.
 
-Guests have 30 checks, a separate 30-operation detector allowance, three practice
-sessions and 300 audio seconds per UTC day. Owner funding expires at
-`OWNER_FUNDED_UNTIL` (default `2026-11-09T08:00:00Z`). After a quota, ceiling or
-expiry, the action points to Settings so a visitor can use their own key.
+The `guest` profile has 30 proofreading operations, 30 detector operations,
+three evaluation operations and 300 audio seconds per UTC day. Hosted funding
+expiry is controlled by `OWNER_FUNDED_UNTIL`; after a quota, ceiling or expiry,
+the action points to Settings so a visitor can use their own key.
 
 Before a model call, `reserve()` runs in one `BEGIN IMMEDIATE` transaction: it checks the kill switch, the learner quota and `reserved + actual + maxCost <= ceiling`, then inserts a reservation. `maxCost` is an upper bound from the bounded input size, the role's explicit
-`max_tokens`, and the configured price with a 1.25 safety margin. Audio is limited
+`max_tokens`, and the configured price with a 1.25 safety margin, as defined in `src/server/models/prices.ts`. Audio is limited
 to 60 seconds per request. After the call, `settle()` lowers a charge only for a
 strictly positive provider-reported cost; missing or zero cost retains the bound. If the outcome is unknown (timeout, dropped connection), the reservation stays counted, because the provider may have done the work. Retries are new reservations.
 
@@ -74,15 +74,17 @@ under-reserved inputs, changed funding, expiry, a disabled switch or any ledger
 failure refuse the network request. Model adapters cannot bypass this transport.
 
 `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`, when both are configured, send
-asynchronous owner alerts through the Telegram Bot API at 50%, 80% and 100% of
+asynchronous operator alerts through the Telegram Bot API at 50%, 80% and 100% of
 the daily cap and a guest-enrollment burst alert; the token is never logged.
 Notification errors do not change request results. `npm run spend:report` prints charged daily and period
 spend by role plus guest counts.
 
-BYOK reservations retain daily learner quotas and the global kill switch, but do
-not count toward the operator's dollar ceiling. They are additionally limited to
-six reservations per minute and two pending calls per learner. Each ledger row
-records its immutable funding source, so hosted and visitor costs stay separate.
+BYOK reservations currently retain daily learner quotas and the global kill
+switch, but do not count toward the hosted dollar ceiling. Removing gloss-level
+quotas for BYOK is a planned policy change and is not implemented yet. BYOK is
+additionally limited to six reservations per minute and two pending calls per
+learner. Each ledger row records its immutable funding source, so hosted and
+visitor costs stay separate.
 
 The visitor's OpenRouter key is stored in their browser and sent transiently in
 `X-Gloss-Provider-Key` for model requests. It is never stored in the database,
@@ -128,7 +130,7 @@ Money is stored in micro-dollars (integers). Dates are UTC ISO strings; "today" 
 
 Request and response schemas are in `src/shared/contracts.ts`. Errors use `{ error: { code, message } }` with a short learner-safe message.
 
-`POST /api/detect` accepts 1–8 hashed sentences with at most 6,000 UTF-16 text units total and optional local-rule ranges. Its response contains probabilities only; `detect_runs` retains a fingerprint and decisions, not sentence text. Detector calls use their own `detect` quota. `/api/me` reports hosted AI disabled when the owner OpenRouter key is missing or malformed; BYOK availability still uses the visitor's browser-held key and the global kill switch.
+`POST /api/detect` accepts 1–8 hashed sentences with at most 6,000 UTF-16 text units total and optional local-rule ranges. Its response contains probabilities only; `detect_runs` retains a fingerprint and decisions, not sentence text. Detector calls use their own `detect` quota. `/api/me` reports hosted AI disabled when the hosted OpenRouter key is missing or malformed; BYOK availability still uses the visitor's browser-held key and the global kill switch.
 
 ## Models
 
@@ -139,7 +141,7 @@ conservative UTF-8 byte bound rather than an average English token ratio. A
 model without a known price is never called. There is no automatic fallback to
 another provider or tier: a job whose tier cannot be served is refused.
 
-| Tier | Hosted (operator-funded) | Visitor (BYOK, OpenRouter) | Reasoning |
+| Tier | Hosted-funded | Visitor (BYOK, OpenRouter) | Reasoning |
 |---|---|---|---|
 | fast | OpenRouter with the operator's `OPENROUTER_API_KEY`; model or preset from `OPENROUTER_FAST_MODEL`, default `openai/gpt-oss-120b` | `openai/gpt-oss-120b` | low |
 | smart | Meta Muse Spark directly | `meta/muse-spark-1.3` | the role's setting |
@@ -155,7 +157,7 @@ another provider or tier: a job whose tier cannot be served is refused.
 | Speech-to-text | Meta Muse Voice Transcribe (`meta/muse-voice-transcribe-1.0` for visitors) |
 
 The fast tier asks OpenRouter for strict `json_schema` output, low reasoning,
-an explicit `max_tokens`, supported parameters and usage accounting. Owner-funded
+an explicit `max_tokens`, supported parameters and usage accounting. Hosted-funded
 routes must use a known model from the price table. Opaque presets and unknown
 model IDs are refused because they cannot demonstrate a worst-case bound.
 Configured prices cannot lower the table's bound. OpenRouter routing uses maximum
@@ -300,7 +302,7 @@ estimate below is implemented in `src/server/learning/priority/intake.ts` and
 used for every word without a curated band; a curated band always wins. It uses
 no corpus and no network call, needs no data file and no third-party licence,
 and is provisional: it is a rough order of magnitude, never shown to the learner
-as a score, and the owner can override any band with a curated value.
+as a score, and a curated value overrides any band with a curated value.
 
 The rule is a single pass with no ambiguity. Define the input as the normalized
 text (lower case, trimmed, inner whitespace collapsed to one space), an optional
@@ -419,10 +421,9 @@ records the exercise actually served.
 
 ## Onboarding: level and Word check
 
-Onboarding has a Welcome step, a Level step, Word check, the Word check result,
-Your tools and Ready. The owner removed the Goals and topics screen (Nov 3), so
-there is no topics API and nothing reads a topic choice; personal relevance
-comes from Word check answers and the learner's own writing and saved words.
+Onboarding has six steps: Welcome, Level, Word check, Word map, Your tools and
+All set. Goals and topics are not part of onboarding; personal relevance comes
+from Word check answers and the learner's own writing and saved words.
 `learners.level` (`A2`, `B1`, `B2`, `C1`; NULL before the first estimate) is
 the single stored level. Two writers feed it, and the rule is:
 
@@ -499,8 +500,7 @@ is documented here so the product can change it in one place.
 
 ### Onboarding interface and completion
 
-The six-step interface lives at `/onboarding`: Welcome, Level, Word check,
-Word map, Your tools and All set. Only `/practice` checks completion and
+The interface lives at `/onboarding` and follows the six steps listed above. Only `/practice` checks completion and
 redirects an unfinished learner to onboarding. The editor, saved expressions,
 extension and dictation remain available independently. Development-only
 practice fixtures remain local previews.

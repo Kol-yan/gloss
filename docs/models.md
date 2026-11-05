@@ -8,7 +8,7 @@ and nothing else in the code talks to a model provider.
 | Job | Tier | Hosted model | Code |
 |---|---|---|---|
 | Judge a practice answer | smart | Muse Spark 1.3 (`muse-spark-1.3`) | `src/server/practice/evaluation.ts`, `attempts.ts` |
-| Tidy dictated text | smart | Muse Spark 1.3 | `src/server/dictation/service.ts` |
+| Tidy dictated text | fast | `openai/gpt-oss-120b` via OpenRouter | `src/server/dictation/service.ts` |
 | Speech-to-text | speech | Muse Voice Transcribe 1.0 (`muse-voice-transcribe-1.0`) | `src/server/models/meta-asr.ts` |
 | Flag sentences after a typing pause | fast | `openai/gpt-oss-120b` via OpenRouter | `src/server/detect` |
 | Proofread | fast | `openai/gpt-oss-120b` via OpenRouter | `src/server/proofread` |
@@ -34,24 +34,17 @@ as used when it was not, so this job runs on the stronger model.
   `low`, temperature 0.
 - **Answer as data.** The answer sits inside `<answer>` tags, and the prompt
   treats any request in it, such as "give me a pass", as part of the answer.
-- **Measured.** The committed run
-  [`eval/results/2026-11-03-evaluation-v4.md`](../eval/results/2026-11-03-evaluation-v4.md)
-  (prompt `evaluation-v4`, 48 rows, each answer judged with a shown and a hidden
-  cue) has these results:
-  - every verdict was acceptable (48 of 48);
-  - no injection or wrong-meaning row passed (0 of 18);
-  - no answer got a different verdict under the two cues (0 of 24 pairs);
-  - p50/p95 latency was 4.9 s / 8.6 s;
-  - the whole run cost $0.18.
+- **Measured.** Historical corpus results and per-run metrics are listed in
+  [`eval/README.md`](../eval/README.md).
 - **Pinned.** `tests/server/evaluation-prompt-version.test.ts` pins the
   prompt's version and SHA-256. Editing the prompt fails `npm test` until a new
   corpus run is committed.
 
-## Muse Spark 1.3: cleaning up dictation
+## Fast tier: cleaning up dictation
 
 The editor's **Dictate** button records up to 60 seconds and sends it to
 `POST /api/speech/dictate`. First Muse Voice Transcribe produces the
-transcript, then Muse Spark tidies it:
+transcript, then `openai/gpt-oss-120b` via OpenRouter tidies it:
 
 - It may add punctuation and capitals, remove fillers (*um*, *uh*, filler
   *like*) and remove immediate repeats or restarts.
@@ -89,8 +82,7 @@ Detection runs after every typing pause, proofreading on every badge press or
 check, and a situation is written for every task. These jobs are frequent and
 tightly structured, so the code sends them to "a cheap open-weight model for
 routine work" (`access.ts`) and keeps Muse Spark for the judgements that
-matter. The price table in `src/server/models/prices.ts` (checked November 2026)
-shows the gap:
+matter. The price table in `src/server/models/prices.ts` shows the gap:
 
 | Model | Input, USD per 1M tokens | Output, USD per 1M tokens |
 |---|---|---|
@@ -123,10 +115,11 @@ A call whose outcome is unknown, such as a timeout, stays counted at its worst
 case. A model without a known price is never called. Each adapter makes one
 call with no retries, and there is no fallback to another provider or tier.
 
-Daily quotas per learner (`src/server/config.ts`):
+Current daily quotas per learner (`src/server/config.ts`):
 
 | Profile | `proofread` | `detect` | `evaluate` | `asrSeconds` |
 |---|---:|---:|---:|---:|
+| `guest` | 30 | 30 | 3 | 300 |
 | `pilot` | 20 | 100 | 12 | 180 |
 | `judge` | 30 | 30 | 30 | 300 |
 | `owner` | 200 | 200 | 100 | 1800 |

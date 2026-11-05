@@ -28,7 +28,7 @@ larger allowance, create an invite, open the printed `/join/…` link and press
 **Continue**:
 
 ```bash
-npm run invite -- --label me --uses 1 --profile owner
+npm run invite -- --label dev --uses 1 --profile pilot
 ```
 
 Migrations are applied when the database is first opened. The session cookie
@@ -42,20 +42,23 @@ served in production.
 
 | Variable | Purpose |
 |---|---|
-| `META_API_KEY` | Meta API key: answer evaluation, dictation clean-up and speech-to-text. |
+| `META_API_KEY` | Meta API key: answer evaluation and speech-to-text. |
 | `META_API_BASE_URL` | Meta API base URL. |
 | `META_TEXT_MODEL` | Meta text model for the smart tier. |
 | `META_ASR_MODEL` | Meta speech-to-text model. |
-| `OPENROUTER_API_KEY` | The operator's OpenRouter key: sentence detection, proofreading and practice situations. |
+| `OPENROUTER_API_KEY` | The hosted OpenRouter key: sentence detection, proofreading and practice situations. |
 | `OPENROUTER_FAST_MODEL` | Optional fast-tier model or preset. |
 | `OPENROUTER_FAST_PRICE_IN_PER_M`, `OPENROUTER_FAST_PRICE_OUT_PER_M` | Optional price bound for the fast model. Set both for any model other than the default. |
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | Cloudflare Turnstile keys for guest enrollment; both are required in production. |
 | `BYOK_TRUST_PROXY_HEADERS` | Trust the proxy's client-IP header for visitor enrollment limits. Only behind a proxy that overwrites it. |
 | `AI_ENABLED` | Kill switch for every cloud model call. |
 | `DAILY_BUDGET_USD`, `PERIOD_BUDGET_USD` | Daily and period spend ceilings for the whole instance. |
-| `OWNER_FUNDED_UNTIL` | End of owner-funded demo access. |
+| `OWNER_FUNDED_UNTIL` | Optional end time for hosted-funded demo access. |
 | `GLOSSY_DATABASE_PATH` | SQLite file. Use a persistent disk outside development. |
 | `GLOSSY_PUBLIC_URL` | Base URL printed in invite links and allowed to post the invite form. |
+| `TURNSTILE_ACTION`, `TURNSTILE_HOSTNAME` | Optional constraints on Turnstile verification. |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Optional hosted spend and enrollment alerts. |
+| `PERIOD_BUDGET_USD` | Period spend ceiling for the whole instance. |
 
 What works without keys:
 

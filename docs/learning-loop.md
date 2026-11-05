@@ -113,7 +113,7 @@ Only the first attempt of a task schedules the next practice
 
 ## What you can see
 
-**My expressions** (`/expressions`) lists each expression with its evidence,
+**My words** (`/expressions`) lists each saved word or expression with its evidence,
 newest first: *Used with help*, *Written attempt* or *Spoken attempt* with the
 verdict, and the notes *From memory*, *Hint used* and *Transcript edited*. It
 also shows when the expression is next due.
