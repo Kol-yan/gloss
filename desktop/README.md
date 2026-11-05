@@ -123,8 +123,8 @@ The desktop app uses the web app's guest sessions; there is no separate
 account and no sign-in screen.
 
 - On first launch it calls `POST /api/access/guest/desktop` and keeps the
-  session cookie the server sets, in memory and, when the system keychain is
-  available, the Keychain. The route creates the same guest learner the
+  session cookie the server sets in memory and an owner-only guest session
+  file in the app config directory. The route creates the same guest learner the
   website gives a first visitor, without Turnstile, which a native app cannot
   show; the per-IP daily limit and the owner spend caps still apply.
 - **Start a new workspace** under **Advanced** ends the session and creates a
@@ -148,13 +148,14 @@ to a server that did not issue it.
 
 ## Privacy
 
-- The session token is stored in the macOS Keychain (Credential Manager on
-  Windows, Secret Service on Linux), never in a file or a log. Without a
-  usable credential store it is kept in memory until the app quits, and the
-  settings window says so.
-- Selected text leaves your computer only when you press the check shortcut,
-  and goes only to your gloss server. Applied suggestions are recorded as
-  accepted, as in the web editor.
+- Guest session tokens are stored per server in `guest-sessions.json` in the
+  app config directory, atomically replaced with Unix permissions `0600`.
+  macOS attempts one silent migration of each old Keychain session, skipping
+  anything that requires a prompt. Normal use never reads or writes Keychain.
+  If the file cannot be saved, the workspace lasts only until the app quits.
+- With **Check as I type** enabled, the focused editable field is sent to
+  your gloss server after a typing pause. The check shortcut sends the selected
+  text. Applied suggestions are recorded as accepted, as in the web editor.
 - To read a selection that an app does not expose through Accessibility, gloss
   sends Copy, reads the clipboard and puts your previous clipboard back. To
   insert text it does the same with Paste. On macOS every representation on
@@ -187,7 +188,7 @@ desktop/
         │   └── portable.rs       Windows and Linux: clipboard copy and paste
         ├── audio.rs, wav.rs      microphone capture and the WAV the server accepts
         ├── text.rs               NFC normalization and UTF-16 ranges, as in src/lib/text
-        ├── credentials.rs        per-server sessions in the system credential store
+        ├── credentials.rs        per-server guest sessions in an owner-only file
         ├── settings.rs           settings file and server address rules
         ├── shortcuts.rs          global shortcuts and their labels
         ├── tray.rs, windows.rs   menu-bar icon and window placement

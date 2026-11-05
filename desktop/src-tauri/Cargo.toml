@@ -24,7 +24,6 @@ tauri-plugin-log = "2.10"
 tauri-plugin-opener = "2.7"
 tauri-plugin-single-instance = "2.5"
 cpal = "0.18"
-keyring = "4"
 log = "0.4"
 # The operating system's TLS stack and trust store (Security.framework on
 # macOS, SChannel on Windows, OpenSSL on Linux), so corporate roots just work.
@@ -37,8 +36,9 @@ url = "2.5"
 uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "3.7"
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "libc", "block2", "NSEvent", "NSPasteboard", "NSPasteboardItem", "NSRunningApplication", "NSWorkspace"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "libc", "block2", "NSEvent", "NSPasteboard", "NSPasteboardItem", "NSRunningApplication", "NSScreen", "NSWorkspace"] }
 block2 = "0.6"
 objc2-application-services = { version = "0.3", default-features = false, features = ["std", "AXError", "AXUIElement", "AXValue", "HIServices", "UniversalAccess", "libc"] }
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFBase", "CFDictionary", "CFNumber", "CFRunLoop", "CFString"] }

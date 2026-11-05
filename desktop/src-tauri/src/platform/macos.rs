@@ -25,8 +25,7 @@ use objc2_core_graphics::{CGEvent, CGEventFlags, CGEventSource, CGEventSourceSta
 use objc2_foundation::{NSArray, NSData, NSString, NSURL};
 
 use super::{
-    ClipItem, ClipSnapshot, Clipboard, EditKey, FocusedApp, Permission, Platform, PlatformError, PrivacyPane,
-    TextField,
+    ClipItem, ClipSnapshot, Clipboard, EditKey, FocusedApp, Permission, Platform, PlatformError, PrivacyPane, TextField,
 };
 
 // Virtual key codes of the ANSI C and V keys. Command shortcuts in non-Latin
@@ -108,8 +107,9 @@ impl Platform for MacPlatform {
         written
     }
 
-    fn release_text_field(&self, field: &TextField) {
-        release(field.token);
+    fn release_text_field(&self, _field: &TextField) {
+        // TextField's last shared lease releases the native reference. An
+        // explicit panel dismissal must not invalidate a watcher's clone.
     }
 
     fn wait_for_modifier_release(&self) {
@@ -186,13 +186,29 @@ impl Platform for MacPlatform {
 
 // Elements handed to the rest of the app are named by a number, so the panel
 // and the background checker can write into the field they read without the
-// unsafe pointers crossing module boundaries. An entry is removed once the
-// field it points to is dismissed or checked anew, which releases it.
+// unsafe pointers crossing module boundaries. Cloned fields share a lease, so
+// dismissing a panel cannot invalidate the watcher's target for the same field.
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 struct Registry {
-    elements: HashMap<u64, *mut AXUIElement>,
+    elements: HashMap<u64, RegisteredElement>,
+}
+
+struct RegisteredElement {
+    raw: *mut AXUIElement,
+    lease: std::sync::Weak<FieldLease>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct FieldLease {
+    token: u64,
+}
+
+impl Drop for FieldLease {
+    fn drop(&mut self) {
+        release(self.token);
+    }
 }
 
 // SAFETY: the pointers are only used as opaque handles for AX calls, which the
@@ -208,8 +224,7 @@ static NEXT_TOKEN: AtomicU64 = AtomicU64::new(1);
 unsafe fn text_subtree(element: CFRetained<AXUIElement>) -> CFRetained<AXUIElement> {
     // SAFETY: an element without children answers with an error, ignored.
     unsafe {
-        let Some(children) = copy_attribute(&element, "AXChildren")
-            .and_then(|value| value.downcast::<CFArray>().ok())
+        let Some(children) = copy_attribute(&element, "AXChildren").and_then(|value| value.downcast::<CFArray>().ok())
         else {
             return element;
         };
@@ -227,34 +242,45 @@ unsafe fn text_subtree(element: CFRetained<AXUIElement>) -> CFRetained<AXUIEleme
     }
 }
 
-fn register(element: CFRetained<AXUIElement>) -> u64 {
+fn register(element: CFRetained<AXUIElement>) -> std::sync::Arc<FieldLease> {
     let mut registry = ELEMENTS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    // The registry never grows past a handful of fields.
-    if registry.elements.len() >= 32 {
-        for (_, raw) in registry.elements.drain() {
-            // SAFETY: the registry owned the +1 reference until this line.
-            drop(unsafe { CFRetained::from_raw(NonNull::new(raw).unwrap()) });
+    for registered in registry.elements.values() {
+        // SAFETY: the locked registry owns a retained reference. AX equality
+        // uses CFEqual, so separately returned proxies for one field match.
+        // Upgrade only the matching lease and return it without dropping a
+        // possible last owner while this mutex is held.
+        if unsafe { &*registered.raw } == element.as_ref()
+            && let Some(lease) = registered.lease.upgrade()
+        {
+            return lease;
         }
     }
     let token = NEXT_TOKEN.fetch_add(1, Ordering::Relaxed);
-    registry.elements.insert(token, CFRetained::into_raw(element).as_ptr() as *mut AXUIElement);
-    token
+    let lease = std::sync::Arc::new(FieldLease { token });
+    registry.elements.insert(
+        token,
+        RegisteredElement {
+            raw: CFRetained::into_raw(element).as_ptr() as *mut AXUIElement,
+            lease: std::sync::Arc::downgrade(&lease),
+        },
+    );
+    lease
 }
 
 fn element_for(token: u64) -> Option<CFRetained<AXUIElement>> {
     let registry = ELEMENTS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    let raw = *registry.elements.get(&token)?;
+    let raw = registry.elements.get(&token)?.raw;
     let pointer = NonNull::new(raw)?;
-    // SAFETY: the registry holds the +1 reference until the token is released.
+    // SAFETY: the registry holds its +1 reference while this mutex is held.
     Some(unsafe { CFRetained::retain(pointer) })
 }
 
 fn release(token: u64) {
     let mut registry = ELEMENTS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    if let Some(raw) = registry.elements.remove(&token)
-        && let Some(pointer) = NonNull::new(raw)
+    if let Some(registered) = registry.elements.remove(&token)
+        && let Some(pointer) = NonNull::new(registered.raw)
     {
-        // SAFETY: the registry's +1 reference is dropped exactly once.
+        // SAFETY: the registry owned this +1 until the last field lease ended.
         drop(unsafe { CFRetained::from_raw(pointer) });
     }
 }
@@ -267,9 +293,8 @@ unsafe fn read_focused_field() -> Option<TextField> {
         let frontmost = NSWorkspace::sharedWorkspace().frontmostApplication()?;
         let application = AXUIElement::new_application(frontmost.processIdentifier());
         let _ = application.set_messaging_timeout(0.4);
-        let focused = ["AXFocusedUIElement", "AXFocusedWindow"]
-            .iter()
-            .find_map(|name| copy_attribute(&application, name))?;
+        let focused =
+            ["AXFocusedUIElement", "AXFocusedWindow"].iter().find_map(|name| copy_attribute(&application, name))?;
         // Safari, Mail and other rich text views put the text on a child
         // element; the number is registered on the element that holds it.
         let element = text_subtree(focused.downcast::<AXUIElement>().ok()?);
@@ -297,8 +322,8 @@ unsafe fn read_focused_field() -> Option<TextField> {
             )
             .map(|((x, y), (width, height))| (x, y, width, height));
         let editable = is_true(&element, "AXEditable") || value_is_settable(&element);
-        let token = register(element);
-        Some(TextField { value, selection, frame, editable, token })
+        let lease = register(element);
+        Some(TextField { value, selection, frame, editable, token: lease.token, lease: Some(lease) })
     }
 }
 
@@ -365,18 +390,12 @@ unsafe fn write_field(field: &TextField, text: &str) -> bool {
         if let Some(range) = ax_range_value(CFRange { location: 0, length }) {
             let _ = element.set_attribute_value(&CFString::from_static_str("AXSelectedTextRange"), range.as_ref());
         }
-        let selected = element.set_attribute_value(
-            &CFString::from_static_str("AXSelectedText"),
-            string.as_ref(),
-        );
+        let selected = element.set_attribute_value(&CFString::from_static_str("AXSelectedText"), string.as_ref());
         let value = element.set_attribute_value(&CFString::from_static_str("AXValue"), string.as_ref());
         if selected == AXError::Success || value == AXError::Success {
             // Leave the caret at the end of what was written.
             if let Some(range) = ax_range_value(CFRange { location: length, length: 0 }) {
-                let _ = element.set_attribute_value(
-                    &CFString::from_static_str("AXSelectedTextRange"),
-                    range.as_ref(),
-                );
+                let _ = element.set_attribute_value(&CFString::from_static_str("AXSelectedTextRange"), range.as_ref());
             }
             return true;
         }
@@ -460,5 +479,40 @@ impl Clipboard for MacClipboard {
 
     fn change_count(&mut self) -> Option<i64> {
         Some(self.board.changeCount() as i64)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn application(pid: i32) -> CFRetained<AXUIElement> {
+        // SAFETY: creating an AX proxy does not read another app or require
+        // permission; the test never requests attributes from this proxy.
+        unsafe { AXUIElement::new_application(pid) }
+    }
+
+    #[test]
+    fn repeated_proxies_share_a_token_until_the_last_lease_is_dropped() {
+        let first = register(application(2_000_001));
+        let token = first.token;
+        let second = register(application(2_000_001));
+        assert_eq!(token, second.token, "CFEqual identifies independently returned AX proxies");
+        drop(first);
+        assert!(element_for(token).is_some(), "another field clone still owns the target");
+        drop(second);
+        assert!(element_for(token).is_none(), "the last lease releases the registry's native reference");
+    }
+
+    #[test]
+    fn registering_more_than_32_fields_never_invalidates_a_pinned_target() {
+        let pinned = register(application(2_000_002));
+        let others: Vec<_> = (2_000_100..2_000_140).map(|pid| register(application(pid))).collect();
+        assert!(element_for(pinned.token).is_some());
+        assert_eq!(register(application(2_000_002)).token, pinned.token);
+        let tokens: Vec<_> = others.iter().map(|lease| lease.token).collect();
+        drop(others);
+        assert!(tokens.into_iter().all(|token| element_for(token).is_none()));
+        assert!(element_for(pinned.token).is_some());
     }
 }

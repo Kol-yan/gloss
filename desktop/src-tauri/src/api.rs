@@ -307,6 +307,7 @@ impl Client {
             .send()
             .await
             .map_err(|_| ApiError::Network)?;
+        log::info!("[gloss] POST /api/speech/dictate {}", response.status().as_u16());
         parse(response).await
     }
 

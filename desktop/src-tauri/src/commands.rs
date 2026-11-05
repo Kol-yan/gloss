@@ -79,16 +79,15 @@ pub fn save_shortcuts(app: AppHandle, check: String, dictation: String) -> Comma
     // The right Option key is watched by the monitor, not registered as a
     // global shortcut, so it is not parsed here.
     shortcuts::apply(&app, &check, &dictation)?;
-    if dictation != previous.dictation_shortcut {
-        crate::push_to_talk::start(&app, &dictation);
-    }
-    let next = Settings { check_shortcut: check.trim().to_owned(), dictation_shortcut: dictation, ..previous };
+    let next =
+        Settings { check_shortcut: check.trim().to_owned(), dictation_shortcut: dictation.clone(), ..previous.clone() };
     if let Err(error) = save(&state, next) {
         // Put the old shortcuts back rather than leaving them half applied.
         let _ = shortcuts::apply(&app, &previous.check_shortcut, &previous.dictation_shortcut);
         crate::push_to_talk::start(&app, &previous.dictation_shortcut);
         return Err(error);
     }
+    crate::push_to_talk::start(&app, &dictation);
     state::publish(&app);
     Ok(state.overview())
 }
@@ -138,16 +137,18 @@ pub fn shortcut_pressed(state: State<'_, AppState>) -> bool {
 }
 
 #[tauri::command]
-pub fn suspend_shortcuts(app: AppHandle) {
-    shortcuts::suspend(&app);
-    crate::push_to_talk::stop();
+pub fn suspend_shortcuts(app: AppHandle) -> CommandResult<()> {
+    // The Option monitor already ignores events in this app's windows.
+    shortcuts::suspend(&app)
 }
 
 #[tauri::command]
-pub fn resume_shortcuts(app: AppHandle) {
+pub fn resume_shortcuts(app: AppHandle) -> CommandResult<Overview> {
     // Coming back from recording a key: register what is saved again.
     crate::push_to_talk::start(&app, &app.state::<AppState>().settings().dictation_shortcut);
-    shortcuts::register_saved(&app);
+    let settings = app.state::<AppState>().settings();
+    shortcuts::apply(&app, &settings.check_shortcut, &settings.dictation_shortcut)?;
+    Ok(app.state::<AppState>().overview())
 }
 
 fn save(state: &AppState, next: Settings) -> CommandResult<()> {

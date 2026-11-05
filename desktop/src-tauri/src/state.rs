@@ -68,10 +68,11 @@ pub struct Overview {
 impl AppState {
     pub fn new(store: SettingsStore) -> Self {
         let settings = store.load();
+        let credentials = Credentials::new(store.directory());
         Self {
             store,
             settings: Mutex::new(settings),
-            credentials: Credentials::new(),
+            credentials,
             client: api::Client::new(),
             platform: platform::current(),
             account: Mutex::new(AccountView::default()),
@@ -135,11 +136,14 @@ impl AppState {
         match self.client.create_guest(&server).await {
             Ok((cookie_name, token)) => {
                 log::info!("[gloss] guest workspace created (cookie {cookie_name})");
-                self.credentials.save(&origin, &crate::credentials::StoredSession {
-                    token: token.clone(),
-                    cookie_name: cookie_name.clone(),
-                    owned: true,
-                });
+                self.credentials.save(
+                    &origin,
+                    &crate::credentials::StoredSession {
+                        token: token.clone(),
+                        cookie_name: cookie_name.clone(),
+                        owned: true,
+                    },
+                );
                 Some(Session { server, token, cookie_name, owned: true })
             }
             Err(error) => {

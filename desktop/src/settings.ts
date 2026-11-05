@@ -3,6 +3,7 @@ import { remaining, type Overview } from "./types";
 
 const checkKey = byId<HTMLButtonElement>("check-key");
 const dictationKey = byId<HTMLButtonElement>("dictation-key");
+const resetShortcuts = byId<HTMLButtonElement>("reset-shortcuts");
 const shortcutError = byId<HTMLParagraphElement>("shortcut-error");
 const checkAsYouType = byId<HTMLInputElement>("check-as-you-type");
 const accessibility = byId<HTMLButtonElement>("accessibility");
@@ -70,7 +71,7 @@ function renderStatus(overview: Overview) {
     if (seconds !== null) parts.push(`${Math.floor(seconds / 60)} min of dictation left`);
     if (parts.length) lines.push(line(parts.join(" · "), "hint"));
     if (!account.remembered) {
-      lines.push(line("No system keychain is available, so this workspace lasts until gloss restarts.", "hint"));
+      lines.push(line("The workspace could not be saved, so it lasts until gloss restarts.", "hint"));
     }
   }
   if (overview.shortcutError) lines.push(line(overview.shortcutError, "error"));
@@ -143,8 +144,8 @@ checkAsYouType.addEventListener("change", () => {
 });
 
 // A shortcut is recorded by clicking it and pressing the keys together. While
-// a field records, the global shortcuts and the dictation key are paused, so
-// pressing the current ones records them instead of starting a check.
+// a field records, global shortcuts are paused; the Option monitor ignores
+// this app's focused windows, so recording never starts dictation.
 const KEY_NAMES: Record<string, string> = {
   Space: "Space",
   Comma: "Comma",
@@ -158,6 +159,19 @@ const KEY_NAMES: Record<string, string> = {
   Minus: "Minus",
   Equal: "Equal",
   Backquote: "Backquote",
+  Enter: "Enter",
+  Tab: "Tab",
+  Backspace: "Backspace",
+  Delete: "Delete",
+  Insert: "Insert",
+  Home: "Home",
+  End: "End",
+  PageUp: "PageUp",
+  PageDown: "PageDown",
+  ArrowUp: "ArrowUp",
+  ArrowDown: "ArrowDown",
+  ArrowLeft: "ArrowLeft",
+  ArrowRight: "ArrowRight",
 };
 
 function keyName(code: string): string | null {
@@ -167,9 +181,8 @@ function keyName(code: string): string | null {
   return KEY_NAMES[code] ?? null;
 }
 
-function accelerator(event: KeyboardEvent, button: HTMLButtonElement): string | null {
-  // The dictation key may be pressed alone; the check shortcut needs a modifier.
-  if (button === dictationKey && event.code === "AltRight") return "RightOption";
+function accelerator(event: KeyboardEvent): string | null {
+  // Plain typing keys cannot become a global shortcut.
   const key = keyName(event.code);
   if (!key) return null;
   const modifiers: string[] = [];
@@ -180,63 +193,132 @@ function accelerator(event: KeyboardEvent, button: HTMLButtonElement): string | 
   return modifiers.length ? [...modifiers, key].join("+") : null;
 }
 
-function startRecording(button: HTMLButtonElement) {
-  if (recording) stopRecording();
-  recording = button;
-  button.classList.add("recording");
-  button.textContent = "Press the new keys";
-  shortcutError.textContent = "";
-  void invoke("suspend_shortcuts").catch(() => undefined);
+// Serialize the native pause/save/resume calls. A blur or Escape must never
+// resume an old registration after a successful save of a new shortcut.
+let shortcutOperation = Promise.resolve();
+let shortcutBusy = false;
+let rightOptionCandidate = false;
+
+function queueShortcut(action: () => Promise<void>) {
+  shortcutOperation = shortcutOperation.then(action).catch((failure) => {
+    shortcutError.textContent = errorMessage(failure);
+  });
 }
 
-function stopRecording() {
-  if (!recording) return;
-  recording.classList.remove("recording");
+function clearRecording() {
+  if (recording) {
+    recording.classList.remove("recording");
+    recording.textContent = keys(recording.dataset.value ?? "");
+  }
   recording = null;
-  void invoke("resume_shortcuts").catch(() => undefined);
+  rightOptionCandidate = false;
+}
+
+function startRecording(button: HTMLButtonElement) {
+  if (shortcutBusy) return;
+  clearRecording();
+  recording = button;
+  button.classList.add("recording");
+  button.textContent = "Press keys · Esc cancels";
+  shortcutError.textContent = "";
+  shortcutBusy = true;
+  queueShortcut(async () => {
+    try {
+      await invoke("suspend_shortcuts");
+    } catch (failure) {
+      clearRecording();
+      render(await invoke<Overview>("resume_shortcuts"));
+      throw failure;
+    } finally {
+      shortcutBusy = false;
+    }
+  });
+}
+
+function cancelRecording() {
+  if (!recording) return;
+  clearRecording();
+  shortcutBusy = true;
+  queueShortcut(async () => {
+    try {
+      render(await invoke<Overview>("resume_shortcuts"));
+    } finally {
+      shortcutBusy = false;
+    }
+  });
+}
+
+function saveShortcut(check: string, dictation: string) {
+  clearRecording();
+  shortcutBusy = true;
+  queueShortcut(async () => {
+    try {
+      render(await invoke<Overview>("save_shortcuts", { check, dictation }));
+    } catch (failure) {
+      // The backend keeps the previous settings and restores registration.
+      render(await invoke<Overview>("resume_shortcuts"));
+      throw failure;
+    } finally {
+      shortcutBusy = false;
+    }
+  });
+}
+
+function acceptShortcut(button: HTMLButtonElement, value: string) {
+  saveShortcut(
+    button === checkKey ? value : (checkKey.dataset.value ?? ""),
+    button === dictationKey ? value : (dictationKey.dataset.value ?? ""),
+  );
 }
 
 for (const button of [checkKey, dictationKey]) {
   button.addEventListener("click", () => startRecording(button));
-  button.addEventListener("blur", () => {
-    if (recording === button) {
-      stopRecording();
-      void invoke<Overview>("get_overview").then(render, () => undefined);
-    }
-  });
-  button.addEventListener("keydown", (event) => {
-    if (event.key === "Tab" && !event.ctrlKey && !event.altKey && !event.metaKey) return;
-    if (event.key === "Escape") {
-      stopRecording();
-      void invoke<Overview>("get_overview").then(render, () => undefined);
-      return;
-    }
-    event.preventDefault();
-    const value = accelerator(event, button);
-    if (!value) {
-      if (!["Control", "Alt", "Shift", "Meta", "AltRight"].includes(event.key)) {
-        shortcutError.textContent = "Hold Control, Alt or Command while you press the key.";
-      }
-      return;
-    }
-    button.textContent = keys(value);
-    const check = button === checkKey ? value : (checkKey.dataset.value ?? "");
-    const dictation = button === dictationKey ? value : (dictationKey.dataset.value ?? "");
-    void invoke<Overview>("save_shortcuts", { check, dictation }).then(
-      (overview) => {
-        stopRecording();
-        render(overview);
-      },
-      (failure) => {
-        shortcutError.textContent = errorMessage(failure);
-        button.classList.remove("recording");
-        recording = null;
-        void invoke("resume_shortcuts").catch(() => undefined);
-        void invoke<Overview>("get_overview").then(render, () => undefined);
-      },
-    );
-  });
 }
+
+// Only explicit recording can change saved keys; Enter/Space that activates
+// the button must not itself select a shortcut.
+window.addEventListener("keydown", (event) => {
+  if (!recording) return;
+  if (event.key === "Escape") {
+    event.preventDefault();
+    cancelRecording();
+    return;
+  }
+  if (event.key === "Tab" && !event.ctrlKey && !event.altKey && !event.metaKey) {
+    cancelRecording();
+    return;
+  }
+  event.preventDefault();
+  if (shortcutBusy || event.repeat) return;
+  if (recording === dictationKey && os === "macos" && event.code === "AltRight"
+      && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+    // Wait for release, so right Option can also be part of a combination.
+    rightOptionCandidate = true;
+    recording.textContent = "right Option";
+    return;
+  }
+  rightOptionCandidate = false;
+  const value = accelerator(event);
+  if (value) {
+    acceptShortcut(recording, value);
+  } else if (!["Control", "Alt", "Shift", "Meta"].includes(event.key)) {
+    shortcutError.textContent = "Hold Control, Alt or Command while you press the key.";
+  }
+}, true);
+
+window.addEventListener("keyup", (event) => {
+  if (recording && !shortcutBusy && rightOptionCandidate && event.code === "AltRight") {
+    event.preventDefault();
+    acceptShortcut(recording, "RightOption");
+  }
+}, true);
+
+window.addEventListener("blur", cancelRecording);
+resetShortcuts.addEventListener("click", () => {
+  if (shortcutBusy) return;
+  shortcutError.textContent = "";
+  saveShortcut("Control+Alt+G", os === "macos" ? "RightOption" : "Control+Alt+D");
+});
 
 // Coming back from System Settings should show a newly granted permission.
 window.addEventListener("focus", () => {

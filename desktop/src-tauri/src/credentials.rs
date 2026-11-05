@@ -1,7 +1,6 @@
-//! Session tokens live in the operating system's credential store (Keychain on
-//! macOS, Credential Manager on Windows, Secret Service on Linux), one entry per
-//! server origin, so a token is only ever sent to the server that issued it.
-//! Without a usable store the token is kept in memory for this run only.
+//! Low-value guest sessions live in an atomically replaced, owner-only file
+//! in the app config directory, isolated by server origin. Keychain is queried
+//! once for silent migration only; normal reads, saves and sign-out use files.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -37,86 +36,204 @@ pub fn looks_like_token(value: &str) -> bool {
 }
 
 pub struct Credentials {
+    path: std::path::PathBuf,
     memory: Mutex<HashMap<String, StoredSession>>,
-    // Set once the system store fails, so later calls do not retry a broken store.
     store_unavailable: AtomicBool,
 }
 
 impl Credentials {
-    pub fn new() -> Self {
-        Self { memory: Mutex::new(HashMap::new()), store_unavailable: AtomicBool::new(false) }
+    pub fn new(dir: &std::path::Path) -> Self {
+        Self {
+            path: dir.join("guest-sessions.json"),
+            memory: Mutex::new(HashMap::new()),
+            store_unavailable: AtomicBool::new(false),
+        }
     }
 
-    /// False when tokens only last until the app quits.
     pub fn is_persistent(&self) -> bool {
         !self.store_unavailable.load(Ordering::Relaxed)
     }
 
     pub fn load(&self, origin: &str) -> Option<StoredSession> {
-        if let Some(session) = self.memory.lock().ok().and_then(|map| map.get(origin).cloned()) {
-            return Some(session);
+        let mut memory = self.memory.lock().ok()?;
+        if let Some(session) = memory.get(origin) {
+            return Some(session.clone());
         }
-        if !self.is_persistent() {
-            return None;
-        }
-        match keyring::Entry::new(SERVICE, origin).and_then(|entry| entry.get_password()) {
-            Ok(stored) => {
-                let session =
-                    serde_json::from_str::<StoredSession>(&stored).ok().filter(|s| looks_like_token(&s.token))?;
-                self.remember(origin, &session);
-                Some(session)
+        let mut sessions = self.read_file();
+        // Persist the attempt before querying Security.framework: even a crash,
+        // refusal or inaccessible old item must not retry on the next launch.
+        if !sessions.contains_key(origin) {
+            sessions.insert(origin.to_owned(), None);
+            if self.write_file(&sessions).is_ok() {
+                if let Some(session) = migrate_without_prompt(origin) {
+                    sessions.insert(origin.to_owned(), Some(session));
+                    self.persist(&sessions);
+                }
+            } else {
+                self.store_unavailable.store(true, Ordering::Relaxed);
             }
-            Err(keyring::Error::NoEntry) => None,
-            Err(error) => {
-                self.mark_unavailable(&error);
-                None
-            }
         }
+        let session = sessions.get(origin)?.clone().filter(valid_session)?;
+        memory.insert(origin.to_owned(), session.clone());
+        Some(session)
     }
 
     pub fn save(&self, origin: &str, session: &StoredSession) {
-        self.remember(origin, session);
-        if !self.is_persistent() {
+        if !valid_session(session) {
             return;
         }
-        let Ok(stored) = serde_json::to_string(session) else { return };
-        if let Err(error) = keyring::Entry::new(SERVICE, origin).and_then(|entry| entry.set_password(&stored)) {
-            self.mark_unavailable(&error);
-        }
+        let Ok(mut memory) = self.memory.lock() else { return };
+        memory.insert(origin.to_owned(), session.clone());
+        let mut sessions = self.read_file();
+        sessions.insert(origin.to_owned(), Some(session.clone()));
+        self.persist(&sessions);
     }
 
     pub fn delete(&self, origin: &str) {
-        if let Ok(mut map) = self.memory.lock() {
-            map.remove(origin);
-        }
-        if !self.is_persistent() {
-            return;
-        }
-        match keyring::Entry::new(SERVICE, origin).and_then(|entry| entry.delete_credential()) {
-            Ok(()) | Err(keyring::Error::NoEntry) => {}
-            Err(error) => self.mark_unavailable(&error),
+        let Ok(mut memory) = self.memory.lock() else { return };
+        memory.remove(origin);
+        let mut sessions = self.read_file();
+        // Keep the migration tombstone after sign-out, too.
+        sessions.insert(origin.to_owned(), None);
+        self.persist(&sessions);
+    }
+
+    fn read_file(&self) -> HashMap<String, Option<StoredSession>> {
+        std::fs::read(&self.path).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default()
+    }
+
+    fn persist(&self, sessions: &HashMap<String, Option<StoredSession>>) {
+        let failed = self.write_file(sessions).is_err();
+        self.store_unavailable.store(failed, Ordering::Relaxed);
+        if failed {
+            log::warn!("guest session file unavailable; keeping the session in memory");
         }
     }
 
-    fn remember(&self, origin: &str, session: &StoredSession) {
-        if let Ok(mut map) = self.memory.lock() {
-            map.insert(origin.to_owned(), session.clone());
+    fn write_file(&self, sessions: &HashMap<String, Option<StoredSession>>) -> std::io::Result<()> {
+        use std::io::Write;
+        let dir = self.path.parent().expect("session file has a config directory");
+        std::fs::create_dir_all(dir)?;
+        // A unique, exclusively created sibling prevents following a preexisting
+        // symlink and preserves atomic replacement on the same filesystem.
+        let temporary = dir.join(format!(".guest-session-{}", uuid::Uuid::new_v4()));
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let result = (|| {
+            let mut file = options.open(&temporary)?;
+            file.write_all(&serde_json::to_vec(sessions)?)?;
+            file.sync_all()?;
+            std::fs::rename(&temporary, &self.path)
+        })();
+        if result.is_err() {
+            let _ = std::fs::remove_file(&temporary);
+        }
+        result
+    }
+}
+
+fn valid_session(session: &StoredSession) -> bool {
+    looks_like_token(&session.token)
+        && !session.cookie_name.is_empty()
+        && session.cookie_name.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+}
+
+/// This is the only Keychain access in the application, for one-time migration.
+/// Both legacy Keychain UI and authenticated-item UI are disabled. A locked or
+/// signature-protected item is skipped; guest enrollment handles the absence.
+#[cfg(target_os = "macos")]
+fn migrate_without_prompt(origin: &str) -> Option<StoredSession> {
+    use security_framework::item::{ItemClass, ItemSearchOptions, SearchResult};
+    #[link(name = "Security", kind = "framework")]
+    unsafe extern "C" {
+        fn SecKeychainGetUserInteractionAllowed(state: *mut u8) -> i32;
+        fn SecKeychainSetUserInteractionAllowed(state: u8) -> i32;
+    }
+    // Security.framework's interaction flag is process-wide. Serialize migration
+    // and restore the previous state on every return, including unwinding.
+    static MIGRATION: Mutex<()> = Mutex::new(());
+    let _lock = MIGRATION.lock().ok()?;
+    let mut previous = 0u8;
+    // SAFETY: Security.framework writes one Boolean into a valid pointer.
+    if unsafe { SecKeychainGetUserInteractionAllowed(&mut previous) } != 0 {
+        return None;
+    }
+    // SAFETY: disabling UI means denied access fails instead of opening a prompt.
+    if unsafe { SecKeychainSetUserInteractionAllowed(0) } != 0 {
+        return None;
+    }
+    struct Restore(u8);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            // SAFETY: restore the flag read before the migration.
+            unsafe {
+                SecKeychainSetUserInteractionAllowed(self.0);
+            }
         }
     }
+    let _restore = Restore(previous);
+    let results = ItemSearchOptions::new()
+        .class(ItemClass::generic_password())
+        .service(SERVICE)
+        .account(origin)
+        .load_data(true)
+        .skip_authenticated_items(true)
+        .search()
+        .ok()?;
+    results.into_iter().find_map(|result| {
+        let SearchResult::Data(bytes) = result else { return None };
+        serde_json::from_slice::<StoredSession>(&bytes).ok().filter(valid_session)
+    })
+}
 
-    fn mark_unavailable(&self, error: &keyring::Error) {
-        // The variant name is enough to diagnose; platform details may include
-        // account names.
-        let kind = format!("{error:?}");
-        let kind = kind.split(['(', ' ', '{']).next().unwrap_or("unknown");
-        log::warn!("system credential store unavailable ({kind}); keeping the session in memory");
-        self.store_unavailable.store(true, Ordering::Relaxed);
-    }
+#[cfg(not(target_os = "macos"))]
+fn migrate_without_prompt(_origin: &str) -> Option<StoredSession> {
+    None
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn persists_private_origin_scoped_sessions_and_keeps_migration_tombstones() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::path::PathBuf::from("/tmp").join(format!("gloss-session-test-{}", uuid::Uuid::new_v4()));
+        let origin = "https://gloss.example";
+        let store = Credentials::new(&dir);
+        // Seed a tombstone so tests never query a real credential store.
+        store.delete(origin);
+        let session = StoredSession {
+            token: ["abcdefghijklmnopqrstuvwxyz", "ABCDEFGHIJ0123-_Q"].concat(),
+            cookie_name: "glossy_session".into(),
+            owned: true,
+        };
+        store.save(origin, &session);
+        assert_eq!(std::fs::metadata(&store.path).unwrap().permissions().mode() & 0o777, 0o600);
+        let restarted = Credentials::new(&dir);
+        assert_eq!(restarted.load(origin), Some(session));
+        restarted.delete(origin);
+        assert_eq!(Credentials::new(&dir).load(origin), None);
+        assert!(restarted.read_file().contains_key(origin));
+        assert_eq!(restarted.read_file().len(), 1);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn rejects_tokens_and_cookie_names_that_could_inject_headers() {
+        let session = StoredSession {
+            token: ["abcdefghijklmnopqrstuvwxyz", "ABCDEFGHIJ0123-_Q"].concat(),
+            cookie_name: "glossy_session; other=x".into(),
+            owned: true,
+        };
+        assert!(!valid_session(&session));
+    }
 
     #[test]
     fn reads_older_sessions_without_a_cookie_name() {

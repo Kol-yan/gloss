@@ -246,6 +246,8 @@ mod tests {
             frame: None,
             editable: true,
             token: 1,
+            #[cfg(target_os = "macos")]
+            lease: None,
         };
         assert_eq!(capture(&platform, Some(&field)).unwrap(), "go");
         // Unknown, empty or out-of-range selections fall through to the app.

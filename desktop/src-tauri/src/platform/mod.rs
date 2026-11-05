@@ -9,7 +9,6 @@ pub mod observer;
 #[cfg(not(target_os = "macos"))]
 mod portable;
 
-
 use std::sync::Arc;
 
 /// An application that had keyboard focus, so it can get focus back after the
@@ -85,6 +84,9 @@ pub struct TextField {
     pub editable: bool,
     /// Placeholder for the platform to keep the element handle; opaque here.
     pub token: u64,
+    /// Shared native ownership keeps cloned watcher and panel targets alive.
+    #[cfg(target_os = "macos")]
+    pub(crate) lease: Option<Arc<macos::FieldLease>>,
 }
 
 pub trait Platform: Send + Sync {

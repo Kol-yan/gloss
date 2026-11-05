@@ -88,7 +88,9 @@ pub fn register_saved(app: &AppHandle) {
     log::info!(
         "[gloss] registering shortcuts: check {} ({}), dictate {}",
         label(&settings.check_shortcut),
-        parse(&settings.check_shortcut).map(|shortcut| shortcut.id()).map_or("invalid".to_string(), |id| id.to_string()),
+        parse(&settings.check_shortcut)
+            .map(|shortcut| shortcut.id())
+            .map_or("invalid".to_string(), |id| id.to_string()),
         label(&settings.dictation_shortcut),
     );
     if let Err(error) = apply(app, &settings.check_shortcut, &settings.dictation_shortcut) {
@@ -98,12 +100,13 @@ pub fn register_saved(app: &AppHandle) {
 }
 
 /// Pauses both shortcuts while the settings window records new keys.
-pub fn suspend(app: &AppHandle) {
-    let _ = app.global_shortcut().unregister_all();
+pub fn suspend(app: &AppHandle) -> Result<(), String> {
+    app.global_shortcut().unregister_all().map_err(|_| "Shortcuts could not be paused. Try again.".to_string())?;
     let state = app.state::<AppState>();
     let mut current = lock(&state.shortcuts);
     current.check = None;
     current.dictation = None;
+    Ok(())
 }
 
 pub fn handle(app: &AppHandle, shortcut: &Shortcut, event: ShortcutEvent) {

@@ -11,7 +11,7 @@ use crate::platform::{self, TextField};
 use crate::state::AppState;
 use crate::windows;
 
-use super::{Watcher, MAX_CHARS};
+use super::{MAX_CHARS, Watcher};
 
 /// The installed observation for one app; replaced when the frontmost app
 /// changes. The refcon it holds is freed with the observation.
@@ -153,24 +153,27 @@ fn focus_changed(app: &AppHandle) {
         );
         keep_field(field);
     }
-    // The same field re-read (the polling and the notifications both call
-    // this) does not reset a debounce that is still pending.
-    with_watcher(|watcher| {
-        let same = match (&value, watcher.field.as_ref()) {
-            (Some((_, token)), Some(field)) => field.token == *token,
-            (None, None) => true,
-            _ => false,
-        };
-        if !same {
-            watcher.focus(value, Instant::now());
-        } else if let Some((text, _)) = value {
-            // Re-reading the same text keeps a pending debounce as it is, so
-            // the polling and the notifications cannot cancel each other.
-            if watcher.field.as_ref().is_some_and(|field| field.value != text) {
-                let _ = watcher.typed(text, Instant::now());
-            }
-        }
-    });
+    let actions = with_watcher(|watcher| update_focus(watcher, value, Instant::now()));
+    for action in actions {
+        run_action(app, action);
+    }
+}
+
+// Polling the same AX element must preserve both the pending debounce and
+// the checked result. Only changed text restarts the wait.
+fn update_focus(watcher: &mut Watcher, value: Option<(String, u64)>, now: Instant) -> Vec<super::Action> {
+    let same = match (&value, watcher.field.as_ref()) {
+        (Some((_, token)), Some(field)) => field.token == *token,
+        (None, None) => true,
+        _ => false,
+    };
+    if !same {
+        watcher.focus(value, now)
+    } else if let Some((text, _)) = value {
+        watcher.typed(text, now)
+    } else {
+        Vec::new()
+    }
 }
 
 /// A value notification: re-reads the field and restarts the debounce.
@@ -331,5 +334,37 @@ pub fn settings_changed(app: &AppHandle) {
     } else {
         stop();
         windows::hide_badge(app);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::auto_check::{Action, DEBOUNCE};
+
+    #[test]
+    fn repeated_focus_polls_preserve_the_debounce_and_finished_badge() {
+        let mut watcher = Watcher::default();
+        let t0 = Instant::now();
+        let field = || Some(("He go home.".to_owned(), 7));
+        update_focus(&mut watcher, field(), t0);
+        assert!(update_focus(&mut watcher, field(), t0 + Duration::from_millis(600)).is_empty());
+        assert!(update_focus(&mut watcher, field(), t0 + DEBOUNCE).is_empty());
+        assert_eq!(watcher.take_due(t0 + DEBOUNCE), Some(Action::Check));
+        watcher.answered("He go home.", 1);
+        assert!(update_focus(&mut watcher, field(), t0 + Duration::from_secs(2)).is_empty());
+        assert_eq!(watcher.badge_text().as_deref(), Some("1"));
+        assert_eq!(watcher.take_due(t0 + Duration::from_secs(5)), None);
+    }
+
+    #[test]
+    fn changed_text_from_a_focus_poll_restarts_the_debounce() {
+        let mut watcher = Watcher::default();
+        let t0 = Instant::now();
+        update_focus(&mut watcher, Some(("He go".into(), 7)), t0);
+        let actions = update_focus(&mut watcher, Some(("He go home.".into(), 7)), t0 + Duration::from_millis(600));
+        assert_eq!(actions, vec![Action::HideBadge, Action::Arm(DEBOUNCE)]);
+        assert!(!watcher.due(t0 + DEBOUNCE));
+        assert_eq!(watcher.take_due(t0 + Duration::from_millis(600) + DEBOUNCE), Some(Action::Check));
     }
 }

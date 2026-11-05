@@ -106,6 +106,10 @@ impl SettingsStore {
         Self { path: dir.join("settings.json") }
     }
 
+    pub fn directory(&self) -> &Path {
+        self.path.parent().expect("settings have a config directory")
+    }
+
     /// A missing or unreadable file gives the defaults; a value that no
     /// longer validates falls back to its default rather than blocking start.
     pub fn load(&self) -> Settings {
