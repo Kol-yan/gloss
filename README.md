@@ -157,6 +157,19 @@ its own guest workspace on the server and keeps it.
 
 See the [Mac installation and build guide](desktop/README.md#run-it-on-macos).
 
+## Releases
+
+The website, the browser extension and the desktop app have their own version
+numbers and changelogs:
+
+- Website and server: [CHANGELOG.md](CHANGELOG.md), tags `web-v…`
+- Browser extension: [extension/CHANGELOG.md](extension/CHANGELOG.md), tags
+  `extension-v…`
+- Desktop app: [desktop/CHANGELOG.md](desktop/CHANGELOG.md), tags `desktop-v…`
+
+Downloads (the macOS `.dmg` and the extension zip) are attached to
+[GitHub Releases](https://github.com/Kol-yan/gloss/releases).
+
 ## Tests and checks
 
 ```bash
