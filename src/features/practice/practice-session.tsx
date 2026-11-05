@@ -150,7 +150,7 @@ function PracticeForLearner({ expressionId }: { expressionId: string }) {
           title="You've used today's practice allowance"
           action={
             <Link href="/expressions" className={buttonClasses("primary")}>
-              See my expressions
+              See my words
             </Link>
           }
         >
@@ -179,7 +179,7 @@ function PracticeForLearner({ expressionId }: { expressionId: string }) {
           title="We couldn't find that expression"
           action={
             <Link href="/expressions" className={buttonClasses("primary")}>
-              See my expressions
+              See my words
             </Link>
           }
         >
@@ -201,7 +201,7 @@ function PracticeForLearner({ expressionId }: { expressionId: string }) {
         title="That's it for now"
         action={
           <Link href="/expressions" className={buttonClasses("primary")}>
-            See my expressions
+            See my words
           </Link>
         }
       >

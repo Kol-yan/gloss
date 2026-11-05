@@ -1,5 +1,5 @@
-// Pay-before-you-call budget accounting. Three limits apply to every cloud
-// model call: a per-learner daily quota by kind, one daily spend ceiling for
+// Pay-before-you-call budget accounting. Hosted model calls have three limits:
+// a per-learner daily quota by kind, one daily spend ceiling for
 // the whole instance, and one all-time (period) hosted spend ceiling with an
 // owner funding expiry. A reservation is made before the call (reserve) and
 // closed after it (settle, or markUnknown when the outcome is lost). Daily
@@ -29,7 +29,6 @@ import type { FundingSource } from "../models/access";
 import { queueSpendAlertCheck } from "./alerts";
 
 export const DEFAULT_PERIOD_BUDGET_MICROS = 25_000_000;
-export const DEFAULT_OWNER_FUNDED_UNTIL = "2026-11-09T08:00:00Z";
 
 export interface BudgetDeps extends ServerDeps {
   config?: AppConfig;
@@ -108,12 +107,13 @@ export function reserve(input: ReserveInput, deps: BudgetDeps = {}): ReserveResu
     if (!learner) throw new UnauthorizedError();
 
     const { start, end } = utcDayBounds(now);
-    const limit = quotaLimits(QuotaProfileNameSchema.parse(learner.quota_profile))[input.kind];
-    const used = unitsUsed(db, input.learnerId, input.kind, start, end);
-    if (safeAdd(used, input.units) > limit) throw new QuotaExceededError(input.kind, used, limit);
-
     if (learner.funding_source !== "hosted" && learner.funding_source !== "byok") throw new AiDisabledError();
     const hosted = learner.funding_source === "hosted";
+    if (hosted) {
+      const limit = quotaLimits(QuotaProfileNameSchema.parse(learner.quota_profile))[input.kind];
+      const used = unitsUsed(db, input.learnerId, input.kind, start, end);
+      if (safeAdd(used, input.units) > limit) throw new QuotaExceededError(input.kind, used, limit);
+    }
     if (!hosted) enforceVisitorRate(db, input.learnerId, now);
 
     // Owner funding expiry and all-time period cap apply to hosted only.
@@ -355,9 +355,16 @@ export function getBudgetStatus(deps: BudgetDeps = {}): BudgetStatus {
 export function getQuotaUsage(
   learner: { id: string; quotaProfile: QuotaProfileName },
   deps: BudgetDeps = {},
-): Record<QuotaKind, { used: number; limit: number }> {
+): Record<QuotaKind, { used: number; limit: number; unlimited?: boolean }> {
   const db = deps.db ?? getDb();
   const { start, end } = utcDayBounds(deps.now ?? new Date());
+  // Read persisted funding rather than a potentially stale caller's profile.
+  const funding = db.prepare("SELECT funding_source FROM learners WHERE id = ? AND deleted_at IS NULL").get(learner.id);
+  if (funding?.funding_source === "byok") {
+    // Keep numeric fields parseable by existing clients; unlimited is authoritative.
+    const unlimited = () => ({ used: 0, limit: Number.MAX_SAFE_INTEGER, unlimited: true });
+    return { proofread: unlimited(), detect: unlimited(), evaluate: unlimited(), asrSeconds: unlimited() };
+  }
   const limits = quotaLimits(learner.quotaProfile);
   return {
     proofread: {
@@ -485,7 +492,8 @@ export function readPeriodCeiling(config: AppConfig): number {
 
 export function readFundedUntilMs(config: AppConfig): number {
   const raw = config.ownerFundedUntil;
-  const text = raw ?? DEFAULT_OWNER_FUNDED_UNTIL;
+  if (raw === undefined) return Number.POSITIVE_INFINITY;
+  const text = raw;
   const ms = Date.parse(text);
   if (!Number.isFinite(ms)) throw new RangeError("ownerFundedUntil must be a valid ISO date string");
   return ms;

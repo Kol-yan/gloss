@@ -75,6 +75,8 @@ export type QuotaKind = z.infer<typeof QuotaKind>;
 export const QuotaState = z.object({
   used: z.number().nonnegative(),
   limit: z.number().nonnegative(),
+  // BYOK has no usage quota; numeric fields remain for older clients.
+  unlimited: z.boolean().optional(),
 });
 export type QuotaState = z.infer<typeof QuotaState>;
 

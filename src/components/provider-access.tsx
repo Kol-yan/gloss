@@ -1,5 +1,6 @@
 "use client";
 
+import { PROVIDER_KEY_MESSAGE } from "@/shared/provider-key";
 import { useId, useState, type FormEvent } from "react";
 import { enrollByok } from "@/features/api/client";
 import { forgetProviderKey, isProviderKey } from "@/features/api/access-store";
@@ -17,7 +18,8 @@ export function ProviderKeyForm({ onReady, compact = false }: { onReady?: () => 
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (pending || !isProviderKey(draft)) return;
+    if (pending) return;
+    if (!isProviderKey(draft)) { setMessage(PROVIDER_KEY_MESSAGE); return; }
     setPending(true);
     setMessage(null);
     const result = await enrollByok(draft);
@@ -49,12 +51,12 @@ export function ProviderKeyForm({ onReady, compact = false }: { onReady?: () => 
           spellCheck={false}
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
-          maxLength={512}
+          maxLength={521}
           placeholder="Paste your OpenRouter key"
           className="w-full min-w-0 rounded-field border border-line-strong bg-card px-3 py-2 text-base text-ink outline-none placeholder:text-ink-muted focus:border-accent focus:ring-4 focus:ring-accent/15"
         />
       </div>
-      <Button type="submit" variant="primary" disabled={!isProviderKey(draft)} pending={pending}>
+      <Button type="submit" variant="primary" disabled={!draft.trim()} pending={pending}>
         {pending ? "Connecting…" : access.session?.accessMode === "byok" ? "Use this key" : "Start with my key"}
       </Button>
       {message ? <p role="status" className="text-sm leading-snug text-ink-muted"><BrandedText text={message} /></p> : null}
@@ -84,7 +86,6 @@ export function SettingsPanel() {
       {byok && access.hasKey ? (
         <Button variant="secondary" size="sm" onClick={forgetProviderKey}>Forget key</Button>
       ) : null}
-      {access.storageNotice ? <p role="status" className="text-sm leading-snug text-caution">{access.storageNotice}</p> : null}
     </section>
   );
 }

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { BrandLockup, BrandName, BrandedText } from "@/components/brand";
 import { VocabularyPronunciation } from "@/components/vocabulary-pronunciation";
+import { useAccess } from "@/features/api/use-access";
 import { bootstrapGuestAccess } from "@/features/api/client";
 import { ONBOARDING_LEVEL_GROUP_LIST, type OnboardingLevelGroup, type WordCheckAnswer, type WordCheckResponse } from "@/shared/contracts";
 import { onboardingClient, type OnboardingClient } from "./client";
@@ -27,11 +28,14 @@ const TITLES: Record<OnboardingStep, string> = {
 export function OnboardingSignIn() {
   const router = useRouter();
   const [unavailable, setUnavailable] = useState(false);
+  const { session } = useAccess();
+  useEffect(() => { if (session) router.refresh(); }, [session, router]);
   useEffect(() => {
     let active = true;
     void bootstrapGuestAccess().then((result) => {
       if (!active) return;
-      if (result.kind === "ready" || result.kind === "turnstile") router.refresh();
+      if (result.kind === "ready") router.refresh();
+      else if (result.kind === "turnstile") setUnavailable(false);
       else setUnavailable(true);
     });
     return () => { active = false; };

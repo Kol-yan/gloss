@@ -31,7 +31,11 @@ Every cloud action requires an authenticated learner; there is no default learne
 The app opens immediately and automatically requests a guest session through
 `POST /api/access/guest`. When configured, Turnstile is verified on the server
 before enrollment. Production enrollment refuses missing verification keys.
-At most three guests per IP can be created per UTC day, recorded atomically in
+The configurable daily guest cap (default three, maximum fifty) uses IPv4 addresses
+and IPv6 /64 networks. Desktop enrollment also has a global rolling hourly cap
+(default twenty) and a per-network hourly cap (default three), both counting only
+desktop enrollments. The daily IP cap counts both web and desktop enrollments.
+Enrollment sources are persisted; existing rows default to web. Limits are recorded atomically in
 SQLite; only an explicitly trusted proxy can supply `CF-Connecting-IP`.
 
 Settings accepts a browser-held OpenRouter key through `POST /api/access/byok`.
@@ -55,10 +59,10 @@ Three independent limits protect the operator's API credits:
 2. **A daily spend ceiling** for the whole instance (`DAILY_BUDGET_USD`, default $5, UTC).
 3. **A persistent period ceiling** (`PERIOD_BUDGET_USD`, default $25). All hosted ledger history counts, so a restart or UTC day change cannot reset it.
 
-The `guest` profile has 30 proofreading operations, 30 detector operations,
-three evaluation operations and 300 audio seconds per UTC day. Hosted funding
-expiry is controlled by `OWNER_FUNDED_UNTIL`; after a quota, ceiling or expiry,
-the action points to Settings so a visitor can use their own key.
+Guests have 30 checks, a separate 30-operation detector allowance, three practice
+sessions and 300 audio seconds per UTC day. Operator funding expires at
+`OWNER_FUNDED_UNTIL` when explicitly configured; there is no default expiry. After a quota, ceiling or
+expiry, the action points to Settings so a visitor can use their own key.
 
 Before a model call, `reserve()` runs in one `BEGIN IMMEDIATE` transaction: it checks the kill switch, the learner quota and `reserved + actual + maxCost <= ceiling`, then inserts a reservation. `maxCost` is an upper bound from the bounded input size, the role's explicit
 `max_tokens`, and the configured price with a 1.25 safety margin, as defined in `src/server/models/prices.ts`. Audio is limited
@@ -79,12 +83,12 @@ the daily cap and a guest-enrollment burst alert; the token is never logged.
 Notification errors do not change request results. `npm run spend:report` prints charged daily and period
 spend by role plus guest counts.
 
-BYOK reservations currently retain daily learner quotas and the global kill
-switch, but do not count toward the hosted dollar ceiling. Removing gloss-level
-quotas for BYOK is a planned policy change and is not implemented yet. BYOK is
-additionally limited to six reservations per minute and two pending calls per
-learner. Each ledger row records its immutable funding source, so hosted and
-visitor costs stay separate.
+BYOK reservations have no gloss daily usage quotas and do not count toward the
+operator's dollar ceiling. The global kill switch and request-size limits still apply. They are additionally limited to
+six reservations per minute and two pending calls per learner. Quota responses
+mark BYOK as `unlimited`; the web UI hides usage counters. Numeric quota fields
+remain parseable by older clients and do not impose a server-side BYOK limit. Each ledger row
+records its immutable funding source, so hosted and visitor costs stay separate.
 
 The visitor's OpenRouter key is stored in their browser and sent transiently in
 `X-Gloss-Provider-Key` for model requests. It is never stored in the database,

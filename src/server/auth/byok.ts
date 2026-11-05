@@ -53,7 +53,8 @@ export function switchSessionToByok(
     if (!row) return null;
 
     const currentProfile = QuotaProfileNameSchema.parse(row.quota_profile);
-    const nextProfile = currentProfile === "guest" ? "pilot" : currentProfile;
+    // Funding, not the legacy quota profile, determines unlimited BYOK usage.
+    const nextProfile = currentProfile;
     if (row.funding_source !== "byok") {
       tx.prepare(
         `UPDATE learners SET funding_source = 'byok', quota_profile = ?

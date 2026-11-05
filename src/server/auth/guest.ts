@@ -34,15 +34,26 @@ export function guestClientIp(request: Request, config: AppConfig): string | nul
 }
 
 export function guestClientIpHash(request: Request, config: AppConfig): string {
-  const clientIp = guestClientIp(request, config);
+  const rawIp = guestClientIp(request, config);
+  // Group IPv6 privacy addresses by network; keep the full address for Siteverify.
+  const clientIp = rawIp && isIP(rawIp) === 6 ? ipv6Network(rawIp) : rawIp;
   return createHash("sha256").update(clientIp ?? "gloss:unknown-guest-client").digest("hex");
+}
+
+function ipv6Network(ip: string): string {
+  // URL normalization expands embedded IPv4 addresses into hexadecimal groups.
+  const [left, right] = ip.split("::");
+  const head = left ? left.split(":") : [];
+  const tail = right ? right.split(":") : [];
+  const groups = right !== undefined ? [...head, ...Array(8 - head.length - tail.length).fill("0"), ...tail] : head;
+  return groups.slice(0, 4).map(group => parseInt(group, 16).toString(16)).join(":") + "::/64";
 }
 
 // Guest creation and the persistent per-UTC-day limit share one SQLite write
 // transaction, so parallel requests and process restarts cannot mint extra quota.
 export function createGuestSession(
   ipHash: string,
-  deps: ServerDeps & { config: AppConfig },
+  deps: ServerDeps & { config: AppConfig; desktop?: boolean },
 ): GuestRedemption {
   const now = deps.now ?? new Date();
   const nowIso = now.toISOString();
@@ -51,6 +62,22 @@ export function createGuestSession(
   const db = deps.db ?? getDb();
 
   return immediate((tx) => {
+    if (deps.desktop) {
+      // Desktop-only hourly limits keep verified web traffic out of its allowance.
+      const since = new Date(now.getTime() - 3_600_000).toISOString();
+      const recent = tx.prepare(
+        "SELECT COUNT(*) AS count, MIN(created_at) AS oldest FROM guest_enrollments WHERE source = 'desktop' AND created_at > ?",
+      ).get(since) as { count: number; oldest: string | null };
+      if (recent.count >= deps.config.desktopGuestHourlyLimit) {
+        throw new RateLimitedError(Math.max(1000, Date.parse(recent.oldest!) + 3_600_000 - now.getTime()));
+      }
+      const network = tx.prepare(
+        "SELECT COUNT(*) AS count, MIN(created_at) AS oldest FROM guest_enrollments WHERE source = 'desktop' AND ip_hash = ? AND created_at > ?",
+      ).get(ipHash, since) as { count: number; oldest: string | null };
+      if (network.count >= deps.config.desktopGuestHourlyIpLimit) {
+        throw new RateLimitedError(Math.max(1000, Date.parse(network.oldest!) + 3_600_000 - now.getTime()));
+      }
+    }
     const count = Number(tx.prepare(
       `SELECT COUNT(*) AS count FROM guest_enrollments
        WHERE ip_hash = ? AND created_at >= ? AND created_at < ?`,
@@ -78,8 +105,8 @@ export function createGuestSession(
       "INSERT INTO sessions (token_hash, learner_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
     ).run(hashToken(sessionToken), learner.id, nowIso, sessionExpiresAt.toISOString());
     tx.prepare(
-      "INSERT INTO guest_enrollments (id, ip_hash, created_at) VALUES (?, ?, ?)",
-    ).run(learner.id, ipHash, nowIso);
+      "INSERT INTO guest_enrollments (id, ip_hash, created_at, source) VALUES (?, ?, ?, ?)",
+    ).run(learner.id, ipHash, nowIso, deps.desktop ? "desktop" : "web");
     tx.prepare("DELETE FROM sessions WHERE expires_at <= ?").run(nowIso);
 
     return { learner, sessionToken, sessionExpiresAt };

@@ -11,10 +11,16 @@ describe("loadConfig", () => {
     expect(config.publicUrl).toBe("http://localhost:3000");
     expect(config.meta.apiKey).toBeUndefined();
     expect(config.periodBudgetMicros).toBe(25_000_000);
-    expect(config.ownerFundedUntil).toBe("2026-11-09T08:00:00.000Z");
+    expect(config.ownerFundedUntil).toBeUndefined();
     expect(config.modelMaxInputChars).toBe(100_000);
     expect(config.guestDailyIpLimit).toBe(3);
+    expect(config.desktopGuestHourlyIpLimit).toBe(3);
     expect(config.guestDailyPracticeSessions).toBe(3);
+  });
+
+  it("allows guest daily limits through fifty and optional expiry", () => {
+    expect(loadConfig({ GUEST_DAILY_IP_LIMIT: "50", OWNER_FUNDED_UNTIL: "" }).guestDailyIpLimit).toBe(50);
+    expect(loadConfig({ OWNER_FUNDED_UNTIL: "" }).ownerFundedUntil).toBeUndefined();
   });
 
   it("treats blank values as unset", () => {
@@ -53,8 +59,9 @@ describe("loadConfig", () => {
   it("fails closed on malformed demo limits and expiry", () => {
     for (const env of [
       { PERIOD_BUDGET_USD: "-1" }, { OWNER_FUNDED_UNTIL: "tomorrow" },
-      { MODEL_MAX_INPUT_CHARS: "100001" }, { GUEST_DAILY_IP_LIMIT: "4" },
+      { MODEL_MAX_INPUT_CHARS: "100001" }, { GUEST_DAILY_IP_LIMIT: "51" },
       { GUEST_DAILY_PRACTICE_SESSIONS: "4" },
+      { DESKTOP_GUEST_HOURLY_IP_LIMIT: "0" }, { DESKTOP_GUEST_HOURLY_IP_LIMIT: "1001" },
     ]) expect(() => loadConfig(env)).toThrow(ConfigError);
   });
 });

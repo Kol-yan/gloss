@@ -17,6 +17,7 @@ import {
   recordWritingEvidence,
   newRequestId,
 } from "@/features/api/client";
+import { checksRemaining } from "@/features/api/quota";
 import { getAccessSnapshot } from "@/features/api/access-store";
 import { useLoad } from "@/features/api/use-load";
 import { useAccess } from "@/features/api/use-access";
@@ -58,7 +59,7 @@ export function EditorSession({ recheckSentences = NO_RECHECK }: { recheckSenten
     const result = await proofread(text);
     if (result.ok) {
       const { quota, suggestions } = result.data;
-      return { ok: true, suggestions, checksLeft: Math.max(0, quota.limit - quota.used) };
+      return { ok: true, suggestions, checksLeft: checksRemaining(quota) ?? undefined };
     }
     if (isUnauthorized(result)) void getMe();
     if (isQuota(result)) return { ok: false, reason: "quota" };
@@ -91,7 +92,7 @@ export function EditorSession({ recheckSentences = NO_RECHECK }: { recheckSenten
             word_choice: answer.needs_word_choice,
           },
         })),
-        checksLeft: Math.max(0, quota.limit - quota.used),
+        checksLeft: checksRemaining(quota) ?? undefined,
       };
     }
     if (isUnauthorized(result)) void getMe();
@@ -170,7 +171,8 @@ export function EditorSession({ recheckSentences = NO_RECHECK }: { recheckSenten
           learningListFailed={savedExpressions?.ok === false}
           learnWithAi={learnWithAi}
           onIndependentWriting={onIndependentWriting}
-          checksLeft={quota ? Math.max(0, quota.limit - quota.used) : null}
+          checksLeft={checksRemaining(quota)}
+          unlimitedChecks={quota?.unlimited}
           aiAvailable={me?.ok ? me.data.aiEnabled && (me.data.accessMode !== "byok" || access.hasKey) : false}
           checkWithAi={checkWithAi}
           dictate={dictateSpeech}

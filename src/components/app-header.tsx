@@ -8,7 +8,7 @@ import { buttonClasses } from "./ui/button";
 const NAV = [
   { href: "/editor", label: "Editor" },
   { href: "/practice", label: "Practice" },
-  { href: "/expressions", label: "My expressions" },
+  { href: "/expressions", label: "My words" },
 ] as const;
 
 export function AppHeader() {
@@ -33,7 +33,7 @@ export function AppHeader() {
         <nav aria-label="Main">
           <ul className="flex items-center gap-0.5 text-sm font-semibold">
             {NAV.map((item) => {
-              const active = pathname.startsWith(item.href);
+              const active = pathname.startsWith(item.href) || (item.href === "/expressions" && pathname === "/words");
               return (
                 <li key={item.href}>
                   <Link

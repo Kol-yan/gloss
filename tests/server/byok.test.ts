@@ -11,11 +11,13 @@ import { POST as proofreadRoute } from "@/app/api/proofread/route";
 import { POST as taskRoute } from "@/app/api/practice/tasks/route";
 import { POST as attemptRoute } from "@/app/api/practice/attempts/[attemptId]/route";
 import { POST as speechRoute } from "@/app/api/speech/transcribe/route";
+import { createGuestSession } from "@/server/auth/guest";
+import { getConfig } from "@/server/config";
 import { createByokSession } from "@/server/auth/byok";
 import { createEnrollmentLimiter } from "@/server/auth/enrollment-rate";
 import { findLearnerBySessionToken, getSessionCookieName } from "@/server/auth/sessions";
-import { getBudgetStatus, reserve, setAiEnabled, settle } from "@/server/budget";
-import { RateLimitedError, QuotaExceededError } from "@/server/errors";
+import { getBudgetStatus, getQuotaUsage, reserve, setAiEnabled, settle } from "@/server/budget";
+import { RateLimitedError } from "@/server/errors";
 import { PROVIDER_KEY_HEADER, resolveProviderAccess } from "@/server/models/access";
 import { chatReply, db, fetchMock, installApp, login, makeWav, OWNER_OPENROUTER_KEY, proofreadReply, requestId, sentBody, seedExpression, seedTask, session } from "./helpers/app";
 
@@ -57,7 +59,7 @@ describe("public BYOK access", () => {
   it("creates an isolated browser session without sending or persisting the key", async () => {
     const body = await enroll();
     expect(body.accessMode).toBe("byok");
-    expect(body.quotas.proofread.limit).toBe(20);
+    expect(body.quotas.proofread.unlimited).toBe(true);
     expect(fetchMock).not.toHaveBeenCalled();
     const rows = db().prepare("SELECT * FROM learners WHERE id = ?").all(body.learner.id);
     expect(rows[0]).toMatchObject({ funding_source: "byok", quota_profile: "pilot" });
@@ -82,12 +84,12 @@ describe("public BYOK access", () => {
 
   it("requires a valid key and switches a hosted learner to BYOK in place", async () => {
     const absent = await enrollRoute(request("/api/access/byok", {}, null));
-    expect(ApiError.parse(await absent.json()).error.code).toBe("ai_disabled");
+    expect(ApiError.parse(await absent.json()).error).toMatchObject({ code: "invalid_request", message: expect.stringContaining("sk-or-v1-") });
     const hosted = login();
     seedExpression(hosted.learner.id);
     session.cookie = hosted.sessionToken;
     const missingKey = await enrollRoute(request("/api/access/byok", {}, null));
-    expect(ApiError.parse(await missingKey.json()).error.code).toBe("ai_disabled");
+    expect(ApiError.parse(await missingKey.json()).error.code).toBe("invalid_request");
     expect(db().prepare("SELECT funding_source FROM learners WHERE id = ?").get(hosted.learner.id))
       .toEqual({ funding_source: "hosted" });
 
@@ -267,7 +269,7 @@ describe("public BYOK access", () => {
 });
 
 describe("visitor accounting and rate limits", () => {
-  it("limits six calls per minute while keeping daily quota checks", () => {
+  it("limits six calls per minute without applying daily quotas", () => {
     const now = new Date("2026-11-03T01:00:00Z");
     const { learner } = createByokSession({ now });
     for (let i = 0; i < 6; i++) {
@@ -275,10 +277,38 @@ describe("visitor accounting and rate limits", () => {
       settle(row.id, 5, { now });
     }
     expect(() => reserve({ learnerId: learner.id, kind: "proofread", requestId: requestId(), units: 1, maxCostMicros: 10 }, { now })).toThrow(RateLimitedError);
-    expect(() => reserve({ learnerId: learner.id, kind: "asrSeconds", requestId: requestId(), units: 181, maxCostMicros: 10 }, { now })).toThrow(QuotaExceededError);
+    expect(() => reserve({ learnerId: learner.id, kind: "asrSeconds", requestId: requestId(), units: 181, maxCostMicros: 10 }, { now })).toThrow(RateLimitedError);
     expect(() => db().prepare("UPDATE learners SET funding_source = 'hosted' WHERE id = ?").run(learner.id)).toThrow();
     expect(() => reserve({ learnerId: learner.id, kind: "proofread", requestId: requestId(), units: 1, maxCostMicros: 10 },
       { now: new Date(now.getTime() + 60_001) })).not.toThrow();
+  });
+
+  it("allows every BYOK usage kind beyond the legacy daily allowances", async () => {
+    const now = new Date("2026-11-03T01:00:00Z");
+    const { learner, sessionToken } = createByokSession({ now });
+    for (const kind of ["proofread", "detect", "evaluate", "asrSeconds"] as const) {
+      const reservation = reserve({ learnerId: learner.id, kind, requestId: requestId(), units: 10000, maxCostMicros: 10 }, { now });
+      settle(reservation.id, 5, { now });
+    }
+    session.cookie = sessionToken;
+    const me = MeResponse.parse(await (await meRoute(meRequest())).json());
+    expect(me.accessMode).toBe("byok");
+    for (const quota of Object.values(me.quotas)) expect(quota.unlimited).toBe(true);
+  });
+
+  it("upgrades an exhausted guest in place without a pilot downgrade or inherited usage cap", async () => {
+    const now = new Date();
+    const guest = createGuestSession("upgrade-network", { now, config: getConfig() });
+    const oldReservation = reserve({ learnerId: guest.learner.id, kind: "proofread", requestId: requestId(), units: 30, maxCostMicros: 10 }, { now });
+    settle(oldReservation.id, 5, { now });
+    session.cookie = guest.sessionToken;
+    const upgraded = MeResponse.parse(await (await enrollRoute(request("/api/access/byok"))).json());
+    expect(upgraded.learner.id).toBe(guest.learner.id);
+    expect(db().prepare("SELECT quota_profile FROM learners WHERE id = ?").get(guest.learner.id)).toEqual({ quota_profile: "guest" });
+    expect(upgraded.quotas.proofread.unlimited).toBe(true);
+    // Even a pre-upgrade Learner object must report current persisted funding.
+    expect(getQuotaUsage(guest.learner).proofread.unlimited).toBe(true);
+    expect(() => reserve({ learnerId: guest.learner.id, kind: "proofread", requestId: requestId(), units: 31, maxCostMicros: 10 }, { now })).not.toThrow();
   });
 
   it("does not trust spoofed forwarding headers", () => {

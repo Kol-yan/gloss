@@ -10,11 +10,11 @@ import { ExpressionsScreen } from "./expressions-screen";
 export function ExpressionsSession() {
   const { result, reload } = useLoad(listExpressions);
 
-  if (!result) return <LoadingState label="Loading your expressions" />;
+  if (!result) return <LoadingState label="Loading your words" />;
   if (!result.ok) {
     if (isUnauthorized(result)) return <AccessUnavailable />;
     return (
-      <LoadError title="We couldn't load your expressions" onRetry={reload}>
+      <LoadError title="We couldn't load your words" onRetry={reload}>
         Check your connection and try again.
       </LoadError>
     );
