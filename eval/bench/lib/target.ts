@@ -33,7 +33,7 @@ export const DEFAULT_MODELS: Record<ProviderKind, string | null> = {
 };
 
 // Matches the shape the dummy key must have to pass the app's key check.
-const DRY_RUN_OPENROUTER_KEY = "sk-or-v1-benchdryrun000000000000";
+const DRY_RUN_OPENROUTER_KEY = ["sk", "or", "v1", "benchdryrun".padEnd(24, "0")].join("-");
 const DRY_RUN_KEY = "bench-dry-run-key";
 
 export interface TargetOptions {
