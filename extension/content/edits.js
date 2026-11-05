@@ -8,6 +8,7 @@
   const MIN_CHECK_LENGTH = 8;
   const WORD_CHAR = /[\p{L}\p{M}\p{N}_'’]/u;
   // Attributes with which a site says writing tools should leave a field alone.
+  const SECRET_HINT = /(pass|token|secret|api[-_ ]?key|otp|2fa|one[-_ ]?time|verification|cvv|cvc|card|iban|ssn|pin\b)/;
   const OPT_OUT = [["data-gloss", "off"], ["data-gramm", "false"], ["data-enable-grammarly", "false"]];
 
   // The one edit that turns `before` into `after`: [start, oldEnd) of
@@ -106,6 +107,8 @@
   // normalize differently cannot be addressed by its ranges, so it is skipped.
   function checkableText(text) {
     if (typeof text !== "string") return false;
+    // A long run without spaces looks like a key or token, not prose.
+    if (/\S{32,}/.test(text) && !/\s/.test(text.trim())) return false;
     if (text.length < MIN_CHECK_LENGTH || text.length > MAX_CHECK_LENGTH) return false;
     if (text !== text.normalize("NFC") || text.includes("\r")) return false;
     return (text.match(/\p{L}+/gu) ?? []).length >= 2;
@@ -129,6 +132,11 @@
     // Structured fields (amounts, addresses, sign-in names) are not prose.
     const autocomplete = attr("autocomplete");
     if (autocomplete && autocomplete !== "on" && autocomplete !== "off") return null;
+    // Fields that look like they hold credentials or codes are never read.
+    if (["name", "id", "aria-label", "placeholder"].some((name) => SECRET_HINT.test(attr(name) ?? ""))) return null;
+    // A single-line field with the browser's spelling off is usually a code,
+    // key or identifier, not prose; only multi-line surfaces are checked then.
+    if (tag === "INPUT" && attr("spellcheck") === "false") return null;
     if (tag === "TEXTAREA") return "textarea";
     if (tag === "INPUT") return inputType === "text" ? "input" : null;
     return field.isContentEditable ? "editable" : null;

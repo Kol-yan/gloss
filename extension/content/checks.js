@@ -87,7 +87,7 @@
   function describe(element) {
     const attributes = {};
     const separate = separateEditorIn(element) !== null;
-    for (const name of ["spellcheck", "autocomplete", "data-gloss", "data-gramm", "data-enable-grammarly"]) {
+    for (const name of ["spellcheck", "autocomplete", "data-gloss", "data-gramm", "data-enable-grammarly", "name", "id", "aria-label", "placeholder"]) {
       const value = element.getAttribute(name);
       if (value !== null) attributes[name] = value;
     }
