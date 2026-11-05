@@ -63,13 +63,19 @@ export function createGuestSession(
 
   return immediate((tx) => {
     if (deps.desktop) {
-      // Count all enrollments so switching entry points cannot evade the global cap.
+      // Desktop-only hourly limits keep verified web traffic out of its allowance.
       const since = new Date(now.getTime() - 3_600_000).toISOString();
       const recent = tx.prepare(
-        "SELECT COUNT(*) AS count, MIN(created_at) AS oldest FROM guest_enrollments WHERE created_at > ?",
+        "SELECT COUNT(*) AS count, MIN(created_at) AS oldest FROM guest_enrollments WHERE source = 'desktop' AND created_at > ?",
       ).get(since) as { count: number; oldest: string | null };
       if (recent.count >= deps.config.desktopGuestHourlyLimit) {
         throw new RateLimitedError(Math.max(1000, Date.parse(recent.oldest!) + 3_600_000 - now.getTime()));
+      }
+      const network = tx.prepare(
+        "SELECT COUNT(*) AS count, MIN(created_at) AS oldest FROM guest_enrollments WHERE source = 'desktop' AND ip_hash = ? AND created_at > ?",
+      ).get(ipHash, since) as { count: number; oldest: string | null };
+      if (network.count >= deps.config.desktopGuestHourlyIpLimit) {
+        throw new RateLimitedError(Math.max(1000, Date.parse(network.oldest!) + 3_600_000 - now.getTime()));
       }
     }
     const count = Number(tx.prepare(
@@ -99,8 +105,8 @@ export function createGuestSession(
       "INSERT INTO sessions (token_hash, learner_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
     ).run(hashToken(sessionToken), learner.id, nowIso, sessionExpiresAt.toISOString());
     tx.prepare(
-      "INSERT INTO guest_enrollments (id, ip_hash, created_at) VALUES (?, ?, ?)",
-    ).run(learner.id, ipHash, nowIso);
+      "INSERT INTO guest_enrollments (id, ip_hash, created_at, source) VALUES (?, ?, ?, ?)",
+    ).run(learner.id, ipHash, nowIso, deps.desktop ? "desktop" : "web");
     tx.prepare("DELETE FROM sessions WHERE expires_at <= ?").run(nowIso);
 
     return { learner, sessionToken, sessionExpiresAt };

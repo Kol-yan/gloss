@@ -261,6 +261,57 @@ describe("desktop guest access", () => {
     });
   });
 
+  it("does not count web enrollments toward the desktop global hourly cap", async () => {
+    await withEnv({ BYOK_TRUST_PROXY_HEADERS: "true", DESKTOP_GUEST_HOURLY_LIMIT: "2" }, async () => {
+      for (const ip of ["192.0.2.10", "192.0.2.11", "192.0.2.12"]) {
+        expect((await guestRoute(request({}, 3000, ip))).status).toBe(200);
+      }
+      expect((await desktopGuestRoute(desktopRequest("198.51.100.10"))).status).toBe(200);
+      expect((await desktopGuestRoute(desktopRequest("198.51.100.11"))).status).toBe(200);
+      const capped = await desktopGuestRoute(desktopRequest("198.51.100.12"));
+      expect(capped.status).toBe(429);
+      const retryAfter = Number(capped.headers.get("retry-after"));
+      expect(retryAfter).toBeGreaterThan(0);
+      expect(retryAfter).toBeLessThanOrEqual(3_600);
+      expect(getDb().prepare("SELECT source, COUNT(*) AS n FROM guest_enrollments GROUP BY source ORDER BY source").all())
+        .toEqual([{ source: "desktop", n: 2 }, { source: "web", n: 3 }]);
+    });
+  });
+
+  it.each([
+    { family: "IPv4", addresses: ["192.0.2.20", "192.0.2.20", "192.0.2.20", "192.0.2.20"], other: "192.0.2.21" },
+    { family: "IPv6 /64", addresses: ["2001:db8:20:1::1", "2001:db8:20:1::2", "2001:db8:20:1:ffff::3", "2001:db8:20:1::4"], other: "2001:db8:20:2::1" },
+  ])("limits desktop guests per $family in a rolling hour while other networks remain available", async ({ addresses, other }) => {
+    await withEnv({
+      BYOK_TRUST_PROXY_HEADERS: "true",
+      GUEST_DAILY_IP_LIMIT: "50",
+      DESKTOP_GUEST_HOURLY_IP_LIMIT: undefined,
+      DESKTOP_GUEST_HOURLY_LIMIT: "100",
+    }, async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      try {
+        vi.setSystemTime(new Date("2026-11-04T12:59:00.000Z"));
+        for (const ip of addresses.slice(0, 3)) {
+          expect((await desktopGuestRoute(desktopRequest(ip))).status).toBe(200);
+        }
+        // Crossing the wall-clock hour does not reset a rolling allowance.
+        vi.setSystemTime(new Date("2026-11-04T13:01:00.000Z"));
+        const capped = await desktopGuestRoute(desktopRequest(addresses[3]));
+        expect(capped.status).toBe(429);
+        const retryAfter = Number(capped.headers.get("retry-after"));
+        expect(retryAfter).toBeGreaterThan(0);
+        expect(retryAfter).toBeLessThanOrEqual(3_600);
+        expect((await desktopGuestRoute(desktopRequest(other))).status).toBe(200);
+        expect(Number(getDb().prepare("SELECT COUNT(*) AS n FROM guest_enrollments").get()?.n)).toBe(4);
+
+        vi.setSystemTime(new Date("2026-11-04T13:59:01.000Z"));
+        expect((await desktopGuestRoute(desktopRequest(addresses[3]))).status).toBe(200);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   it("shares the IPv6 daily bucket with web enrollment", async () => {
     await withEnv({ BYOK_TRUST_PROXY_HEADERS: "true", GUEST_DAILY_IP_LIMIT: "1" }, async () => {
       expect((await guestRoute(request({}, 3000, "2001:db8:1:2::1"))).status).toBe(200);

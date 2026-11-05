@@ -33,7 +33,9 @@ The app opens immediately and automatically requests a guest session through
 before enrollment. Production enrollment refuses missing verification keys.
 The configurable daily guest cap (default three, maximum fifty) uses IPv4 addresses
 and IPv6 /64 networks. Desktop enrollment also has a global rolling hourly cap
-(default twenty, counting all guest enrollments). Limits are recorded atomically in
+(default twenty) and a per-network hourly cap (default three), both counting only
+desktop enrollments. The daily IP cap counts both web and desktop enrollments.
+Enrollment sources are persisted; existing rows default to web. Limits are recorded atomically in
 SQLite; only an explicitly trusted proxy can supply `CF-Connecting-IP`.
 
 Settings accepts a browser-held OpenRouter key through `POST /api/access/byok`.

@@ -83,10 +83,35 @@ describe("openDatabase", () => {
       "0016_guest_access.sql",
       "0017_budget_hardening.sql",
       "0018_onboarding_completion.sql",
+      "0019_guest_enrollment_source.sql",
     ]);
     const again = openDatabase(temp.path);
     expect(migrate(again)).toEqual([]);
     again.close();
+  });
+
+  it("preserves existing guest enrollments as web and constrains the source", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "glossy-guest-source-upgrade-"));
+    const oldMigrations = path.join(dir, "m");
+    mkdirSync(oldMigrations);
+    const source = defaultMigrationsDir();
+    for (const file of readdirSync(source).filter(name => Number.parseInt(name.slice(0, 4), 10) <= 18)) {
+      copyFileSync(path.join(source, file), path.join(oldMigrations, file));
+    }
+    const db = new DatabaseSync(path.join(dir, "existing.db"));
+    try {
+      migrate(db, oldMigrations);
+      db.exec("INSERT INTO guest_enrollments (id, ip_hash, created_at) VALUES ('old-guest', 'network-hash', '2026-11-04T12:00:00.000Z')");
+      expect(migrate(db, source)).toEqual(["0019_guest_enrollment_source.sql"]);
+      expect(db.prepare("SELECT * FROM guest_enrollments").get()).toEqual({
+        id: "old-guest", ip_hash: "network-hash", created_at: "2026-11-04T12:00:00.000Z", source: "web",
+      });
+      expect(() => db.exec("INSERT INTO guest_enrollments (id, ip_hash, created_at, source) VALUES ('invalid', 'hash', 'date', 'other')")).toThrow();
+      expect(migrate(db, source)).toEqual([]);
+    } finally {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("adds the routing audit columns on a fresh database", () => {
@@ -132,6 +157,7 @@ describe("openDatabase", () => {
         "0016_guest_access.sql",
         "0017_budget_hardening.sql",
         "0018_onboarding_completion.sql",
+        "0019_guest_enrollment_source.sql",
       ]);
       expect(db.prepare("SELECT * FROM evidence_events WHERE id = 'old'").get()).toEqual({ ...before, document_id: null });
       db.exec(`INSERT INTO evidence_events (id, learner_id, expression_id, kind, document_id, created_at)
@@ -191,7 +217,7 @@ describe("openDatabase", () => {
       const practiceBefore = db.prepare("SELECT * FROM practice_sessions WHERE id = 'practice'").get();
       const itemBefore = db.prepare("SELECT * FROM practice_session_items WHERE id = 'practice-item'").get();
 
-      expect(migrate(db, source)).toEqual(["0016_guest_access.sql", "0017_budget_hardening.sql", "0018_onboarding_completion.sql"]);
+      expect(migrate(db, source)).toEqual(["0016_guest_access.sql", "0017_budget_hardening.sql", "0018_onboarding_completion.sql", "0019_guest_enrollment_source.sql"]);
       const learnerColumnsAfter = db.prepare("PRAGMA table_info(learners)").all() as { name: string }[];
       expect(learnerColumnsAfter.slice(0, learnerColumnsBefore.length)).toEqual(learnerColumnsBefore);
       expect(learnerColumnsAfter.map((column) => column.name)).toContain("onboarding_completed_at");
@@ -280,6 +306,7 @@ describe("openDatabase", () => {
         "0016_guest_access.sql",
         "0017_budget_hardening.sql",
         "0018_onboarding_completion.sql",
+        "0019_guest_enrollment_source.sql",
       ]);
 
       const row = db.prepare("SELECT * FROM check_runs WHERE id = 'run-old'").get() as Record<string, unknown>;
@@ -377,6 +404,7 @@ describe("openDatabase", () => {
         "0016_guest_access.sql",
         "0017_budget_hardening.sql",
         "0018_onboarding_completion.sql",
+        "0019_guest_enrollment_source.sql",
       ]);
       const row = db.prepare("SELECT * FROM check_runs WHERE id = 'pre-routing-run'").get() as Record<string, unknown>;
       expect(row).toMatchObject({

@@ -14,6 +14,7 @@ describe("loadConfig", () => {
     expect(config.ownerFundedUntil).toBeUndefined();
     expect(config.modelMaxInputChars).toBe(100_000);
     expect(config.guestDailyIpLimit).toBe(3);
+    expect(config.desktopGuestHourlyIpLimit).toBe(3);
     expect(config.guestDailyPracticeSessions).toBe(3);
   });
 
@@ -60,6 +61,7 @@ describe("loadConfig", () => {
       { PERIOD_BUDGET_USD: "-1" }, { OWNER_FUNDED_UNTIL: "tomorrow" },
       { MODEL_MAX_INPUT_CHARS: "100001" }, { GUEST_DAILY_IP_LIMIT: "51" },
       { GUEST_DAILY_PRACTICE_SESSIONS: "4" },
+      { DESKTOP_GUEST_HOURLY_IP_LIMIT: "0" }, { DESKTOP_GUEST_HOURLY_IP_LIMIT: "1001" },
     ]) expect(() => loadConfig(env)).toThrow(ConfigError);
   });
 });

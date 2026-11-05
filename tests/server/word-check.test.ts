@@ -71,6 +71,7 @@ describe("Word check migrations", () => {
         "0016_guest_access.sql",
         "0017_budget_hardening.sql",
         "0018_onboarding_completion.sql",
+        "0019_guest_enrollment_source.sql",
       ]);
       expect(db.prepare("SELECT level FROM learners WHERE id = ?").get(learner)).toEqual({ level: null });
       expect(

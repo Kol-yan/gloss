@@ -66,6 +66,7 @@ const EnvSchema = z.object({
   TELEGRAM_CHAT_ID: optionalText,
   GUEST_DAILY_IP_LIMIT: z.preprocess(blankAsUndefined, z.coerce.number().int().min(1).max(50).default(3)),
   DESKTOP_GUEST_HOURLY_LIMIT: z.preprocess(blankAsUndefined, z.coerce.number().int().min(1).max(1000).default(20)),
+  DESKTOP_GUEST_HOURLY_IP_LIMIT: z.preprocess(blankAsUndefined, z.coerce.number().int().min(1).max(1000).default(3)),
   GUEST_DAILY_PRACTICE_SESSIONS: z.preprocess(blankAsUndefined, z.coerce.number().int().min(0).max(3).default(3)),
   MODEL_MAX_INPUT_CHARS: z.preprocess(blankAsUndefined, z.coerce.number().int().min(1).max(100_000).default(100_000)),
   OWNER_FUNDED_UNTIL: z.preprocess(blankAsUndefined, z.iso.datetime({ offset: true }).optional()),
@@ -107,6 +108,7 @@ export interface AppConfig {
   turnstile: { siteKey?: string; secretKey?: string; action?: string; hostname?: string };
   guestDailyIpLimit: number;
   desktopGuestHourlyLimit: number;
+  desktopGuestHourlyIpLimit: number;
   guestDailyPracticeSessions: number;
   modelMaxInputChars: number;
   ownerFundedUntil?: string;
@@ -163,6 +165,7 @@ export function loadConfig(env: Record<string, string | undefined>): AppConfig {
       action: v.TURNSTILE_ACTION, hostname: v.TURNSTILE_HOSTNAME },
     guestDailyIpLimit: v.GUEST_DAILY_IP_LIMIT,
     desktopGuestHourlyLimit: v.DESKTOP_GUEST_HOURLY_LIMIT,
+    desktopGuestHourlyIpLimit: v.DESKTOP_GUEST_HOURLY_IP_LIMIT,
     guestDailyPracticeSessions: v.GUEST_DAILY_PRACTICE_SESSIONS,
     modelMaxInputChars: v.MODEL_MAX_INPUT_CHARS,
     ownerFundedUntil: v.OWNER_FUNDED_UNTIL ? new Date(v.OWNER_FUNDED_UNTIL).toISOString() : undefined,
