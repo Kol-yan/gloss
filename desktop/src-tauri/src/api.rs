@@ -2,16 +2,16 @@
 //! `src/shared/contracts.ts` this app uses; a response that does not parse is
 //! treated as a bad response, never guessed.
 //!
-//! Signing in reuses the web app's own session: the invite link is redeemed
-//! through `POST /join/{token}/continue`, exactly like the Continue button on
-//! the invite page, and the `glossy_session` (or `glossy_session_<port>` on a
-//! development server) cookie it sets is the credential for every later
-//! request.
+//! There is no sign-in. On first launch the app creates its own guest
+//! workspace through `POST /api/access/guest/desktop`, and the
+//! `glossy_session` (or `glossy_session_<port>` on a development server)
+//! cookie it sets is the credential for every later request. The invite
+//! helpers below are kept for the offline round-trip test only.
 
 use std::collections::HashMap;
 use std::time::Duration;
 
-use reqwest::header::{CONTENT_TYPE, COOKIE, LOCATION, SET_COOKIE};
+use reqwest::header::{CONTENT_TYPE, COOKIE, SET_COOKIE};
 use reqwest::{StatusCode, redirect};
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -102,6 +102,10 @@ pub enum ApiError {
     Network,
     #[error("bad response")]
     BadResponse,
+    /// The server refused the session and no new one could be made.
+    #[error("unauthorized")]
+    Unauthorized,
+    #[cfg(test)]
     #[error("invalid invite")]
     InvalidInvite,
 }
@@ -116,14 +120,18 @@ impl ApiError {
     pub fn learner_message(&self, origin: &str) -> String {
         match self {
             ApiError::Server { code, .. } if code == "unauthorized" => {
-                "Your session has ended. Sign in again in gloss settings.".into()
+                "Your workspace has ended. Start a new one under Advanced in gloss settings.".into()
             }
             ApiError::Server { message, .. } => message.clone(),
             ApiError::Network => format!("Can't reach gloss at {origin}. Check that the server is running."),
             ApiError::BadResponse => {
                 "gloss sent an answer this app does not understand. Is the server up to date?".into()
             }
-            ApiError::InvalidInvite => "This invite link is not valid any more. Ask for a new one.".into(),
+            ApiError::Unauthorized => {
+                "gloss could not start a workspace. Check that the server is reachable and try again.".into()
+            }
+            #[cfg(test)]
+            ApiError::InvalidInvite => "This invite link is not valid any more.".into(),
         }
     }
 }
@@ -181,6 +189,7 @@ impl Client {
 
     /// Redeems an invite exactly like the invite page's Continue button and
     /// returns the cookie name and session token the server sets.
+    #[cfg(test)]
     pub async fn redeem_invite(&self, server: &Url, invite_token: &str) -> ApiResult<(String, String)> {
         if !looks_like_token(invite_token) {
             return Err(ApiError::InvalidInvite);
@@ -198,7 +207,7 @@ impl Client {
 
         let status = response.status();
         if status == StatusCode::SEE_OTHER {
-            let location = response.headers().get(LOCATION).and_then(|v| v.to_str().ok()).unwrap_or("");
+            let location = response.headers().get("location").and_then(|v| v.to_str().ok()).unwrap_or("");
             if location.contains("invite=invalid") {
                 return Err(ApiError::InvalidInvite);
             }
@@ -208,6 +217,28 @@ impl Client {
             .ok_or(ApiError::BadResponse);
         }
         Err(error_from_response(response).await)
+    }
+
+    /// Creates this app's own guest workspace, the same guest learner a first
+    /// visit to the website gets, without Turnstile. The server still applies
+    /// its per-IP daily limit and the owner spend caps.
+    pub async fn create_guest(&self, server: &Url) -> ApiResult<(String, String)> {
+        let url = server.join("api/access/guest/desktop").map_err(|_| ApiError::BadResponse)?;
+        let response = self
+            .http
+            .post(url)
+            .header(CONTENT_TYPE, "application/json")
+            .header("Origin", server.origin().ascii_serialization())
+            .body("{}")
+            .timeout(QUICK_TIMEOUT)
+            .send()
+            .await
+            .map_err(|_| ApiError::Network)?;
+        if !response.status().is_success() {
+            return Err(error_from_response(response).await);
+        }
+        session_from_set_cookie(response.headers().get_all(SET_COOKIE).iter().filter_map(|v| v.to_str().ok()))
+            .ok_or(ApiError::BadResponse)
     }
 
     pub async fn me(&self, session: &Session) -> ApiResult<MeResponse> {
@@ -348,6 +379,7 @@ fn session_from_set_cookie<'a>(headers: impl Iterator<Item = &'a str>) -> Option
 
 /// Accepts a bare session token or a `name=value` pair copied from the
 /// browser's cookie list. The session cookie name is preserved when present.
+#[cfg(test)]
 pub fn session_from_input(input: &str) -> Option<(String, String)> {
     let trimmed = input.trim();
     let (name, value) = match trimmed.split_once('=') {
@@ -360,6 +392,7 @@ pub fn session_from_input(input: &str) -> Option<(String, String)> {
 /// Accepts an invite link (`https://host/join/<token>`) or the bare token.
 /// A link for another server is refused so a session is never created on a
 /// server the learner did not choose.
+#[cfg(test)]
 pub fn invite_token_from_input(input: &str, server: &Url) -> Result<String, String> {
     let trimmed = input.trim();
     if looks_like_token(trimmed) {
@@ -469,18 +502,26 @@ mod tests {
         let origin = server.origin().ascii_serialization();
         tauri::async_runtime::block_on(async {
             let client = Client::new();
-            let invite = invite_token_from_input(&link, &server).unwrap();
-            let (cookie_name, token) = client.redeem_invite(&server, &invite).await.expect("redeem");
-            let session = Session { server: server.clone(), token, cookie_name, owned: true };
+            let session = if link == "guest" {
+                // A cookie header (`name=token`) from a guest browser session
+                // exercises the same client without an invite.
+                let cookie = std::env::var("GLOSS_TEST_COOKIE").expect("GLOSS_TEST_COOKIE");
+                let (cookie_name, token) = session_from_input(&cookie).expect("cookie");
+                Session { server: server.clone(), token, cookie_name, owned: false }
+            } else {
+                let invite = invite_token_from_input(&link, &server).unwrap();
+                let (cookie_name, token) = client.redeem_invite(&server, &invite).await.expect("redeem");
+                let session = Session { server: server.clone(), token, cookie_name, owned: true };
+                // A spent single-use invite reports the invalid-invite state.
+                match client.redeem_invite(&server, &invite).await {
+                    Err(ApiError::InvalidInvite) | Ok(_) => {}
+                    Err(other) => panic!("unexpected {other:?}"),
+                }
+                session
+            };
 
             let me = client.me(&session).await.expect("me");
             println!("signed in as {} ({}), AI enabled: {}", me.learner.display_name, me.access_mode, me.ai_enabled);
-
-            // A spent single-use invite reports the invalid-invite state.
-            match client.redeem_invite(&server, &invite).await {
-                Err(ApiError::InvalidInvite) | Ok(_) => {}
-                Err(other) => panic!("unexpected {other:?}"),
-            }
 
             match client.proofread(&session, "He go to school yesterday.").await {
                 Ok(result) => {
@@ -492,14 +533,84 @@ mod tests {
                 Err(error) => println!("proofread: {}", error.learner_message(&origin)),
             }
 
-            let silence = crate::wav::encode_pcm16(&vec![0.0; 16_000], crate::wav::TARGET_RATE);
-            match client.dictate(&session, silence).await {
+            // A real recording when given: a WAV file in GLOSS_TEST_WAV.
+            let audio = match std::env::var("GLOSS_TEST_WAV") {
+                Ok(path) => std::fs::read(path).expect("read GLOSS_TEST_WAV"),
+                Err(_) => crate::wav::encode_pcm16(&vec![0.0; 16_000], crate::wav::TARGET_RATE),
+            };
+            match client.dictate(&session, audio).await {
                 Ok(result) => println!("dictation: {:?}", result.text),
                 Err(error) => println!("dictate: {}", error.learner_message(&origin)),
             }
 
-            client.sign_out(&session).await.expect("sign out");
-            assert!(client.me(&session).await.unwrap_err().is_unauthorized());
+            if session.owned {
+                client.sign_out(&session).await.expect("sign out");
+                assert!(client.me(&session).await.unwrap_err().is_unauthorized());
+            }
+        });
+    }
+
+    /// A server that answers 401 for a known cookie and, for a fresh guest
+    /// request, sets a new cookie, like a production build after a restart.
+    fn recovery_server() -> String {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { continue };
+                let mut buffer = [0u8; 8192];
+                let read = stream.read(&mut buffer).unwrap_or(0);
+                let request = String::from_utf8_lossy(&buffer[..read]).to_string();
+                let stale = request.contains(&format!("glossy_session=stale{}", "A".repeat(38)));
+                let (status, headers, body) = if request.starts_with("POST /api/access/guest/desktop") {
+                    (
+                        "200 OK",
+                        "set-cookie: glossy_session=freshBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB; Path=/; HttpOnly",
+                        "{}",
+                    )
+                } else if stale {
+                    ("401 Unauthorized", "content-type: application/json", "{\"error\":{\"code\":\"unauthorized\",\"message\":\"nope\"}}")
+                } else {
+                    (
+                        "200 OK",
+                        "content-type: application/json",
+                        "{\"learner\":{\"displayName\":\"Guest\"},\"accessMode\":\"hosted\",\"aiEnabled\":true,\"quotas\":{}}",
+                    )
+                };
+                let response =
+                    format!("HTTP/1.1 {status}\r\n{headers}\r\nconnection: close\r\ncontent-length: {}\r\n\r\n{body}", body.len());
+                let _ = stream.write_all(response.as_bytes());
+            }
+        });
+        base
+    }
+
+    #[test]
+    fn a_refused_session_is_replaced_by_a_fresh_guest() {
+        let base = recovery_server();
+        let server = Url::parse(&base).unwrap();
+        let client = Client::new();
+        let stale = Session {
+            server: server.clone(),
+            token: format!("stale{}", "A".repeat(38)),
+            cookie_name: "glossy_session_3000".into(),
+            owned: true,
+        };
+        tauri::async_runtime::block_on(async {
+            let refused = client.me(&stale).await.err();
+            assert!(
+                refused.as_ref().is_none_or(|error| error.is_unauthorized()),
+                "stale session answered {refused:?}"
+            );
+            // The same requests the app makes to recover.
+            let created = client.create_guest(&server).await;
+            assert!(created.is_ok(), "guest creation answered {created:?}");
+            let (cookie_name, token) = created.unwrap();
+            assert_eq!(cookie_name, "glossy_session");
+            let fresh = Session { server, token, cookie_name, owned: true };
+            let me = client.me(&fresh).await.unwrap();
+            assert_eq!(me.learner.display_name, "Guest");
         });
     }
 

@@ -5,7 +5,7 @@
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
-use crate::platform::{EditKey, Permission, Platform, PlatformError};
+use crate::platform::{EditKey, Permission, Platform, PlatformError, TextField};
 
 // How long an app may take to put the copied selection on the clipboard.
 const COPY_TIMEOUT: Duration = Duration::from_millis(700);
@@ -13,6 +13,21 @@ const COPY_POLL: Duration = Duration::from_millis(25);
 // The target app reads the clipboard while it handles Paste, which can take
 // a moment; restoring the old content sooner would paste that instead.
 const PASTE_SETTLE: Duration = Duration::from_millis(450);
+
+/// The selected part of `value`, by UTF-16 range. None when the range is
+/// unknown, empty or outside the text.
+pub fn selected_range(value: &str, selection: Option<(usize, usize)>) -> Option<String> {
+    let (location, length) = selection?;
+    if length == 0 {
+        return None;
+    }
+    let units: Vec<u16> = value.encode_utf16().collect();
+    let end = location.checked_add(length)?;
+    if end > units.len() {
+        return None;
+    }
+    String::from_utf16(&units[location..end]).ok()
+}
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum CaptureError {
@@ -25,16 +40,26 @@ pub enum CaptureError {
 }
 
 /// Reads the selection through the accessibility API, or copies it through
-/// the clipboard when the app does not expose it.
-pub fn capture(platform: &dyn Platform) -> Result<String, CaptureError> {
+/// the clipboard when the app does not expose it. `field` is the focused text
+/// field the caller already read, so its own selection is used first.
+pub fn capture(platform: &dyn Platform, field: Option<&TextField>) -> Result<String, CaptureError> {
+    log::info!("[gloss] check: reading the selection");
     if platform.accessibility() == Permission::Missing {
         return Err(CaptureError::PermissionNeeded);
+    }
+    if let Some(field) = field
+        && let Some(text) = selected_range(&field.value, field.selection)
+        && !text.trim().is_empty()
+    {
+        log::info!("[gloss] check: the selection is {} characters of the field", text.chars().count());
+        return Ok(text);
     }
     if let Some(text) = platform.selected_text()
         && !text.trim().is_empty()
     {
         return Ok(text);
     }
+    log::info!("[gloss] check: no selection through accessibility, copying it");
     platform.wait_for_modifier_release();
     copy_through_clipboard(platform, COPY_TIMEOUT)
 }
@@ -65,6 +90,11 @@ fn copy_through_clipboard(platform: &dyn Platform, timeout: Duration) -> Result<
         }
     }
     clipboard.restore(saved);
+    log::info!(
+        "[gloss] check: copy through the clipboard {} ({} chars)",
+        if copied.as_deref().is_some_and(|text| !text.trim().is_empty()) { "worked" } else { "found nothing" },
+        copied.as_deref().map(|text| text.chars().count()).unwrap_or(0)
+    );
     copied.filter(|text| !text.trim().is_empty()).ok_or(CaptureError::NothingSelected)
 }
 
@@ -208,10 +238,29 @@ mod tests {
     }
 
     #[test]
+    fn uses_the_selection_of_the_read_field_first() {
+        let platform = FakePlatform::new("kept", Some("copied"));
+        let field = TextField {
+            value: "He go to school.".into(),
+            selection: Some((3, 2)),
+            frame: None,
+            editable: true,
+            token: 1,
+        };
+        assert_eq!(capture(&platform, Some(&field)).unwrap(), "go");
+        // Unknown, empty or out-of-range selections fall through to the app.
+        for selection in [None, Some((0, 0)), Some((100, 2))] {
+            let field = TextField { selection, ..field.clone() };
+            assert_eq!(capture(&platform, Some(&field)).unwrap(), "copied");
+        }
+        assert_eq!(selected_range("héllo", Some((1, 1))), Some("é".into()));
+    }
+
+    #[test]
     fn prefers_the_accessibility_selection() {
         let mut platform = FakePlatform::new("kept", Some("copied"));
         platform.accessible_selection = Some("from AX".into());
-        assert_eq!(capture(&platform).unwrap(), "from AX");
+        assert_eq!(capture(&platform, None).unwrap(), "from AX");
         assert_eq!(platform.board.lock().unwrap().count, 0, "clipboard untouched");
     }
 
@@ -234,7 +283,7 @@ mod tests {
     fn asks_for_permission_before_touching_anything() {
         let mut platform = FakePlatform::new("kept", Some("text"));
         platform.permission = Permission::Missing;
-        assert_eq!(capture(&platform), Err(CaptureError::PermissionNeeded));
+        assert_eq!(capture(&platform, None), Err(CaptureError::PermissionNeeded));
         assert_eq!(platform.board.lock().unwrap().count, 0);
     }
 

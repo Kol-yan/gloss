@@ -48,6 +48,8 @@ pub struct AccountView {
     pub notice: Option<String>,
     /// False when the session only lasts until the app quits.
     pub remembered: bool,
+    /// While the shortcut is held and the microphone is starting.
+    pub shortcut_pressed: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -58,6 +60,8 @@ pub struct Overview {
     pub os: &'static str,
     pub accessibility: Permission,
     pub shortcut_error: Option<String>,
+    /// What the app knows about the permission the key monitor needs.
+    pub input_monitoring: crate::push_to_talk::MonitorState,
     pub version: &'static str,
 }
 
@@ -94,7 +98,61 @@ impl AppState {
     pub fn session(&self) -> Option<Session> {
         let server = self.server();
         let stored = self.credentials.load(&settings::origin_string(&server))?;
-        Some(Session { server, token: stored.token, cookie_name: stored.cookie_name, owned: stored.owned })
+        // A development cookie name no longer fits a production server (and
+        // the other way round): the session is read with the name the server
+        // uses for this address, which `getSessionCookieName` derives the same
+        // way. A refusal then starts a fresh guest.
+        let cookie_name = match (stored.cookie_name.as_str(), server.port()) {
+            ("glossy_session_3000", Some(3000)) => "glossy_session".to_owned(),
+            (name, _) => name.to_owned(),
+        };
+        Some(Session { server, token: stored.token, cookie_name, owned: stored.owned })
+    }
+
+    /// The session, or a new guest when the stored one no longer works. A
+    /// server that changes its cookie name (a production build without the
+    /// port suffix) or loses the guest must not leave the app stuck.
+    pub async fn session_or_guest(&self) -> Option<Session> {
+        let Some(session) = self.session() else {
+            self.create_guest().await?;
+            return self.session();
+        };
+        match self.client.me(&session).await {
+            Err(error) if error.is_unauthorized() => {
+                log::info!("[gloss] stored session refused ({}); creating a guest", session.cookie_name);
+                self.credentials.delete(&settings::origin_string(&session.server));
+                self.create_guest().await?;
+                self.session()
+            }
+            _ => Some(session),
+        }
+    }
+
+    /// Creates this app's guest workspace and stores the session it sets.
+    pub async fn create_guest(&self) -> Option<Session> {
+        let server = self.server();
+        let origin = settings::origin_string(&server);
+        match self.client.create_guest(&server).await {
+            Ok((cookie_name, token)) => {
+                log::info!("[gloss] guest workspace created (cookie {cookie_name})");
+                self.credentials.save(&origin, &crate::credentials::StoredSession {
+                    token: token.clone(),
+                    cookie_name: cookie_name.clone(),
+                    owned: true,
+                });
+                Some(Session { server, token, cookie_name, owned: true })
+            }
+            Err(error) => {
+                log::info!("[gloss] guest workspace not created: {}", error.learner_message(&origin));
+                None
+            }
+        }
+    }
+
+    /// Runs `change` on the account view and tells the windows, so a live
+    /// state (the key being held) reaches the settings window at once.
+    pub fn update_account(&self, change: impl FnOnce(&mut AccountView)) {
+        change(&mut lock(&self.account));
     }
 
     pub fn overview(&self) -> Overview {
@@ -104,6 +162,7 @@ impl AppState {
             os: platform::os_name(),
             accessibility: self.platform.accessibility(),
             shortcut_error: lock(&self.shortcuts).error.clone(),
+            input_monitoring: crate::push_to_talk::state(),
             version: env!("CARGO_PKG_VERSION"),
         }
     }
@@ -127,7 +186,7 @@ pub async fn refresh_account(app: &AppHandle) {
             Err(error) if error.is_unauthorized() => {
                 state.credentials.delete(&origin);
                 AccountView {
-                    notice: Some("Your session has ended. Paste a new invite link to sign in again.".into()),
+                    notice: Some("Your workspace has ended. Start a new one under Advanced.".into()),
                     remembered: state.credentials.is_persistent(),
                     ..AccountView::default()
                 }
@@ -149,7 +208,7 @@ pub async fn refresh_account(app: &AppHandle) {
 
 fn signed_in_view(me: &api::MeResponse, remembered: bool) -> AccountView {
     let notice = if me.access_mode == "byok" {
-        Some("This is a visitor workspace that uses your own OpenRouter key. The desktop app cannot send that key yet, so sign in with an invite link to use cloud checks.".into())
+        Some("This workspace uses your own OpenRouter key, which the desktop app cannot send yet.".into())
     } else if !me.ai_enabled {
         Some("Cloud checking is switched off on this server right now.".into())
     } else {
@@ -164,7 +223,24 @@ fn signed_in_view(me: &api::MeResponse, remembered: bool) -> AccountView {
         dictation_seconds: me.quotas.get("asrSeconds").copied(),
         notice,
         remembered,
+        ..AccountView::default()
     }
+}
+
+/// A session that works: the stored one, or a fresh guest when the server
+/// refused it (a cookie name changed by a production build, a guest that
+/// expired). `None` only when no workspace can be had at all.
+pub async fn working_session(state: &AppState) -> Option<Session> {
+    let session = state.session_or_guest().await?;
+    state.credentials.save(
+        &settings::origin_string(&session.server),
+        &crate::credentials::StoredSession {
+            token: session.token.clone(),
+            cookie_name: session.cookie_name.clone(),
+            owned: session.owned,
+        },
+    );
+    Some(session)
 }
 
 /// After a request answered `unauthorized`, the stored token is useless.
@@ -175,7 +251,7 @@ pub fn forget_session_if_unauthorized(app: &AppHandle, error: &ApiError) {
     let state = app.state::<AppState>();
     state.credentials.delete(&state.origin());
     *lock(&state.account) = AccountView {
-        notice: Some("Your session has ended. Paste a new invite link to sign in again.".into()),
+        notice: Some("Your workspace has ended. Start a new one under Advanced.".into()),
         remembered: state.credentials.is_persistent(),
         ..AccountView::default()
     };

@@ -38,9 +38,10 @@ uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "libc", "NSPasteboard", "NSPasteboardItem", "NSRunningApplication", "NSWorkspace"] }
-objc2-application-services = { version = "0.3", default-features = false, features = ["std", "AXError", "AXUIElement", "HIServices", "libc"] }
-objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFBase", "CFDictionary", "CFNumber", "CFString"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "libc", "block2", "NSEvent", "NSPasteboard", "NSPasteboardItem", "NSRunningApplication", "NSWorkspace"] }
+block2 = "0.6"
+objc2-application-services = { version = "0.3", default-features = false, features = ["std", "AXError", "AXUIElement", "AXValue", "HIServices", "UniversalAccess", "libc"] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFBase", "CFDictionary", "CFNumber", "CFRunLoop", "CFString"] }
 objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGEvent", "CGEventSource", "CGEventTypes", "CGRemoteOperation"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSData", "NSString", "NSURL"] }
 

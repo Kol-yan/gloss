@@ -12,6 +12,7 @@ export interface Settings {
   serverUrl: string;
   checkShortcut: string;
   dictationShortcut: string;
+  checkAsYouType: boolean;
 }
 
 export interface Account {
@@ -23,6 +24,7 @@ export interface Account {
   dictationSeconds: QuotaState | null;
   notice: string | null;
   remembered: boolean;
+  shortcutPressed: boolean;
 }
 
 export interface Overview {
@@ -31,6 +33,8 @@ export interface Overview {
   os: string;
   accessibility: Permission;
   shortcutError: string | null;
+  /** "on" while the right Option monitor runs; "off" otherwise. */
+  inputMonitoring: "on" | "off";
   version: string;
 }
 

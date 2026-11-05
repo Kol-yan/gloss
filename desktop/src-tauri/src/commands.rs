@@ -2,9 +2,7 @@
 
 use tauri::{AppHandle, Manager, State};
 
-use crate::api::{self, Session};
 use crate::check::{self, PanelAction, PanelView};
-use crate::credentials::StoredSession;
 use crate::platform::PrivacyPane;
 use crate::settings::{self, Settings};
 use crate::shortcuts;
@@ -30,72 +28,44 @@ pub async fn save_server_url(app: AppHandle, url: String) -> CommandResult<Overv
     let state = app.state::<AppState>();
     let next = Settings { server_url: settings::origin_string(&server), ..state.settings() };
     save(&state, next)?;
-    // Sessions are stored per server, so the account view must be re-read.
+    // The new server may not know this app yet, so it gets its own workspace.
+    ensure_guest(&app).await;
     state::refresh_account(&app).await;
     Ok(state.overview())
 }
 
-#[tauri::command]
-pub async fn sign_in_with_invite(app: AppHandle, link: String) -> CommandResult<Overview> {
+/// Creates this app's guest workspace on the server when there is no session
+/// for its address yet. There is no sign-in: the same guest learner the
+/// website gives a first visitor, under the same per-IP limit and caps.
+pub async fn ensure_guest(app: &AppHandle) {
     let state = app.state::<AppState>();
-    let server = state.server();
-    let origin = settings::origin_string(&server);
-    let invite = api::invite_token_from_input(&link, &server)?;
-    let (cookie_name, token) =
-        state.client.redeem_invite(&server, &invite).await.map_err(|error| error.learner_message(&origin))?;
-    replace_session(&app, Session { server, token, cookie_name, owned: true }).await;
-    Ok(app.state::<AppState>().overview())
-}
-
-/// Uses a session the learner already has, for example from the browser
-/// where they opened their invite, so the desktop app and the web editor
-/// share one learner.
-#[tauri::command]
-pub async fn sign_in_with_session(app: AppHandle, token: String) -> CommandResult<Overview> {
-    let state = app.state::<AppState>();
-    let server = state.server();
-    let origin = settings::origin_string(&server);
-    let Some((cookie_name, token)) = api::session_from_input(&token) else {
-        return Err("A session value is 43 letters, digits, - or _. Copy the whole value.".into());
-    };
-    let session = Session { server, token, cookie_name, owned: false };
-    match state.client.me(&session).await {
-        Ok(_) => {}
-        Err(error) if error.is_unauthorized() => {
-            return Err(format!("That session is not valid on {origin}. It may have expired."));
-        }
-        Err(error) => return Err(error.learner_message(&origin)),
+    let origin = settings::origin_string(&state.server());
+    log::info!("[gloss] checking the workspace for {origin}");
+    // A stored session is used when it still works; otherwise (a server that
+    // changed its cookie name, an expired guest) a new guest is created.
+    if state.session_or_guest().await.is_none() {
+        *lock(&state.account) = state::AccountView {
+            notice: Some("Can't reach the gloss server. Check your connection and try again.".into()),
+            remembered: state.credentials.is_persistent(),
+            ..state::AccountView::default()
+        };
     }
-    replace_session(&app, session).await;
-    Ok(app.state::<AppState>().overview())
 }
 
-async fn replace_session(app: &AppHandle, session: Session) {
+/// Starts over with a fresh guest workspace, for example when today's demo
+/// allowance is used up.
+#[tauri::command]
+pub async fn reset_workspace(app: AppHandle) -> Overview {
     let state = app.state::<AppState>();
-    let origin = settings::origin_string(&session.server);
-    // A previous session this app created is ended, not left behind.
-    if let Some(previous) = state.session()
-        && previous.owned
-        && previous.token != session.token
+    // Best effort: the old session is ended on the server when it can be reached.
+    if let Some(session) = state.session()
+        && session.owned
     {
-        let _ = state.client.sign_out(&previous).await;
+        let _ = state.client.sign_out(&session).await;
     }
-    state.credentials.save(
-        &origin,
-        &StoredSession { token: session.token.clone(), cookie_name: session.cookie_name.clone(), owned: session.owned },
-    );
-    state::refresh_account(app).await;
-}
-
-#[tauri::command]
-pub async fn sign_out(app: AppHandle) -> Overview {
-    let state = app.state::<AppState>();
-    if let Some(session) = state.session() {
-        // Best effort: the local token is forgotten even if the server is down.
-        if session.owned {
-            let _ = state.client.sign_out(&session).await;
-        }
-        state.credentials.delete(&state.origin());
+    state.credentials.delete(&state.origin());
+    if state.create_guest().await.is_none() {
+        log::info!("[gloss] new workspace could not be created");
     }
     state::refresh_account(&app).await;
     state.overview()
@@ -103,25 +73,80 @@ pub async fn sign_out(app: AppHandle) -> Overview {
 
 #[tauri::command]
 pub fn save_shortcuts(app: AppHandle, check: String, dictation: String) -> CommandResult<Overview> {
-    shortcuts::apply(&app, &check, &dictation)?;
+    let dictation = dictation.trim().to_owned();
     let state = app.state::<AppState>();
-    let next = Settings {
-        check_shortcut: check.trim().to_owned(),
-        dictation_shortcut: dictation.trim().to_owned(),
-        ..state.settings()
-    };
-    save(&state, next)?;
+    let previous = state.settings();
+    // The right Option key is watched by the monitor, not registered as a
+    // global shortcut, so it is not parsed here.
+    shortcuts::apply(&app, &check, &dictation)?;
+    if dictation != previous.dictation_shortcut {
+        crate::push_to_talk::start(&app, &dictation);
+    }
+    let next = Settings { check_shortcut: check.trim().to_owned(), dictation_shortcut: dictation, ..previous };
+    if let Err(error) = save(&state, next) {
+        // Put the old shortcuts back rather than leaving them half applied.
+        let _ = shortcuts::apply(&app, &previous.check_shortcut, &previous.dictation_shortcut);
+        crate::push_to_talk::start(&app, &previous.dictation_shortcut);
+        return Err(error);
+    }
     state::publish(&app);
     Ok(state.overview())
+}
+
+/// Switches checking as the learner types on or off.
+#[tauri::command]
+pub fn set_check_as_you_type(app: AppHandle, enabled: bool) -> Overview {
+    let state = app.state::<AppState>();
+    let next = Settings { check_as_you_type: enabled, ..state.settings() };
+    if let Err(error) = save(&state, next) {
+        log::warn!("[gloss] check-as-you-type setting not saved: {error}");
+    }
+    crate::auto_check::runtime::settings_changed(&app);
+    state.overview()
+}
+
+/// Manual check of the automatic checking: uses `text` as the field's text.
+#[tauri::command]
+pub fn simulate_typing(app: AppHandle, text: String) {
+    crate::auto_check::runtime::simulate_typing(&app, &text);
+}
+
+/// Opens the panel for the field the automatic checker last saw.
+#[tauri::command]
+pub fn open_last_field(app: AppHandle) {
+    crate::auto_check::runtime::badge_click(&app);
+}
+
+/// Test hook: applies every default suggestion through Accessibility, the
+/// way the panel's Apply does, and reports the field text afterwards.
+#[tauri::command]
+pub fn apply_last_fixes(app: AppHandle) -> Result<String, String> {
+    crate::check::apply_default_fixes(&app)
+}
+
+/// The badge was clicked: show the panel for the field it sits next to.
+#[tauri::command]
+pub fn badge_click(app: AppHandle) {
+    crate::auto_check::runtime::badge_click(&app);
+}
+
+/// Records whether the dictation key is the right Option monitor; the
+/// settings window shows a live line while it is held.
+#[tauri::command]
+pub fn shortcut_pressed(state: State<'_, AppState>) -> bool {
+    state.overview().account.shortcut_pressed
 }
 
 #[tauri::command]
 pub fn suspend_shortcuts(app: AppHandle) {
     shortcuts::suspend(&app);
+    crate::push_to_talk::stop();
 }
 
 #[tauri::command]
 pub fn resume_shortcuts(app: AppHandle) {
+    // Coming back from recording a key: register what is saved again.
+    crate::push_to_talk::start(&app, &app.state::<AppState>().settings().dictation_shortcut);
     shortcuts::register_saved(&app);
 }
 

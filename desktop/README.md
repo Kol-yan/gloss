@@ -7,21 +7,26 @@ on your computer:
   (Control+Option+G; Ctrl+Alt+G on Windows and Linux). A small panel shows the
   suggestions from your gloss server; **Apply** pastes the corrected text over
   your selection.
-- **Push-to-talk dictation.** Hold **⌃⌥D**, speak, and let go. The cleaned-up
-  text (punctuation added, fillers removed, your words unchanged) is pasted
-  where you are typing. A quick tap starts hands-free recording; tap again to
-  stop. Recordings end at 60 seconds.
-- **Settings** for the server address, sign-in and both shortcuts.
+- **Push-to-talk dictation.** Hold the **right Option** key (`⌥` on the right
+  of the keyboard), speak, and let go. The cleaned-up text (punctuation added,
+  fillers removed, your words unchanged) is pasted where you are typing. A
+  quick tap starts hands-free recording; tap again to stop. Recordings end at
+  60 seconds. On Windows and Linux, hold **Ctrl+Alt+D** instead.
+- **Check as you type.** While you type in another app, gloss checks after a
+  short pause and shows a small badge with the number of fixes beside the
+  field; click it to open the suggestions and apply them in place.
+- **Settings** with the two shortcuts, the permission status, the
+  "Check as I type" switch and the server address under **Advanced**. There is
+  no sign-in.
 
 The app is built with [Tauri 2](https://tauri.app): a Rust core with two small
 web views (settings and the panel). It talks to the same gloss server as the
 web editor and uses its existing API; it has no server code of its own.
 
-> **Status.** macOS gets the first polish, but this code has **not yet been run
-> on a real Mac**. Everything macOS-specific type-checks against the macOS
-> target and has a GitHub Actions build, but the Accessibility, pasteboard,
-> keystroke and microphone paths have only been exercised through their
-> Linux counterparts. See [What has been tested](#what-has-been-tested).
+> **Status.** The macOS build compiles, runs from the menu bar and its
+> Accessibility, shortcut and clipboard paths are exercised on a real Mac;
+> the microphone path still needs a manual check. See
+> [What has been tested](#what-has-been-tested).
 
 ## Run it on macOS
 
@@ -38,12 +43,6 @@ later (the repository uses Node 26), plus a gloss server.
    npm run dev
    ```
 
-   and create an invite for the desktop app:
-
-   ```bash
-   npm run invite -- --label desktop --uses 1 --profile owner
-   ```
-
 2. **Start the desktop app** in development mode:
 
    ```bash
@@ -55,9 +54,11 @@ later (the repository uses Node 26), plus a gloss server.
    The first build compiles the Rust dependencies and takes a few minutes. A
    **g** icon appears in the menu bar and the settings window opens.
 
-3. **Sign in.** Paste the invite link into **Invite link** and choose
-   **Sign in**. The server address defaults to `http://localhost:3000`; change
-   it under **Server** if yours runs elsewhere.
+3. **No sign-in.** On first launch the app creates its own guest workspace on
+   the server, the same guest a first visit to the website gets, under the
+   same per-IP limit and spend caps. A development build uses
+   `http://localhost:3000`; change it under **Advanced** if yours runs
+   elsewhere.
 
 4. **Allow Accessibility.** gloss reads your selection and pastes text back
    through the Accessibility API. Open **System Settings → Privacy & Security →
@@ -66,7 +67,7 @@ later (the repository uses Node 26), plus a gloss server.
      gives a process started from a terminal the terminal's permissions), or
    - **gloss**, for the bundled app.
 
-   The settings window shows **Allowed** once it is on.
+   The settings window has a link to this pane.
 
 5. **Try it.** Select a sentence in any app, for example *He go to school
    yesterday.* in TextEdit or Notes, and press **⌃⌥G**. In the panel, tick the
@@ -74,9 +75,9 @@ later (the repository uses Node 26), plus a gloss server.
    corrected text on the clipboard instead; **Esc** closes the panel and returns
    you to your app.
 
-6. **Dictate.** Click into a text field, hold **⌃⌥D**, speak, and let go.
-   The menu bar shows *Listening…* and then *Transcribing…*. macOS asks for
-   microphone access the first time.
+6. **Dictate.** Click into a text field, hold the **right Option** key, speak,
+   and let go. The menu bar shows *Listening…* and then *Transcribing…*.
+   macOS asks for microphone access the first time.
 
 ### Build a bundle
 
@@ -116,21 +117,26 @@ repository secrets `APPLE_CERTIFICATE` (base64 `.p12`),
 `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`,
 `APPLE_PASSWORD` (an app-specific password) and `APPLE_TEAM_ID`.
 
-## Signing in
+## Workspace and permissions
 
-The desktop app uses the web app's own sessions; there is no separate account.
+The desktop app uses the web app's guest sessions; there is no separate
+account and no sign-in screen.
 
-- **Invite link** (recommended). The app redeems the link exactly like the
-  **Continue** button on the invite page (`POST /join/{token}/continue`) and
-  keeps the session cookie the server sets. This starts a new gloss workspace
-  for the desktop app, and spends one use of the invite. **Sign out** ends that
-  session on the server.
-- **Session from your browser.** To share one workspace with the web editor,
-  open the developer tools in the browser where you are signed in to gloss,
-  copy the value of the `glossy_session` cookie for your server, and paste it
-  under **Use the session from your browser instead**. Signing out of the
-  desktop app then only forgets the session on this computer, so the browser
-  stays signed in.
+- On first launch it calls `POST /api/access/guest/desktop` and keeps the
+  session cookie the server sets, in memory and, when the system keychain is
+  available, the Keychain. The route creates the same guest learner the
+  website gives a first visitor, without Turnstile, which a native app cannot
+  show; the per-IP daily limit and the owner spend caps still apply.
+- **Start a new workspace** under **Advanced** ends the session and creates a
+  fresh guest, for example after today's free demo is used up. If the server
+  refuses the stored session (an expired guest, a server that renamed its
+  cookie), the app quietly starts a new guest and repeats the request once.
+
+Assets the app needs on macOS (System Settings → Privacy & Security):
+
+- **Accessibility**: read the selection and paste the corrected text back, and
+  notice the right Option key.
+- **Microphone**: dictation.
 
 Visitor workspaces that use their own OpenRouter key are not supported yet:
 the app does not send that key.
@@ -224,11 +230,14 @@ cargo fmt --check
 `npm run tauri dev` runs the app with the Vite dev server; `npm run tauri
 build` makes a release bundle for the current platform.
 
-A live test talks to a running gloss server and spends one invite:
+A live test talks to a running gloss server with a session cookie from a
+guest browser window (open the site, then copy `glossy_session_<port>` from the
+developer tools; never commit it):
 
 ```bash
 GLOSS_TEST_SERVER=http://localhost:3000 \
-GLOSS_TEST_INVITE="http://localhost:3000/join/<token>" \
+GLOSS_TEST_INVITE=guest \
+GLOSS_TEST_COOKIE="glossy_session_3000=<value>" \
 cargo test live_server_round_trip -- --ignored --nocapture
 ```
 
@@ -246,14 +255,21 @@ generates under `desktop/src-tauri/target`; `cargo clean` removes it.
 
 ## What has been tested
 
-On Linux (Ubuntu 24.04, a virtual X display, the gloss dev server with stand-in
-model endpoints):
+- macOS (Apple silicon, the debug app run from a terminal with real
+  permissions): shortcut registration, the Accessibility-granted path, the
+  settings window with the icon set, and the gate commands
+  (`cargo test`, `npm run typecheck`, `npm run build`, `npm run tauri build`).
+  A synthesized Control+Option+G from another process still needs a manual
+  pass, because macOS only accepts synthetic keystrokes from a process the
+  owner has allowed to control the computer.
+- Linux (Ubuntu 24.04, a virtual X display, the gloss dev server with stand-in
+  model endpoints):
 
-- `cargo check`, `cargo clippy` and `cargo test` (35 unit tests: text ranges,
+- `cargo check`, `cargo clippy` and `cargo test` (43 unit tests: text ranges,
   edit application, server address rules, cookie and invite parsing, error
-  mapping, WAV encoding and resampling, the push-to-talk state machine, and the
-  clipboard save-and-restore logic against a fake platform), plus the frontend
-  build and type check.
+  mapping, WAV encoding and resampling, the push-to-talk state machine and its
+  right Option key classification, and the clipboard save-and-restore logic
+  against a fake platform), plus the frontend build and type check.
 - `cargo check` and `cargo clippy` for `aarch64-apple-darwin`, which compiles
   every macOS-only line against the real macOS bindings.
 - The live API test above against the dev server: invite redemption, `/api/me`,

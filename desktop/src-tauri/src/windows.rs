@@ -5,6 +5,9 @@ use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition};
 
 const SETTINGS: &str = "settings";
 const PANEL: &str = "panel";
+const BADGE: &str = "badge";
+// The badge sits just inside the field's bottom-right corner.
+const BADGE_GAP: f64 = 6.0;
 // Distance between the pointer and the panel's corner.
 const POINTER_GAP: f64 = 14.0;
 const PANEL_WIDTH: f64 = 440.0;
@@ -12,11 +15,14 @@ const PANEL_MIN_HEIGHT: f64 = 150.0;
 const PANEL_MAX_HEIGHT: f64 = 560.0;
 
 pub fn show_settings(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window(SETTINGS) {
-        let _ = window.unminimize();
-        let _ = window.show();
-        let _ = window.set_focus();
-    }
+    let Some(window) = app.get_webview_window(SETTINGS) else { return };
+    // A menu-bar app's windows cannot take keyboard focus from another app
+    // while it stays an accessory, so the settings window brings the app
+    // forward like a normal window does.
+    let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_focus();
 }
 
 pub fn panel_visible(app: &AppHandle) -> bool {
@@ -57,10 +63,49 @@ pub fn fit_panel(app: &AppHandle, height: f64) {
     }
 }
 
+/// The settings window was closed: back to the menu bar, no Dock icon.
+pub fn settings_closed(app: &AppHandle) {
+    #[cfg(target_os = "macos")]
+    let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+    #[cfg(not(target_os = "macos"))]
+    let _ = app;
+}
+
 pub fn hide_panel(app: &AppHandle) {
     if let Some(window) = app.get_webview_window(PANEL) {
         let _ = window.hide();
     }
+}
+
+pub fn hide_badge(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window(BADGE) {
+        let _ = window.hide();
+    }
+}
+
+/// Shows the badge at the bottom-right corner of the field at
+/// `(x, y, width, height)` in global points. The window never takes focus.
+pub fn show_badge(app: &AppHandle, fixes: usize) {
+    let Some(window) = app.get_webview_window(BADGE) else { return };
+    let _ = fixes;
+    if let Some(field) = crate::auto_check::runtime::last_field() {
+        log::info!("[gloss] as-you-type: badge at frame {:?}", field.frame);
+    }
+    if let Some(field) = crate::auto_check::runtime::last_field()
+        && let Some((x, y, width, height)) = field.frame
+        && let Some(monitor) = app.monitor_from_point(x, y).ok().flatten()
+    {
+        let scale = monitor.scale_factor();
+        let size = window.outer_size().unwrap_or(tauri::PhysicalSize::new(64, 40));
+        // Cocoa's origin is bottom-left; the window server's is top-left.
+        let left = (x + width - size.width as f64 / scale) * scale;
+        let top = (y + height - size.height as f64 / scale - BADGE_GAP) * scale;
+        let area = monitor.work_area();
+        let left = left.max(area.position.x as f64);
+        let top = top.max(area.position.y as f64);
+        let _ = window.set_position(PhysicalPosition::new(left.round() as i32, top.round() as i32));
+    }
+    let _ = window.show();
 }
 
 fn position_near_pointer(app: &AppHandle) -> Option<PhysicalPosition<i32>> {

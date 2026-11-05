@@ -26,7 +26,7 @@ export default defineConfig({
     // Readable output: the assets ship inside the app, size hardly matters.
     minify: false,
     rolldownOptions: {
-      input: { settings: page("settings"), panel: page("panel") },
+      input: { settings: page("settings"), panel: page("panel"), badge: page("badge") },
     },
   },
 });

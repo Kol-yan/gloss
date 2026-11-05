@@ -9,101 +9,82 @@
   <body class="settings">
     <main>
       <header class="brand">
-        <span class="mark" aria-hidden="true">g</span>
+        <img class="brand-tile" src="/brand/icon.svg" alt="" width="44" height="44" />
         <div>
-          <h1>gloss</h1>
-          <p>Check what you write and dictate in any app.</p>
+          <h1 class="brand-name">gloss</h1>
+          <p>Check and dictate in any app.</p>
         </div>
       </header>
 
-      <section class="card" aria-labelledby="account-heading">
-        <h2 id="account-heading">Account</h2>
-        <div id="account-status" class="status" aria-live="polite"></div>
+      <section class="tile" aria-labelledby="dictation-heading">
+        <h2 id="dictation-heading">Dictation: hold <button id="dictation-key" class="keys keys-button" type="button" aria-label="Change the dictation key">right Option</button> and speak</h2>
+        <p class="hint">Let go to paste the text where you type; tap it quickly to keep recording hands-free. To change the key, click it and press the new one.</p>
+        <p id="key-live" class="live" role="status" hidden>Heard the key. Recording now.</p>
+      </section>
 
-        <form id="invite-form" class="stack">
-          <label for="invite">Invite link</label>
-          <div class="row">
-            <input id="invite" type="text" inputmode="url" autocomplete="off" spellcheck="false" placeholder="http://localhost:3000/join/…" />
-            <button type="submit">Sign in</button>
+      <section class="tile" aria-labelledby="check-heading">
+        <h2 id="check-heading">Check: select text in any app and press <button id="check-key" class="keys keys-button" type="button" aria-label="Change the check shortcut">Control+Option+G</button></h2>
+        <p class="hint">gloss shows fixes in a small window, then puts the corrected text back in place. Click the shortcut to change it.</p>
+      </section>
+
+      <section class="tile" aria-labelledby="auto-heading">
+        <div class="switch-row">
+          <div class="permission-text">
+            <h2 id="auto-heading">Check as I type</h2>
+            <span class="hint">A small gloss badge appears beside the field with the number of fixes.</span>
           </div>
-          <p class="hint">Opens a new <span class="brand-word">gloss</span> workspace for this app, like opening the link in a browser.</p>
-        </form>
+          <label class="switch">
+            <input id="check-as-you-type" type="checkbox" role="switch" checked />
+            <span class="track" aria-hidden="true"></span>
+          </label>
+        </div>
+      </section>
 
-        <details id="session-details">
-          <summary>Use the session from your browser instead</summary>
-          <form id="session-form" class="stack">
-            <p class="hint">
-              This keeps one workspace for the web editor and this app. In the browser where you opened your
-              invite, open the developer tools, find the cookie named <code>glossy_session</code> for your <span class="brand-word">gloss</span>
-              server and copy its value.
-            </p>
-            <label for="session">Session value</label>
+      <section class="tile permissions" aria-labelledby="permissions-heading">
+        <h2 id="permissions-heading" class="eyebrow">Permissions</h2>
+        <div class="permission-row">
+          <div class="permission-text">
+            <span class="permission-name">Microphone</span>
+            <span class="hint">For dictation.</span>
+          </div>
+          <button id="microphone" type="button" class="link-button">Open settings</button>
+        </div>
+        <div class="permission-row">
+          <div class="permission-text">
+            <span class="permission-name">Accessibility</span>
+            <span class="hint">To read the text you select and paste it back.</span>
+          </div>
+          <button id="accessibility" type="button" class="link-button">Open settings</button>
+        </div>
+      </section>
+
+      <p id="shortcut-error" class="error" role="alert"></p>
+      <p id="status" class="status" aria-live="polite"></p>
+
+      <details id="advanced" class="advanced">
+        <summary>Advanced</summary>
+        <div class="advanced-body">
+          <form id="server-form" class="stack">
+            <label for="server">Server address</label>
             <div class="row">
-              <input id="session" type="password" autocomplete="off" spellcheck="false" />
-              <button type="submit">Use session</button>
+              <input id="server" type="text" inputmode="url" autocomplete="off" spellcheck="false" />
+              <button type="submit" class="secondary">Save</button>
             </div>
+            <p id="server-error" class="error" role="alert"></p>
           </form>
-        </details>
-
-        <div class="row end">
-          <button id="sign-out" type="button" class="secondary">Sign out</button>
-        </div>
-        <p id="account-error" class="error" role="alert"></p>
-      </section>
-
-      <section class="card" aria-labelledby="server-heading">
-        <h2 id="server-heading">Server</h2>
-        <form id="server-form" class="stack">
-          <label for="server">Server address</label>
-          <div class="row">
-            <input id="server" type="text" inputmode="url" autocomplete="off" spellcheck="false" />
-            <button type="submit">Save</button>
-          </div>
-          <p class="hint">http:// works for a server on this computer; use https:// for any other.</p>
-        </form>
-        <p id="server-error" class="error" role="alert"></p>
-      </section>
-
-      <section class="card" aria-labelledby="shortcut-heading">
-        <h2 id="shortcut-heading">Shortcuts</h2>
-        <form id="shortcut-form" class="stack">
-          <label for="check-shortcut">Check selected text</label>
-          <input id="check-shortcut" class="shortcut" type="text" readonly aria-describedby="shortcut-hint" />
-          <label for="dictation-shortcut">Dictate: hold to talk, or tap to start and tap again to stop</label>
-          <input id="dictation-shortcut" class="shortcut" type="text" readonly aria-describedby="shortcut-hint" />
-          <p id="shortcut-hint" class="hint">Click a field and press the new keys together, for example Control, Alt (Option on a Mac) and G.</p>
           <div class="row end">
-            <button type="submit">Save shortcuts</button>
+            <button id="open-editor" type="button" class="link-button">Open the gloss editor</button>
           </div>
-        </form>
-        <p id="shortcut-error" class="error" role="alert"></p>
-      </section>
-
-      <section id="permissions" class="card" aria-labelledby="permissions-heading" hidden>
-        <h2 id="permissions-heading">Permissions</h2>
-        <div class="permission">
-          <div>
-            <h3>Accessibility</h3>
-            <p class="hint">Lets <span class="brand-word">gloss</span> read the text you select and paste the corrected text back.</p>
+          <div class="row end">
+            <button id="reset-workspace" type="button" class="link-button">Start a new workspace</button>
           </div>
-          <span id="accessibility-state" class="pill"></span>
+          <p class="hint subtle">
+            This app has no sign-in: it uses a free guest workspace, the same one a first visit to the website gets.
+          </p>
         </div>
-        <div class="row end">
-          <button id="accessibility" type="button" class="secondary">Open Accessibility settings</button>
-        </div>
-        <div class="permission">
-          <div>
-            <h3>Microphone</h3>
-            <p class="hint">macOS asks the first time you dictate.</p>
-          </div>
-        </div>
-        <div class="row end">
-          <button id="microphone" type="button" class="secondary">Open Microphone settings</button>
-        </div>
-      </section>
+      </details>
 
       <footer class="footer">
-        <button id="open-editor" type="button" class="link">Open the <span class="brand-word">gloss</span> editor</button>
         <span id="version"></span>
       </footer>
     </main>

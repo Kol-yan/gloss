@@ -112,12 +112,35 @@ pub fn is_recording(state: &AppState) -> bool {
 }
 
 pub fn on_press(app: &AppHandle) {
-    let step = lock(&app.state::<AppState>().dictation).machine.press(Instant::now());
+    let state = app.state::<AppState>();
+    let mut changed = false;
+    state.update_account(|account| {
+        if !account.shortcut_pressed {
+            account.shortcut_pressed = true;
+            changed = true;
+        }
+    });
+    if changed {
+        // The settings window can now show that the key is being heard.
+        state::publish(app);
+    }
+    let step = lock(&state.dictation).machine.press(Instant::now());
     perform(app, step);
 }
 
 pub fn on_release(app: &AppHandle) {
-    let step = lock(&app.state::<AppState>().dictation).machine.release(Instant::now());
+    let state = app.state::<AppState>();
+    let mut changed = false;
+    state.update_account(|account| {
+        if account.shortcut_pressed {
+            account.shortcut_pressed = false;
+            changed = true;
+        }
+    });
+    if changed {
+        state::publish(app);
+    }
+    let step = lock(&state.dictation).machine.release(Instant::now());
     perform(app, step);
 }
 
@@ -152,8 +175,8 @@ fn start(app: &AppHandle) {
         lock(&state.dictation).machine.failed_to_start();
         check::standalone_notice(
             app,
-            "Sign in to dictate",
-            "Open gloss settings and paste your invite link.",
+            "gloss is not set up yet",
+            "Open gloss settings to connect to the server.",
             Some(PanelAction::OpenSettings),
         );
         return;
@@ -242,7 +265,7 @@ fn transcribe_and_insert(app: &AppHandle, recorder: Recorder) -> Outcome {
     let recording = recorder.stop();
     let samples = wav::resample(&recording.samples, recording.sample_rate, wav::TARGET_RATE);
     if wav::seconds(samples.len(), wav::TARGET_RATE) < wav::MIN_SECONDS {
-        return Outcome::Brief("Hold the shortcut while you speak");
+        return Outcome::Brief("Hold the key while you speak");
     }
     if wav::peak(&samples) < SILENCE {
         return Outcome::Notice {
@@ -253,13 +276,28 @@ fn transcribe_and_insert(app: &AppHandle, recorder: Recorder) -> Outcome {
     }
     let Some(session) = state.session() else {
         return Outcome::Notice {
-            title: "Sign in to dictate",
-            detail: "Open gloss settings and paste your invite link.".into(),
+            title: "gloss is not set up yet",
+            detail: "Open gloss settings to connect to the server.".into(),
             action: Some(PanelAction::OpenSettings),
         };
     };
     let audio = wav::encode_pcm16(&samples, wav::TARGET_RATE);
-    match tauri::async_runtime::block_on(state.client.dictate(&session, audio)) {
+    let _ = &session;
+    let result = tauri::async_runtime::block_on(async {
+        let Some(session) = state::working_session(&state).await else {
+            return Err(crate::api::ApiError::Unauthorized);
+        };
+        match state.client.dictate(&session, audio.clone()).await {
+            Err(error) if error.is_unauthorized() => {
+                log::info!("[gloss] dictation refused the session; starting a new guest and retrying once");
+                state.credentials.delete(&state.origin());
+                let Some(fresh) = state::working_session(&state).await else { return Err(error) };
+                state.client.dictate(&fresh, audio).await
+            }
+            other => other,
+        }
+    });
+    match result {
         Ok(result) if result.text.trim().is_empty() => Outcome::Brief("Nothing heard"),
         Ok(result) => match selection::insert(state.platform.as_ref(), &result.text) {
             Ok(()) => Outcome::Inserted,

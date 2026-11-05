@@ -5,6 +5,7 @@ use std::str::FromStr;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutEvent, ShortcutState};
 
+use crate::settings::PUSH_TO_TALK_DICTATION;
 use crate::state::{AppState, lock};
 use crate::{check, dictation};
 
@@ -30,8 +31,21 @@ pub fn parse(accelerator: &str) -> Result<Shortcut, String> {
 /// previous shortcuts stay registered.
 pub fn apply(app: &AppHandle, check_accelerator: &str, dictation_accelerator: &str) -> Result<(), String> {
     let check = parse(check_accelerator)?;
+    // The right Option key is watched by its own monitor (see
+    // `crate::push_to_talk`), so it is not a global shortcut.
+    if dictation_accelerator.trim().eq_ignore_ascii_case(PUSH_TO_TALK_DICTATION) {
+        return apply_one(app, check, None);
+    }
     let dictate = parse(dictation_accelerator)?;
-    if check.id() == dictate.id() {
+    apply_both(app, check, dictate)
+}
+
+fn apply_both(app: &AppHandle, check: Shortcut, dictate: Shortcut) -> Result<(), String> {
+    apply_one(app, check, Some(dictate))
+}
+
+fn apply_one(app: &AppHandle, check: Shortcut, dictate: Option<Shortcut>) -> Result<(), String> {
+    if dictate.is_some_and(|dictate| check.id() == dictate.id()) {
         return Err("Use two different shortcuts for checking and dictation.".into());
     }
 
@@ -43,7 +57,12 @@ pub fn apply(app: &AppHandle, check_accelerator: &str, dictation_accelerator: &s
         .collect();
     let _ = manager.unregister_all();
 
-    let registered = manager.register(check).and_then(|_| manager.register(dictate));
+    let mut registered = manager.register(check);
+    if registered.is_ok()
+        && let Some(dictate) = dictate
+    {
+        registered = manager.register(dictate);
+    }
     if registered.is_err() {
         let _ = manager.unregister_all();
         for shortcut in previous {
@@ -53,8 +72,9 @@ pub fn apply(app: &AppHandle, check_accelerator: &str, dictation_accelerator: &s
     }
     let mut current = lock(&state.shortcuts);
     current.check = Some(check.id());
-    current.dictation = Some(dictate.id());
+    current.dictation = dictate.map(|dictate| dictate.id());
     current.error = None;
+    log::info!("[gloss] shortcuts registered");
     Ok(())
 }
 
@@ -62,8 +82,17 @@ pub fn apply(app: &AppHandle, check_accelerator: &str, dictation_accelerator: &s
 pub fn register_saved(app: &AppHandle) {
     let state = app.state::<AppState>();
     let settings = state.settings();
+    // The system reports a shortcut as registered even when another app
+    // holds it, so a pressed shortcut that logs nothing means it never
+    // reached gloss. Per key press `handle` logs the event id.
+    log::info!(
+        "[gloss] registering shortcuts: check {} ({}), dictate {}",
+        label(&settings.check_shortcut),
+        parse(&settings.check_shortcut).map(|shortcut| shortcut.id()).map_or("invalid".to_string(), |id| id.to_string()),
+        label(&settings.dictation_shortcut),
+    );
     if let Err(error) = apply(app, &settings.check_shortcut, &settings.dictation_shortcut) {
-        log::warn!("saved shortcuts could not be registered");
+        log::warn!("[gloss] saved shortcuts could not be registered: {error}");
         lock(&state.shortcuts).error = Some(error);
     }
 }
@@ -79,6 +108,9 @@ pub fn suspend(app: &AppHandle) {
 
 pub fn handle(app: &AppHandle, shortcut: &Shortcut, event: ShortcutEvent) {
     let state = app.state::<AppState>();
+    if event.state() == ShortcutState::Pressed {
+        log::info!("[gloss] shortcut event id {}", shortcut.id());
+    }
     let (check_id, dictation_id) = {
         let current = lock(&state.shortcuts);
         (current.check, current.dictation)
@@ -100,6 +132,9 @@ pub fn label(accelerator: &str) -> String {
 }
 
 fn label_for(accelerator: &str, mac: bool) -> String {
+    if accelerator.trim().eq_ignore_ascii_case(PUSH_TO_TALK_DICTATION) {
+        return if mac { "Right Option".into() } else { "Right Alt".into() };
+    }
     let mut modifiers = Vec::new();
     let mut key = String::new();
     for token in accelerator.split('+').map(str::trim).filter(|t| !t.is_empty()) {
@@ -160,6 +195,13 @@ mod tests {
         assert!(parse("G").is_err());
         assert!(parse("Control+Alt+").is_err());
         assert!(parse("Hyper+G").is_err());
+    }
+
+    #[test]
+    fn reads_and_labels_the_push_to_talk_key() {
+        assert_eq!(label_for(PUSH_TO_TALK_DICTATION, true), "Right Option");
+        assert!(parse(PUSH_TO_TALK_DICTATION).is_err(), "it is not a global shortcut");
+        assert_eq!(label("Control+Alt+G"), "⌃⌥G");
     }
 
     #[test]

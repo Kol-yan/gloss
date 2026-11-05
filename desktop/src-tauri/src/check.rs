@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::api::{ProofreadResponse, QuotaState, Session, Suggestion};
-use crate::platform::{FocusedApp, PrivacyPane};
+use crate::platform::{FocusedApp, PrivacyPane, TextField};
 use crate::selection::{self, CaptureError};
 use crate::shortcuts;
 use crate::state::{self, AppState, lock};
@@ -37,10 +37,20 @@ pub enum PanelView {
     Notice { title: String, detail: String, action: Option<PanelAction> },
 }
 
+/// Where the checked text came from, so Apply can write straight into it.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Source {
+    /// The field the selection was read from; `previous` is what it held.
+    Field { field: TextField, previous: String },
+    /// Read through the clipboard; Apply pastes into the app that had focus.
+    Clipboard,
+}
+
 struct CheckResult {
     text: String,
     response: ProofreadResponse,
     session: Session,
+    source: Source,
 }
 
 #[derive(Default)]
@@ -57,11 +67,58 @@ pub fn view(state: &AppState) -> PanelView {
     lock(&state.panel).view.clone()
 }
 
+/// Opens the panel for a field the automatic checker found fixes in, without
+/// reading the selection again or moving focus.
+pub fn open_field(app: &AppHandle, field: TextField) {
+    let state = app.state::<AppState>();
+    let Some(session) = state.session() else { return };
+    let text = field.value.clone();
+    if text.trim().is_empty() {
+        return;
+    }
+    log::info!("[gloss] check: opening the panel for the typed text");
+    let generation = next_generation(&state, state.platform.focused_app());
+    let app_handle = app.clone();
+    thread::spawn(move || {
+        let state = app_handle.state::<AppState>();
+        let result = tauri::async_runtime::block_on(proofread_with_recovery(&state, &text));
+        match result {
+            Ok(response) => {
+                let view = PanelView::Ready {
+                    text: text.clone(),
+                    suggestions: response.suggestions.clone(),
+                    quota: response.quota,
+                };
+                {
+                    let state = app_handle.state::<AppState>();
+                    let mut panel = lock(&state.panel);
+                    if panel.generation != generation {
+                        return;
+                    }
+                    panel.result = Some(CheckResult {
+                        text,
+                        response,
+                        session,
+                        source: Source::Field { field: field.clone(), previous: field.value },
+                    });
+                }
+                set_view(&app_handle, generation, view);
+                windows::show_panel(&app_handle);
+            }
+            Err(error) => {
+                let origin = app_handle.state::<AppState>().origin();
+                notice(&app_handle, generation, "Couldn't check this text", &error.learner_message(&origin), None);
+            }
+        }
+    });
+}
+
 /// Called by the shortcut and the tray menu.
 pub fn start(app: &AppHandle) {
     let state = app.state::<AppState>();
     let platform = state.platform.clone();
     let focus = platform.focused_app();
+    log::info!("[gloss] check: shortcut pressed");
 
     // Pressing the shortcut while the panel has focus closes it.
     if let Some(app_focus) = focus
@@ -87,11 +144,38 @@ pub fn start(app: &AppHandle) {
     thread::spawn(move || run(app, generation));
 }
 
+/// `POST /api/proofread` with the current session; a refused session gets one
+/// fresh guest and one retry, so a server that renamed its cookie or forgot a
+/// guest never leaves the learner stuck.
+pub(crate) async fn proofread_with_recovery(
+    state: &AppState,
+    text: &str,
+) -> Result<ProofreadResponse, crate::api::ApiError> {
+    let Some(session) = state::working_session(state).await else {
+        return Err(crate::api::ApiError::Unauthorized);
+    };
+    match state.client.proofread(&session, text).await {
+        Err(error) if error.is_unauthorized() => {
+            log::info!("[gloss] proofread refused the session; starting a new guest and retrying once");
+            state.credentials.delete(&state.origin());
+            let Some(fresh) = state::working_session(state).await else { return Err(error) };
+            state.client.proofread(&fresh, text).await
+        }
+        other => other,
+    }
+}
+
 fn next_generation(state: &AppState, focus: Option<FocusedApp>) -> u64 {
     let mut panel = lock(&state.panel);
     panel.generation += 1;
     panel.focus = focus;
-    panel.result = None;
+    // The field of the previous check is no longer needed; releasing it lets
+    // the focused element go too.
+    if let Some(result) = panel.result.take()
+        && let Source::Field { field, .. } = result.source
+    {
+        state.platform.release_text_field(&field);
+    }
     panel.generation
 }
 
@@ -100,17 +184,21 @@ fn run(app: AppHandle, generation: u64) {
     let key = shortcuts::label(&state.settings().check_shortcut);
 
     let Some(session) = state.session() else {
+        log::info!("[gloss] check: no session for {}", state.origin());
         notice(
             &app,
             generation,
-            "Sign in to check text",
-            "Open gloss settings and paste your invite link.",
+            "gloss is not set up yet",
+            "Open gloss settings to connect to the server.",
             Some(PanelAction::OpenSettings),
         );
         return;
     };
 
-    let captured = match selection::capture(state.platform.as_ref()) {
+    // The field is read first: its selection is the checked text when the
+    // app exposes it, and Apply writes back into the same element.
+    let field = state.platform.focused_text_field();
+    let captured = match selection::capture(state.platform.as_ref(), field.as_ref()) {
         Ok(text) => text,
         Err(CaptureError::PermissionNeeded) => {
             notice(
@@ -146,6 +234,7 @@ fn run(app: AppHandle, generation: u64) {
 
     let text = text::normalize(&captured);
     let length = text::utf16_len(&text);
+    log::info!("[gloss] check: captured {} characters", text.chars().count());
     if length > MAX_TEXT_UTF16 {
         notice(
             &app,
@@ -164,24 +253,37 @@ fn run(app: AppHandle, generation: u64) {
     }
     windows::show_panel(&app);
 
-    let result = tauri::async_runtime::block_on(state.client.proofread(&session, &text));
+    log::info!("[gloss] check: sending {} characters to POST /api/proofread", text.chars().count());
+    let result = tauri::async_runtime::block_on(proofread_with_recovery(&state, &text));
     match result {
         Ok(response) => {
+            log::info!(
+                "[gloss] check: the server answered with {} suggestion(s), showing the panel",
+                response.suggestions.len()
+            );
             let view = PanelView::Ready {
                 text: text.clone(),
                 suggestions: response.suggestions.clone(),
                 quota: response.quota,
+            };
+            let source = match field {
+                Some(field) => {
+                    log::info!("[gloss] check: the text came from an accessibility text field");
+                    Source::Field { previous: field.value.clone(), field }
+                }
+                None => Source::Clipboard,
             };
             {
                 let mut panel = lock(&state.panel);
                 if panel.generation != generation {
                     return;
                 }
-                panel.result = Some(CheckResult { text, response, session });
+                panel.result = Some(CheckResult { text, response, session, source });
             }
             set_view(&app, generation, view);
         }
         Err(error) => {
+            log::info!("[gloss] check: POST /api/proofread failed ({error:?})");
             state::forget_session_if_unauthorized(&app, &error);
             let action = error.is_unauthorized().then_some(PanelAction::OpenSettings);
             notice(&app, generation, "Couldn't check this text", &error.learner_message(&state.origin()), action);
@@ -236,6 +338,28 @@ pub fn preview(state: &AppState, chosen: &[String]) -> Result<String, String> {
     corrected_text(&result.text, &result.response.suggestions, chosen)
 }
 
+/// Applies every default suggestion to the field the automatic checker read
+/// and returns the written text; used by the manual check and the debug hook.
+pub fn apply_default_fixes(app: &AppHandle) -> Result<String, String> {
+    let state = app.state::<AppState>();
+    let Some(field) = crate::auto_check::runtime::last_field() else { return Err("No field.".into()) };
+    let text = field.value.clone();
+    let result = tauri::async_runtime::block_on(proofread_with_recovery(&state, &text))
+        .map_err(|error| error.learner_message(&state.origin()))?;
+    let chosen: Vec<String> = result
+        .suggestions
+        .iter()
+        .filter(|suggestion| suggestion.category == crate::api::SuggestionCategory::Error && !suggestion.meaning_change)
+        .map(|suggestion| suggestion.id.clone())
+        .collect();
+    let corrected = corrected_text(&text, &result.suggestions, &chosen)?;
+    if !state.platform.write_field_text(&field, &corrected) {
+        return Err("The field did not take the text.".into());
+    }
+    log::info!("[gloss] apply: {} fixes written through accessibility", chosen.len());
+    Ok(corrected)
+}
+
 /// Pastes the corrected text over the selection in the original app and
 /// records the applied suggestions as accepted.
 pub fn apply(app: &AppHandle, chosen: Vec<String>) -> Result<(), String> {
@@ -246,10 +370,30 @@ pub fn apply(app: &AppHandle, chosen: Vec<String>) -> Result<(), String> {
         let corrected = corrected_text(&result.text, &result.response.suggestions, &chosen)?;
         (result.text.clone(), corrected, panel.focus, result.session.clone(), result.response.text_hash.clone())
     };
+    log::info!("[gloss] apply: {} chosen suggestion(s)", chosen.len());
     if corrected == original {
         dismiss(app, true);
         return Ok(());
     }
+    let source = { lock(&state.panel).result.as_ref().map(|result| result.source.clone()) };
+
+    // First route: write into the field itself, with no app switching at all.
+    if let Some(Source::Field { field, .. }) = &source
+        && state.platform.write_field_text(field, &corrected)
+    {
+        log::info!("[gloss] apply: wrote the text through accessibility, no app switch");
+        end_session(&state);
+        windows::hide_panel(app);
+        let (chosen_for_log, hash) = (chosen.clone(), text_hash.clone());
+        let session = session.clone();
+        let app = app.clone();
+        thread::spawn(move || {
+            let state = app.state::<AppState>();
+            tauri::async_runtime::block_on(record_accepted(&state, &session, &chosen_for_log, &hash));
+        });
+        return Ok(());
+    }
+    log::info!("[gloss] apply: the field did not take the text, pasting instead");
     end_session(&state);
     windows::hide_panel(app);
 
@@ -269,11 +413,16 @@ pub fn apply(app: &AppHandle, chosen: Vec<String>) -> Result<(), String> {
             copy_to_clipboard(&state, &corrected);
             return;
         }
-        // When the app exposes its selection, make sure the learner did not
-        // select something else in the meantime before replacing it.
-        if let Some(current) = platform.selected_text().filter(|current| !current.trim().is_empty())
-            && text::normalize(&current) != original
-        {
+        // When the app exposes its whole value, make sure nothing changed in
+        // the meantime before pasting over it; a selection copy cannot tell.
+        let field_now = platform.focused_text_field();
+        let unchanged = match (&source, &field_now) {
+            (Some(Source::Field { previous, .. }), Some(now)) => &now.value == previous,
+            (Some(Source::Field { .. }), None) => true,
+            _ => platform.selected_text().filter(|current| !current.trim().is_empty())
+                .is_none_or(|current| text::normalize(&current) == original),
+        };
+        if !unchanged {
             standalone_notice(
                 &app,
                 "The selection changed",
@@ -283,6 +432,7 @@ pub fn apply(app: &AppHandle, chosen: Vec<String>) -> Result<(), String> {
             return;
         }
         if selection::insert(platform.as_ref(), &corrected).is_err() {
+            log::info!("[gloss] apply: pasting failed, the text went to the clipboard");
             copy_to_clipboard(&state, &corrected);
             standalone_notice(
                 &app,
@@ -292,6 +442,7 @@ pub fn apply(app: &AppHandle, chosen: Vec<String>) -> Result<(), String> {
             );
             return;
         }
+        log::info!("[gloss] apply: pasted the corrected text");
         tauri::async_runtime::block_on(record_accepted(&state, &session, &chosen, &text_hash));
     });
     Ok(())
@@ -323,7 +474,11 @@ fn end_session(state: &AppState) {
     let mut panel = lock(&state.panel);
     panel.generation += 1;
     panel.view = PanelView::Idle;
-    panel.result = None;
+    if let Some(result) = panel.result.take()
+        && let Source::Field { field, .. } = result.source
+    {
+        state.platform.release_text_field(&field);
+    }
 }
 
 /// Closes the panel. With `return_focus`, the app the selection came from

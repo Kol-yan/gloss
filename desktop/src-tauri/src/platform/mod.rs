@@ -4,8 +4,11 @@
 
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(target_os = "macos")]
+pub mod observer;
 #[cfg(not(target_os = "macos"))]
 mod portable;
+
 
 use std::sync::Arc;
 
@@ -68,8 +71,37 @@ pub trait Clipboard {
     fn change_count(&mut self) -> Option<i64>;
 }
 
+/// A text field another app exposes through Accessibility: the element
+/// itself, what it holds, and where its selection is (UTF-16 text).
+#[derive(Debug, Clone, PartialEq)]
+pub struct TextField {
+    /// The text right now, read from `AXValue` or `AXSelectedText` fallback.
+    pub value: String,
+    /// Selection as `(location, length)` in UTF-16 units, when known.
+    pub selection: Option<(usize, usize)>,
+    /// Top-left and size of the element on screen, in global points.
+    pub frame: Option<(f64, f64, f64, f64)>,
+    /// The element accepts typing (`AXEditable` or `AXValue` is settable).
+    pub editable: bool,
+    /// Placeholder for the platform to keep the element handle; opaque here.
+    pub token: u64,
+}
+
 pub trait Platform: Send + Sync {
     fn focused_app(&self) -> Option<FocusedApp>;
+    /// The focused text field of the frontmost app, if it exposes one.
+    /// Not implemented for the portable fallback (returns None).
+    fn focused_text_field(&self) -> Option<TextField> {
+        None
+    }
+    /// Writes `text` into the field previously read as `field`, replacing the
+    /// whole value or the field's own selection (see `selection`). False when
+    /// the app does not accept it.
+    fn write_field_text(&self, _field: &TextField, _text: &str) -> bool {
+        false
+    }
+    /// Forgets a field the app no longer uses, so its element is released.
+    fn release_text_field(&self, _field: &TextField) {}
     fn is_own_app(&self, app: FocusedApp) -> bool;
     /// Gives focus back to `app`; true once it is frontmost again.
     fn activate(&self, app: FocusedApp) -> bool;

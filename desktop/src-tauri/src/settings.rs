@@ -8,11 +8,18 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use url::{Host, Url};
 
-pub const DEFAULT_SERVER_URL: &str = "http://localhost:3000";
+// A release build talks to the public server; a debug build to this computer.
+pub const DEFAULT_SERVER_URL: &str =
+    if cfg!(debug_assertions) { "http://localhost:3000" } else { "https://gloss.li" };
 // Control+Option on macOS and Control+Alt elsewhere are rarely taken by
 // system or app shortcuts, and the same keys work on every platform.
 pub const DEFAULT_CHECK_SHORTCUT: &str = "Control+Alt+G";
+// macOS dictates with a push-to-talk monitor of the right Option key (see
+// `push_to_talk`), so the shortcut is only the fallback everywhere else.
 pub const DEFAULT_DICTATION_SHORTCUT: &str = "Control+Alt+D";
+// The push-to-talk accelerator, kept in settings so old files keep loading; a
+// stored Control+Alt+D is replaced by the right Option key on macOS.
+pub const PUSH_TO_TALK_DICTATION: &str = "RightOption";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -21,6 +28,13 @@ pub struct Settings {
     pub server_url: String,
     pub check_shortcut: String,
     pub dictation_shortcut: String,
+    /// Check text while the learner types in another app.
+    #[serde(default = "default_true")]
+    pub check_as_you_type: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for Settings {
@@ -28,9 +42,16 @@ impl Default for Settings {
         Self {
             server_url: DEFAULT_SERVER_URL.to_owned(),
             check_shortcut: DEFAULT_CHECK_SHORTCUT.to_owned(),
-            dictation_shortcut: DEFAULT_DICTATION_SHORTCUT.to_owned(),
+            dictation_shortcut: default_dictation_shortcut(),
+            check_as_you_type: true,
         }
     }
+}
+
+// macOS uses the push-to-talk monitor of the right Option key; other
+// platforms keep the shortcut that works with the global shortcut plugin.
+pub fn default_dictation_shortcut() -> String {
+    if cfg!(target_os = "macos") { PUSH_TO_TALK_DICTATION } else { DEFAULT_DICTATION_SHORTCUT }.to_owned()
 }
 
 /// Accepts an HTTPS origin, or HTTP on this computer only: the session token
@@ -88,11 +109,20 @@ impl SettingsStore {
     /// A missing or unreadable file gives the defaults; a value that no
     /// longer validates falls back to its default rather than blocking start.
     pub fn load(&self) -> Settings {
+        let existed = self.path.exists();
         let mut settings: Settings =
             fs::read(&self.path).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default();
         match parse_server_url(&settings.server_url) {
             Ok(url) => settings.server_url = origin_string(&url),
             Err(_) => settings.server_url = DEFAULT_SERVER_URL.to_owned(),
+        }
+        if cfg!(target_os = "macos") && settings.dictation_shortcut == "Control+Alt+D" {
+            settings.dictation_shortcut = PUSH_TO_TALK_DICTATION.to_owned();
+        }
+        // An older file can hold the development server address; a release
+        // build starts on the public server instead.
+        if existed && !cfg!(debug_assertions) && settings.server_url == "http://localhost:3000" {
+            settings.server_url = DEFAULT_SERVER_URL.to_owned();
         }
         settings
     }
@@ -155,11 +185,16 @@ mod tests {
 
         fs::write(dir.join("settings.json"), br#"{"serverUrl":"http://evil.example"}"#).unwrap();
         assert_eq!(store.load().server_url, DEFAULT_SERVER_URL);
+        // A file from an older build gets the right Option key on macOS.
+        fs::write(dir.join("settings.json"), br#"{"dictationShortcut":"Control+Alt+D"}"#).unwrap();
+        let migrated = store.load().dictation_shortcut;
+        assert_eq!(migrated, if cfg!(target_os = "macos") { PUSH_TO_TALK_DICTATION } else { DEFAULT_DICTATION_SHORTCUT });
 
         let custom = Settings {
             server_url: "https://gloss.example".into(),
             check_shortcut: "Alt+Shift+K".into(),
-            dictation_shortcut: DEFAULT_DICTATION_SHORTCUT.into(),
+            dictation_shortcut: default_dictation_shortcut(),
+            check_as_you_type: true,
         };
         store.save(&custom).unwrap();
         assert_eq!(store.load(), custom);
