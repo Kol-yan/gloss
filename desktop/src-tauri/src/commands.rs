@@ -52,25 +52,6 @@ pub async fn ensure_guest(app: &AppHandle) {
     }
 }
 
-/// Starts over with a fresh guest workspace, for example when today's demo
-/// allowance is used up.
-#[tauri::command]
-pub async fn reset_workspace(app: AppHandle) -> Overview {
-    let state = app.state::<AppState>();
-    // Best effort: the old session is ended on the server when it can be reached.
-    if let Some(session) = state.session()
-        && session.owned
-    {
-        let _ = state.client.sign_out(&session).await;
-    }
-    state.credentials.delete(&state.origin());
-    if state.create_guest().await.is_none() {
-        log::info!("[gloss] new workspace could not be created");
-    }
-    state::refresh_account(&app).await;
-    state.overview()
-}
-
 #[tauri::command]
 pub fn save_shortcuts(app: AppHandle, check: String, dictation: String) -> CommandResult<Overview> {
     let dictation = dictation.trim().to_owned();
@@ -105,12 +86,14 @@ pub fn set_check_as_you_type(app: AppHandle, enabled: bool) -> Overview {
 }
 
 /// Manual check of the automatic checking: uses `text` as the field's text.
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub fn simulate_typing(app: AppHandle, text: String) {
     crate::auto_check::runtime::simulate_typing(&app, &text);
 }
 
 /// Opens the panel for the field the automatic checker last saw.
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub fn open_last_field(app: AppHandle) {
     crate::auto_check::runtime::badge_click(&app);
@@ -118,6 +101,7 @@ pub fn open_last_field(app: AppHandle) {
 
 /// Test hook: applies every default suggestion through Accessibility, the
 /// way the panel's Apply does, and reports the field text afterwards.
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub fn apply_last_fixes(app: AppHandle) -> Result<String, String> {
     crate::check::apply_default_fixes(&app)

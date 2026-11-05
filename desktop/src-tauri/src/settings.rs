@@ -151,6 +151,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn automatic_checks_default_on_and_preserve_an_explicit_opt_out() {
+        assert!(Settings::default().check_as_you_type);
+        assert!(serde_json::from_str::<Settings>("{}").unwrap().check_as_you_type);
+        assert!(!serde_json::from_str::<Settings>(r#"{"checkAsYouType":false}"#).unwrap().check_as_you_type);
+    }
+
+    #[test]
     fn accepts_https_and_loopback_http() {
         assert_eq!(origin_string(&parse_server_url("http://localhost:3000").unwrap()), "http://localhost:3000");
         assert_eq!(origin_string(&parse_server_url(" http://127.0.0.1:3000/ ").unwrap()), "http://127.0.0.1:3000");

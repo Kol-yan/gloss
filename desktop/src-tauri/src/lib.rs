@@ -14,6 +14,8 @@ mod selection;
 mod settings;
 mod shortcuts;
 mod state;
+#[cfg(debug_assertions)]
+mod test_hook;
 mod text;
 mod tray;
 mod wav;
@@ -27,25 +29,31 @@ use crate::state::AppState;
 /// A tiny loopback endpoint that runs the manual tests of the automatic
 /// checker, because macOS refuses synthetic keystrokes to a terminal here.
 /// It exists only in debug builds and only answers on 127.0.0.1.
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", debug_assertions))]
 fn start_test_hook(app: tauri::AppHandle) {
-    if !cfg!(debug_assertions) {
-        return;
-    }
     let Ok(store_dir) = app.path().app_config_dir() else { return };
     let marker = store_dir.join("test-hook.json");
-    if !marker.exists() {
-        return;
-    }
+    let Some(token) = std::fs::read(&marker).ok().and_then(|bytes| test_hook::marker_token(&bytes)) else { return };
     std::thread::spawn(move || {
         use std::io::{Read, Write};
         let Ok(listener) = std::net::TcpListener::bind("127.0.0.1:4211") else { return };
         log::info!("[gloss] test hook on 127.0.0.1:4211");
         for stream in listener.incoming() {
             let Ok(mut stream) = stream else { continue };
-            let mut buffer = [0u8; 4096];
-            let read = stream.read(&mut buffer).unwrap_or(0);
-            let request = String::from_utf8_lossy(&buffer[..read]).to_string();
+            let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(2)));
+            let mut bytes = Vec::new();
+            let mut buffer = [0u8; 1024];
+            while bytes.len() < 8192 && !bytes.windows(4).any(|part| part == b"\r\n\r\n") {
+                match stream.read(&mut buffer) {
+                    Ok(0) | Err(_) => break,
+                    Ok(read) => bytes.extend_from_slice(&buffer[..read]),
+                }
+            }
+            let request = String::from_utf8_lossy(&bytes);
+            if !test_hook::authorized(&request, &token) {
+                let _ = stream.write_all(b"HTTP/1.1 403 Forbidden\r\ncontent-length: 0\r\nconnection: close\r\n\r\n");
+                continue;
+            }
             let path = request.split_whitespace().nth(1).unwrap_or("/").to_string();
             let text = path
                 .split_once("text=")
@@ -76,7 +84,7 @@ fn start_test_hook(app: tauri::AppHandle) {
     });
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", debug_assertions))]
 fn url_decode(value: &str) -> Option<String> {
     let bytes = value.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
@@ -114,7 +122,7 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
-            #[cfg(target_os = "macos")]
+            #[cfg(all(target_os = "macos", debug_assertions))]
             start_test_hook(app.handle().clone());
 
             let config_dir = app.path().app_config_dir()?;
@@ -161,14 +169,16 @@ pub fn run() {
             commands::get_overview,
             commands::refresh_account,
             commands::save_server_url,
-            commands::reset_workspace,
             commands::save_shortcuts,
             commands::suspend_shortcuts,
             commands::shortcut_pressed,
             commands::set_check_as_you_type,
             commands::badge_click,
+            #[cfg(debug_assertions)]
             commands::simulate_typing,
+            #[cfg(debug_assertions)]
             commands::open_last_field,
+            #[cfg(debug_assertions)]
             commands::apply_last_fixes,
             commands::resume_shortcuts,
             commands::request_accessibility,

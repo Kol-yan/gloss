@@ -15,7 +15,6 @@ const serverForm = byId<HTMLFormElement>("server-form");
 const server = byId<HTMLInputElement>("server");
 const serverError = byId<HTMLParagraphElement>("server-error");
 const openEditor = byId<HTMLButtonElement>("open-editor");
-const resetWorkspace = byId<HTMLButtonElement>("reset-workspace");
 const version = byId<HTMLSpanElement>("version");
 
 let os = "";
@@ -133,10 +132,6 @@ accessibility.addEventListener("click", () => {
 });
 microphone.addEventListener("click", () => void invoke("open_microphone_settings"));
 openEditor.addEventListener("click", () => void invoke("open_editor"));
-resetWorkspace.addEventListener("click", () => {
-  void run(resetWorkspace, null, () => invoke<Overview>("reset_workspace"));
-});
-
 checkAsYouType.addEventListener("change", () => {
   void run(null, null, () =>
     invoke<Overview>("set_check_as_you_type", { enabled: checkAsYouType.checked }),

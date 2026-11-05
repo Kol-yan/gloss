@@ -120,7 +120,10 @@ impl ApiError {
     pub fn learner_message(&self, origin: &str) -> String {
         match self {
             ApiError::Server { code, .. } if code == "unauthorized" => {
-                "Your workspace has ended. Start a new one under Advanced in gloss settings.".into()
+                "Your workspace has ended. Try again to reconnect.".into()
+            }
+            ApiError::Server { code, .. } if matches!(code.as_str(), "quota_exceeded" | "budget_exhausted") => {
+                "Today's free checks are used up. Try again tomorrow.".into()
             }
             ApiError::Server { message, .. } => message.clone(),
             ApiError::Network => format!("Can't reach gloss at {origin}. Check that the server is running."),
@@ -475,6 +478,19 @@ mod tests {
         assert!(invite_token_from_input("http://localhost:3000/join/short", &server).is_err());
         assert!(invite_token_from_input(&format!("http://localhost:3000/x/join/{TOKEN}"), &server).is_err());
         assert!(invite_token_from_input("not a link", &server).is_err());
+    }
+
+    #[test]
+    fn quota_messages_do_not_offer_unavailable_desktop_settings() {
+        for code in ["quota_exceeded", "budget_exhausted"] {
+            let error =
+                ApiError::Server { code: code.into(), message: "Add your own OpenRouter key in Settings.".into() };
+            assert!(!error.is_unauthorized(), "quota errors must preserve the stored session");
+            assert_eq!(
+                error.learner_message("https://gloss.li"),
+                "Today's free checks are used up. Try again tomorrow."
+            );
+        }
     }
 
     #[test]

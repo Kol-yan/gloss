@@ -190,7 +190,7 @@ pub async fn refresh_account(app: &AppHandle) {
             Err(error) if error.is_unauthorized() => {
                 state.credentials.delete(&origin);
                 AccountView {
-                    notice: Some("Your workspace has ended. Start a new one under Advanced.".into()),
+                    notice: Some("Your workspace has ended. Try again to reconnect.".into()),
                     remembered: state.credentials.is_persistent(),
                     ..AccountView::default()
                 }
@@ -255,7 +255,7 @@ pub fn forget_session_if_unauthorized(app: &AppHandle, error: &ApiError) {
     let state = app.state::<AppState>();
     state.credentials.delete(&state.origin());
     *lock(&state.account) = AccountView {
-        notice: Some("Your workspace has ended. Start a new one under Advanced.".into()),
+        notice: Some("Your workspace has ended. Try again to reconnect.".into()),
         remembered: state.credentials.is_persistent(),
         ..AccountView::default()
     };

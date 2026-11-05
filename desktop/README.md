@@ -1,5 +1,7 @@
 # gloss desktop
 
+Status: macOS beta; microphone dictation still needs a manual check.
+
 A menu-bar app (tray icon on Windows and Linux) that brings gloss to every app
 on your computer:
 
@@ -16,17 +18,12 @@ on your computer:
   short pause and shows a small badge with the number of fixes beside the
   field; click it to open the suggestions and apply them in place.
 - **Settings** with the two shortcuts, the permission status, the
-  "Check as I type" switch and the server address under **Advanced**. There is
-  no sign-in.
+  "Check as I type" switch and the server address under **Advanced**. A guest
+  workspace is created automatically.
 
-The app is built with [Tauri 2](https://tauri.app): a Rust core with two small
-web views (settings and the panel). It talks to the same gloss server as the
+The app is built with [Tauri 2](https://tauri.app): a Rust core with three small
+web views (settings, panel and badge). It talks to the same gloss server as the
 web editor and uses its existing API; it has no server code of its own.
-
-> **Status.** The macOS build compiles, runs from the menu bar and its
-> Accessibility, shortcut and clipboard paths are exercised on a real Mac;
-> the microphone path still needs a manual check. See
-> [What has been tested](#what-has-been-tested).
 
 ## Run it on macOS
 
@@ -54,7 +51,7 @@ later (the repository uses Node 26), plus a gloss server.
    The first build compiles the Rust dependencies and takes a few minutes. A
    **g** icon appears in the menu bar and the settings window opens.
 
-3. **No sign-in.** On first launch the app creates its own guest workspace on
+3. **Guest workspace.** On first launch the app creates its own guest workspace on
    the server, the same guest a first visit to the website gets, under the
    same per-IP limit and spend caps. A development build uses
    `http://localhost:3000`; change it under **Advanced** if yours runs
@@ -119,18 +116,16 @@ repository secrets `APPLE_CERTIFICATE` (base64 `.p12`),
 
 ## Workspace and permissions
 
-The desktop app uses the web app's guest sessions; there is no separate
-account and no sign-in screen.
+The desktop app creates a guest workspace automatically through the web app's guest sessions.
 
 - On first launch it calls `POST /api/access/guest/desktop` and keeps the
-  session cookie the server sets in memory and an owner-only guest session
+  session cookie the server sets in memory and a user-only guest session
   file in the app config directory. The route creates the same guest learner the
   website gives a first visitor, without Turnstile, which a native app cannot
-  show; the per-IP daily limit and the owner spend caps still apply.
-- **Start a new workspace** under **Advanced** ends the session and creates a
-  fresh guest, for example after today's free demo is used up. If the server
-  refuses the stored session (an expired guest, a server that renamed its
-  cookie), the app quietly starts a new guest and repeats the request once.
+  show; the per-IP daily limit and the server spend caps still apply.
+- A stored session is reused. Only a server refusal of that session starts a
+  replacement guest; running out of daily checks never resets the workspace.
+- **Check as I type** is on by default and can be switched off in Settings.
 
 Assets the app needs on macOS (System Settings → Privacy & Security):
 
@@ -170,7 +165,7 @@ to a server that did not issue it.
 
 ```text
 desktop/
-├── settings.html, panel.html     the two windows (Vite + TypeScript, no framework)
+├── settings.html, panel.html, badge.html  the three windows (Vite + TypeScript, no framework)
 ├── src/                          window code; bridge.ts wraps window.__TAURI__
 └── src-tauri/
     ├── tauri.conf.json           windows, bundle, CSP
@@ -188,7 +183,7 @@ desktop/
         │   └── portable.rs       Windows and Linux: clipboard copy and paste
         ├── audio.rs, wav.rs      microphone capture and the WAV the server accepts
         ├── text.rs               NFC normalization and UTF-16 ranges, as in src/lib/text
-        ├── credentials.rs        per-server guest sessions in an owner-only file
+        ├── credentials.rs        per-server guest sessions in a user-only file
         ├── settings.rs           settings file and server address rules
         ├── shortcuts.rs          global shortcuts and their labels
         ├── tray.rs, windows.rs   menu-bar icon and window placement
@@ -221,7 +216,7 @@ desktop/
 ```bash
 cd desktop
 npm install
-npm run build                # type-check and build the two windows
+npm run build                # type-check and build the three windows
 cd src-tauri
 cargo test                   # unit tests
 cargo clippy --all-targets -- -D warnings
@@ -230,17 +225,6 @@ cargo fmt --check
 
 `npm run tauri dev` runs the app with the Vite dev server; `npm run tauri
 build` makes a release bundle for the current platform.
-
-A live test talks to a running gloss server with a session cookie from a
-guest browser window (open the site, then copy `glossy_session_<port>` from the
-developer tools; never commit it):
-
-```bash
-GLOSS_TEST_SERVER=http://localhost:3000 \
-GLOSS_TEST_INVITE=guest \
-GLOSS_TEST_COOKIE="glossy_session_3000=<value>" \
-cargo test live_server_round_trip -- --ignored --nocapture
-```
 
 On Linux, Tauri needs the WebKitGTK development packages; on Debian or
 Ubuntu:
@@ -254,55 +238,14 @@ TypeScript in `desktop/src`, which is why it uses no npm runtime packages. After
 a local desktop build, the root lint also reports warnings for a file Tauri
 generates under `desktop/src-tauri/target`; `cargo clean` removes it.
 
-## What has been tested
 
-- macOS (Apple silicon, the debug app run from a terminal with real
-  permissions): shortcut registration, the Accessibility-granted path, the
-  settings window with the icon set, and the gate commands
-  (`cargo test`, `npm run typecheck`, `npm run build`, `npm run tauri build`).
-  A synthesized Control+Option+G from another process still needs a manual
-  pass, because macOS only accepts synthetic keystrokes from a process the
-  owner has allowed to control the computer.
-- Linux (Ubuntu 24.04, a virtual X display, the gloss dev server with stand-in
-  model endpoints):
+### Debug loopback helper
 
-- `cargo check`, `cargo clippy` and `cargo test` (43 unit tests: text ranges,
-  edit application, server address rules, cookie and invite parsing, error
-  mapping, WAV encoding and resampling, the push-to-talk state machine and its
-  right Option key classification, and the clipboard save-and-restore logic
-  against a fake platform), plus the frontend build and type check.
-- `cargo check` and `cargo clippy` for `aarch64-apple-darwin`, which compiles
-  every macOS-only line against the real macOS bindings.
-- The live API test above against the dev server: invite redemption, `/api/me`,
-  a spent invite, error mapping, upload format and sign-out.
-- The whole app, end to end: signing in through the settings window, selecting
-  text in a browser and pressing the check shortcut (selection copied through
-  the clipboard, `/api/proofread` called, the panel showing the server's
-  answer), and holding the dictation shortcut with a file-fed microphone
-  (a valid 16 kHz mono WAV uploaded, the cleaned transcript pasted into the
-  browser's text field).
-
-Not tested yet:
-
-- **Anything on a real Mac**: the menu-bar icon, Accessibility selection
-  reading, Quartz Copy and Paste, pasteboard restore, focus return, the
-  microphone and its permission prompt, panel placement, and the bundle built
-  by GitHub Actions (the workflow has not run yet).
-- A real proofreading answer in the panel with the app running: the test server
-  had no model key for proofreading, so the panel showed the server's
-  *switched off* message; the suggestion view was checked in a browser with the
-  same data shape.
-- Windows, and Linux under Wayland.
-
-## Next steps
-
-- Run through the steps above on a Mac and tune the timings in
-  `selection.rs` (copy timeout, paste settle time) for slow apps.
-- Native selection access for Windows (UI Automation) and Linux (AT-SPI), and
-  focus tracking on both.
-- Show the panel next to the selection rather than the pointer, using the
-  Accessibility bounds of the selected range.
-- Turn an accepted *Expression* suggestion into practice from the panel, as the
-  web editor does.
-- Start at login, Developer ID signing and notarization, and updates.
-- Support visitor workspaces that bring their own OpenRouter key.
+Debug builds enable the loopback helper only when the app config directory
+contains `test-hook.json` with a `token` field containing a freshly generated
+32-byte random token as 64 hexadecimal digits. Generate it locally with a
+cryptographic random generator. Send the token in the `X-Gloss-Test-Token`
+header for each request to `127.0.0.1:4211`. Requests with an `Origin`
+header are refused, including requests with a valid token. The helper and
+its simulation IPC commands are excluded from release builds. Remove the
+marker when finished.
