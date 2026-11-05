@@ -79,7 +79,10 @@ export function Landing({ startPracticeHref }: { startPracticeHref: string }) {
       <footer className="landing-footer">
         <div className="landing-inner">
           <span><BrandedText text="Made to make your words your own." /></span>
-          <a href={GITHUB}>GitHub</a>
+          <span className="landing-footer-links">
+            <Link href="/privacy">Privacy</Link>
+            <a href={GITHUB}>GitHub</a>
+          </span>
         </div>
       </footer>
     </div>

@@ -40,6 +40,7 @@ describe("landing and editor navigation", () => {
     expect(html.match(/<li>/g)).toHaveLength(3);
     expect(html).toContain('href="https://github.com/Kol-yan/gloss#desktop-app"');
     expect(html).toContain('href="https://github.com/Kol-yan/gloss">GitHub');
+    expect(html).toContain('href="/privacy">Privacy');
   });
 
   it("sends new visitors and unfinished learners to onboarding", async () => {

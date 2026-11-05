@@ -27,8 +27,13 @@ declare global {
 
 const TURNSTILE_SCRIPT = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
 
+// Invite continuations remain in control of their own session upgrade flow,
+// and reading the privacy policy must not start a workspace.
+export function startsNoSession(pathname: string): boolean {
+  return pathname === "/join" || pathname.startsWith("/join/") || pathname === "/privacy";
+}
+
 // A single root-layout component starts the demo session in the background.
-// Invite continuations remain in control of their own session upgrade flow.
 export function AccessBootstrap() {
   const pathname = usePathname();
   const { sessionRevision } = useAccess();
@@ -47,7 +52,7 @@ export function AccessBootstrap() {
 
   useEffect(() => {
     let active = true;
-    if (pathname === "/join" || pathname.startsWith("/join/")) return () => { active = false; };
+    if (startsNoSession(pathname)) return () => { active = false; };
 
     void bootstrapGuestAccess().then((result) => {
       if (active && result.kind === "ready") setMessage(null);
@@ -67,7 +72,7 @@ export function AccessBootstrap() {
   const turnstile = requestedTurnstile?.pathname === pathname && requestedTurnstile.sessionRevision === sessionRevision
     ? requestedTurnstile
     : null;
-  if (pathname === "/join" || pathname.startsWith("/join/")) return null;
+  if (startsNoSession(pathname)) return null;
   return <>{turnstile ? <TurnstileWidget siteKey={turnstile.siteKey} action={turnstile.action} onToken={onToken} /> : null}{message ? <div role="alert" className="fixed bottom-20 right-2 z-[60] max-w-sm rounded-card bg-card p-4 shadow-card">{message} <Link href="/settings" className="underline">Open Settings</Link></div> : null}</>;
 }
 
