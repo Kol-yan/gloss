@@ -1,0 +1,39 @@
+<!doctype html>
+<!-- A neutral page for store screenshots; see screenshots.md. Not packaged. -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Team notes</title>
+    <style>
+      :root { color-scheme: light; }
+      body { margin: 0; background: #f6f7f9; color: #1f2a30; font: 17px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; }
+      main { max-width: 760px; margin: 0 auto; padding: 40px 24px 64px; }
+      h1 { margin: 0 0 4px; font-size: 28px; }
+      .meta { margin: 0 0 28px; color: #5b6b73; font-size: 15px; }
+      article { margin-bottom: 32px; }
+      label { display: block; margin: 24px 0 8px; font-weight: 600; }
+      textarea, .editor { box-sizing: border-box; width: 100%; padding: 12px 14px; border: 1px solid #c9d1d6; border-radius: 10px; background: #fff; color: inherit; font: inherit; }
+      textarea { min-height: 120px; resize: vertical; }
+      .editor { min-height: 96px; outline: none; }
+      textarea:focus, .editor:focus { border-color: #5b7f99; box-shadow: 0 0 0 3px rgb(91 127 153 / 0.18); }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Team notes</h1>
+      <p class="meta">Weekly update</p>
+
+      <article>
+        <p>Finding the new office was pure serendipity: we walked past it on the way to lunch. The move needs a meticulous plan, so we will keep track of every box and every desk.</p>
+        <p>Please read the checklist before Friday and send your questions to the group.</p>
+      </article>
+
+      <label for="message">Reply to the team</label>
+      <textarea id="message" rows="5"></textarea>
+
+      <label id="notes-label">Your notes</label>
+      <div id="notes" class="editor" contenteditable="true" role="textbox" aria-multiline="true" aria-labelledby="notes-label"></div>
+    </main>
+  </body>
+</html>

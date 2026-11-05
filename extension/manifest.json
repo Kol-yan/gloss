@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "gloss",
   "version": "0.3.0",
-  "description": "Save words to My words, see them on pages you read, and check your English in text fields.",
+  "description": "Checks your English as you type in text fields on any website, and saves words you want to learn to My words.",
   "permissions": [
     "contextMenus",
     "storage"
