@@ -12,8 +12,6 @@ const test = document.querySelector("#test");
 const checksEnabled = document.querySelector("#checks-enabled");
 const offSites = document.querySelector("#off-sites");
 const noOffSites = document.querySelector("#no-off-sites");
-// Granted at install; never removed when the learner switches servers.
-const REQUIRED_PERMISSION = originPermission(DEFAULT_ORIGIN);
 
 async function currentSettings() {
   return readSettings(await ext.storage.local.get({ ...DEFAULT_SETTINGS, checksOffSites: [] }));
@@ -68,19 +66,14 @@ form.addEventListener("submit", async (event) => {
   const permission = originPermission(origin);
   controls.disabled = true;
   try {
-    // The permission prompt must open straight from the click, before any
-    // other await, or browsers refuse it.
-    const granted = await ext.permissions.request({ origins: [permission] });
-    const previous = (await currentSettings()).appOrigin;
+    const granted = await ext.permissions.contains({ origins: [permission] });
+    if (!granted) {
+      status.textContent = "Allow website access in your browser's extension settings, then try again.";
+      return;
+    }
     await ext.storage.local.set({ appOrigin: origin });
     input.value = origin;
-    const old = previous && originPermission(previous);
-    if (old && old !== permission && old !== REQUIRED_PERMISSION) {
-      await ext.permissions.remove({ origins: [old] }).catch(() => false);
-    }
-    status.textContent = granted
-      ? "Server address saved."
-      : "Address saved, but gloss cannot reach it until you allow access. Save again to see the prompt.";
+    status.textContent = "Server address saved.";
   } catch {
     status.textContent = "The address could not be saved. Try again.";
   } finally {

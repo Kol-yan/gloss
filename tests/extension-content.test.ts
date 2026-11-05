@@ -160,13 +160,19 @@ describe("suggestions in a text field", () => {
     expect(edits.fieldKind(field({ type: "TEXT" }))).toBe("input");
     expect(edits.fieldKind(field({ tag: "DIV", isContentEditable: true }))).toBe("editable");
     expect(edits.fieldKind(field({ attributes: { autocomplete: "off" } }))).toBe("input");
+    // Sites with their own proofreading switch the browser's spelling off;
+    // that must not opt them out of gloss (translate.google.com does this).
+    expect(edits.fieldKind(field({ tag: "TEXTAREA", attributes: { spellcheck: "false", autocomplete: "off" } }))).toBe("textarea");
     for (const over of [
       { type: "password" }, { type: "email" }, { type: "search" }, { type: "url" },
       { readOnly: true }, { disabled: true },
-      { attributes: { spellcheck: "false" } }, { attributes: { autocomplete: "cc-number" } },
+      { attributes: { autocomplete: "cc-number" } },
       { attributes: { autocomplete: "username" } }, { attributes: { "data-gloss": "off" } },
       { attributes: { "data-gramm": "false" } }, { attributes: { "data-enable-grammarly": "false" } },
       { tag: "DIV" }, { tag: "SELECT" },
+      // Hidden keyboard sinks of Ace, Monaco and CodeMirror hold no DOM text.
+      { tag: "TEXTAREA", inSeparateEditor: true },
+      { tag: "DIV", isContentEditable: true, inSeparateEditor: true },
     ]) {
       expect(edits.fieldKind(field(over)), JSON.stringify(over)).toBeNull();
     }

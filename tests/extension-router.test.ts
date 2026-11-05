@@ -249,6 +249,10 @@ describe("extension toasts and status lines", () => {
     expect(highlightLine({ on: false, error: "unsupported" })).toContain("cannot highlight");
     expect(checksLine({ on: false, offHere: false, globalOff: true, isApp: false })).toContain("off on all sites");
     expect(checksLine(null)).toBe("");
+    for (const editor of ["Ace", "Monaco", "CodeMirror"]) {
+      expect(checksLine({ on: true, offHere: false, globalOff: false, isApp: false }, editor))
+        .toBe("This kind of editor is not supported yet");
+    }
   });
 });
 

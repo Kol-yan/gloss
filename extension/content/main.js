@@ -47,7 +47,13 @@
       return false;
     }
     if (message.type === "page-state") {
-      sendResponse({ ok: true, host: location.hostname, highlight: highlight.state(), checks: pageChecks });
+      sendResponse({
+        ok: true,
+        host: location.hostname,
+        highlight: highlight.state(),
+        checks: pageChecks,
+        editor: checks.unsupportedEditorOnPage(),
+      });
       return false;
     }
     if (message.type === "highlight") {

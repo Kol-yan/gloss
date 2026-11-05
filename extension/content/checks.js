@@ -49,18 +49,44 @@
     return target instanceof Element ? target : target?.parentElement ?? null;
   }
 
+  // These editors own a document model; editing their DOM or keyboard sink
+  // can desynchronize that model. Keep them out of the generic field adapter.
+  const SEPARATE_EDITORS = [
+    [".ace_editor", "Ace"],
+    [".monaco-editor", "Monaco"],
+    [".cm-editor", "CodeMirror"],
+    [".CodeMirror", "CodeMirror"],
+  ];
+
+  function separateEditorIn(node) {
+    const element = node instanceof Element ? node : node?.parentElement ?? node?.host ?? null;
+    for (const [selector, name] of SEPARATE_EDITORS) {
+      if (element?.closest(selector)) return name;
+    }
+    return null;
+  }
+
+  // The popup reports unsupported editors even before the learner focuses one.
+  function unsupportedEditorOnPage() {
+    for (const [selector, name] of SEPARATE_EDITORS) {
+      if (document.querySelector(selector)) return name;
+    }
+    return null;
+  }
+
   // The element writing checks attach to: the field itself, or the root of
   // the rich text editor the target is in.
   function fieldOf(target) {
     if (!(target instanceof HTMLElement) || ui.isOwnNode(target)) return null;
     if (!target.isContentEditable || target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement) return target;
     let root = target;
-    while (root.parentElement?.isContentEditable) root = root.parentElement;
+    while (root.parentElement?.isContentEditable && root !== document.body) root = root.parentElement;
     return root;
   }
 
   function describe(element) {
     const attributes = {};
+    const separate = separateEditorIn(element) !== null;
     for (const name of ["spellcheck", "autocomplete", "data-gloss", "data-gramm", "data-enable-grammarly"]) {
       const value = element.getAttribute(name);
       if (value !== null) attributes[name] = value;
@@ -72,6 +98,7 @@
       readOnly: element.readOnly === true,
       disabled: element.disabled === true,
       isContentEditable: element.isContentEditable,
+      inSeparateEditor: separate,
       attributes,
     };
   }
@@ -215,14 +242,24 @@
     const target = targetOf(event);
     if (!enabled || !target) return;
     const state = track(target);
-    if (state && sync(state)) schedule(state);
+    if (state) {
+      sync(state);
+      schedule(state);
+    }
   }
 
   function onFocus(event) {
     const target = targetOf(event);
     if (!enabled || !target) return;
-    const state = track(target);
-    if (!state) return;
+    const editor = separateEditorIn(target);
+    const state = editor ? null : track(target);
+    if (!state) {
+      // Either the field is not checked (password, opt-out) or a whole editor
+      // keeps its text out of the DOM. Only the second is worth saying.
+      ui.setNotice(editor ? "writing" : null);
+      return;
+    }
+    ui.setNotice(null);
     sync(state);
     schedule(state);
   }
@@ -277,16 +314,21 @@
     if (element.value !== state.text) return [];
     const { style } = area;
     const mirror = ui.mirrorElement();
+    // Only the text metrics and the padding come from the field. A field with
+    // its own border is drawn inside it, so its border width is not copied.
     for (const name of COPIED_STYLES) mirror.style[name] = style[name];
-    mirror.style.boxSizing = "border-box";
-    mirror.style.width = `${element.clientWidth}px`;
+    mirror.style.boxSizing = "content-box";
+    mirror.style.width = `${element.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)}px`;
     if (state.kind === "input") {
       // Inputs center their single line vertically and never wrap.
       const inner = element.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
       mirror.style.whiteSpace = "pre";
       mirror.style.lineHeight = `${Math.max(inner, 0)}px`;
     } else {
-      mirror.style.whiteSpace = style.whiteSpace === "normal" ? "pre-wrap" : style.whiteSpace;
+      // Long lines break in the field; the mirror must break them the same way.
+      mirror.style.whiteSpace = "pre-wrap";
+      mirror.style.overflowWrap = style.overflowWrap === "normal" ? "break-word" : style.overflowWrap;
+      mirror.style.wordBreak = style.wordBreak === "normal" ? "break-word" : style.wordBreak;
     }
 
     const spans = [];
@@ -526,13 +568,19 @@
       else target.removeEventListener(type, listener, options);
     }
     if (!enabled) {
+      ui.setNotice(null);
       closeCard();
       for (const state of [...fields.values()]) untrack(state);
       return;
     }
     const active = document.activeElement;
     if (active instanceof HTMLElement) onFocus({ target: active });
+    // Text typed while the page was still asking whether checks run here is
+    // not lost: every field that held text gets its check now.
+    for (const state of [...fields.values()]) {
+      if (state.text !== state.checked) schedule(state, 0);
+    }
   }
 
-  globalThis.glossChecks = Object.freeze({ setEnabled, isEnabled: () => enabled });
+  globalThis.glossChecks = Object.freeze({ setEnabled, isEnabled: () => enabled, unsupportedEditorOnPage });
 })();

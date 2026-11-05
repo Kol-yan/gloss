@@ -4,7 +4,6 @@ import {
   ADD_MENU_ID,
   buildCaptureUrl,
   DEFAULT_ORIGIN,
-  IS_DEVELOPMENT_BUILD,
   MAX_SELECTION_LENGTH,
   MAX_WORD_LENGTH,
   MENU_ID,
@@ -15,14 +14,20 @@ import {
 } from "../extension/capture.mjs";
 
 describe("extension capture boundaries", () => {
-  it("defaults to the hosted server, or a local one only in a development build", () => {
-    // Without a Chrome manifest the module cannot ask "is this a store
-    // build?", and only a build that proves it is unpacked may point at a
-    // local server. Everything else, including the published package,
-    // defaults to the hosted server.
-    expect(IS_DEVELOPMENT_BUILD).toBe(false);
+  it("defaults to the hosted server for unpacked installations too", () => {
     expect(DEFAULT_ORIGIN).toBe("https://gloss.li");
     expect(PRODUCTION_ORIGIN).toBe("https://gloss.li");
+  });
+
+  it("keeps the hosted default when Chrome reports an unpacked manifest", async () => {
+    vi.stubGlobal("chrome", { runtime: { getManifest: () => ({ manifest_version: 3 }) } });
+    try {
+      vi.resetModules();
+      const capture = await import("../extension/capture.mjs");
+      expect(capture.DEFAULT_ORIGIN).toBe("https://gloss.li");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("keeps selected text in a fragment and does not include its source page", () => {
@@ -96,14 +101,13 @@ describe("words for Add to gloss", () => {
 describe("extension manifest", () => {
   const manifest = JSON.parse(readFileSync("extension/manifest.json", "utf8"));
 
-  it("asks only for menus, local settings and the two default servers", () => {
+  it("grants web access at installation without per-site prompts", () => {
     expect(manifest.manifest_version).toBe(3);
     expect([...manifest.permissions].sort()).toEqual(["contextMenus", "storage"]);
-    // Both defaults carry the session cookie on first use, so the popup's one
-    // button works before the visitor changes any setting.
-    expect([...manifest.host_permissions].sort()).toEqual(["http://127.0.0.1/*", "http://localhost/*", "https://gloss.li/*"]);
-    expect([...manifest.optional_host_permissions].sort()).toEqual(["https://*/*"]);
-    for (const forbidden of ["tabs", "history", "cookies", "webRequest", "scripting", "<all_urls>"]) {
+    // Checks run on HTTP(S) sites by default, with a per-site opt-out.
+    expect([...manifest.host_permissions].sort()).toEqual(["http://*/*", "https://*/*"]);
+    expect(manifest).not.toHaveProperty("optional_host_permissions");
+    for (const forbidden of ["history", "cookies", "webRequest", "scripting", "<all_urls>"]) {
       expect(JSON.stringify(manifest.permissions)).not.toContain(forbidden);
     }
   });

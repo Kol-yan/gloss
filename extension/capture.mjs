@@ -1,12 +1,7 @@
-// The hosted server is the default. Only an unpacked development build (no
-// update_url, which the stores add) falls back to a local server. Learners can
-// always change the address under Advanced on the options page.
+// Unpacked installations use the same hosted server as store installations.
+// Local servers are an explicit choice in Options > Advanced.
 export const PRODUCTION_ORIGIN = "https://gloss.li";
-export const DEVELOPMENT_ORIGIN = "http://localhost:3000";
-
-const manifest = globalThis.chrome?.runtime?.getManifest?.() ?? globalThis.browser?.runtime?.getManifest?.();
-export const IS_DEVELOPMENT_BUILD = typeof manifest === "object" && manifest?.update_url === undefined;
-export const DEFAULT_ORIGIN = IS_DEVELOPMENT_BUILD ? DEVELOPMENT_ORIGIN : PRODUCTION_ORIGIN;
+export const DEFAULT_ORIGIN = PRODUCTION_ORIGIN;
 export const MAX_SELECTION_LENGTH = 6000;
 // The longest word or phrase "Add to gloss" saves; the server enforces the same.
 export const MAX_WORD_LENGTH = 80;

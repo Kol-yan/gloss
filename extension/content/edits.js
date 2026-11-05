@@ -114,18 +114,23 @@
   // Which kind of field, if any, writing checks attach to. `field` describes
   // an element: tag, type, readOnly, disabled, isContentEditable and
   // attribute values. Passwords, structured data (any autocomplete hint
-  // other than on/off), spellcheck="false" fields and opted-out fields are
-  // never checked.
+  // other than on/off) and opted-out fields are never checked.
+  //
+  // `spellcheck="false"` is not an opt-out: sites that ship their own
+  // proofreading (the bigger writing surfaces among them) switch the browser's
+  // spelling off and used to be skipped silently, so learners saw nothing.
+  // Editors that deliberately reserve a field are excluded by the rules below.
   function fieldKind(field) {
-    if (!field || field.readOnly || field.disabled) return null;
+    if (!field || field.readOnly || field.disabled || field.inSeparateEditor === true) return null;
     const attr = (name) => (typeof field.attributes?.[name] === "string" ? field.attributes[name].trim().toLowerCase() : null);
-    if (attr("spellcheck") === "false") return null;
     if (OPT_OUT.some(([name, value]) => attr(name) === value)) return null;
+    const tag = typeof field.tag === "string" ? field.tag.toUpperCase() : "";
+    const inputType = (field.type ?? "text").toLowerCase();
+    // Structured fields (amounts, addresses, sign-in names) are not prose.
     const autocomplete = attr("autocomplete");
     if (autocomplete && autocomplete !== "on" && autocomplete !== "off") return null;
-    const tag = typeof field.tag === "string" ? field.tag.toUpperCase() : "";
     if (tag === "TEXTAREA") return "textarea";
-    if (tag === "INPUT") return (field.type ?? "text").toLowerCase() === "text" ? "input" : null;
+    if (tag === "INPUT") return inputType === "text" ? "input" : null;
     return field.isContentEditable ? "editable" : null;
   }
 

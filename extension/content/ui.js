@@ -45,7 +45,6 @@
     .card .actions { display: flex; gap: 8px; }
     .line { position: fixed; height: 2px; border-radius: 1px; pointer-events: none; background: #b8402a; }
     .line.style { background: #3b78b5; }
-    .mirror { position: fixed; top: 0; left: 0; visibility: hidden; pointer-events: none; border: 0; margin: 0; }
     @media (prefers-color-scheme: dark) {
       .panel { color: #e9efef; background: #1f282b; border-color: #35444a; }
       button { background: #3fb8aa; border-color: #3fb8aa; color: #10201f; }
@@ -62,11 +61,13 @@
   let host = null;
   let shadow = null;
 
+  // Fixed children use viewport coordinates. A stacking layer keeps solid
+  // underlines above page surfaces without intercepting the page's input.
   function root() {
     if (host?.isConnected) return shadow;
     if (!host) {
       host = document.createElement("gloss-ui");
-      host.setAttribute("style", "all: initial !important; position: fixed !important; top: 0 !important; left: 0 !important; width: 0 !important; height: 0 !important; z-index: 2147483647 !important;");
+      host.setAttribute("style", "all: initial !important; display: block !important; position: fixed !important; top: 0 !important; left: 0 !important; pointer-events: none !important; width: 0 !important; height: 0 !important; overflow: visible !important; z-index: 2147483647 !important;");
       shadow = host.attachShadow({ mode: "closed" });
       const style = document.createElement("style");
       style.textContent = STYLE;
@@ -268,12 +269,59 @@
     else lines.delete(owner);
   }
 
+  // Keep measurement text inside the isolated shadow tree so page CSS cannot
+  // change its font or spans. Subtract its origin when mapping to the field.
   let mirror = null;
 
   function mirrorElement() {
-    if (!mirror) mirror = el("div", { className: "mirror", "aria-hidden": "true" });
+    if (!mirror) {
+      mirror = el("div", { className: "mirror", "aria-hidden": "true" });
+      mirror.style.setProperty("all", "initial");
+      mirror.style.setProperty("position", "fixed", "important");
+      // Still inside the viewport: a placed box far to the left is not laid
+      // out the same way as the field's lines.
+      mirror.style.setProperty("top", "0", "important");
+      mirror.style.setProperty("left", "0", "important");
+      mirror.style.setProperty("visibility", "hidden", "important");
+      mirror.style.setProperty("pointer-events", "none", "important");
+      mirror.style.setProperty("border", "0", "important");
+      mirror.style.setProperty("margin", "0", "important");
+      mirror.style.setProperty("z-index", "-1", "important");
+      mirror.style.setProperty("opacity", "0", "important");
+    }
+    // A page that re-renders <html> may drop it; put it back.
     if (!mirror.isConnected) root().append(mirror);
     return mirror;
+  }
+
+  // Explain skipped code editors when their keyboard sink gains focus.
+  let notice = null;
+
+  function setNotice(kind) {
+    const text = kind === "writing"
+      ? "This kind of editor is not supported yet"
+      : null;
+    if (!text) {
+      notice?.remove();
+      notice = null;
+      return;
+    }
+    if (!notice) {
+      notice = el("p", { className: "notice", role: "status" });
+      notice.style.setProperty("position", "fixed", "important");
+      notice.style.setProperty("left", "16px", "important");
+      notice.style.setProperty("bottom", "16px", "important");
+      notice.style.setProperty("max-width", "min(420px, calc(100vw - 32px))", "important");
+      notice.style.setProperty("padding", "10px 12px", "important");
+      notice.style.setProperty("border-radius", "10px", "important");
+      notice.style.setProperty("font", "13px/1.45 system-ui, sans-serif", "important");
+      notice.style.setProperty("background", "#fffdf9", "important");
+      notice.style.setProperty("color", "#203139", "important");
+      notice.style.setProperty("border", "1px solid #d6cec1", "important");
+      notice.style.setProperty("z-index", "2", "important");
+    }
+    if (notice.textContent !== text) notice.textContent = text;
+    if (!notice.isConnected) root().append(notice);
   }
 
   globalThis.glossUi = Object.freeze({
@@ -283,6 +331,7 @@
     mirrorElement,
     setLines,
     showCard,
+    setNotice,
     showTip,
     showToast,
     cardContains: (node) => Boolean(card && node && card.contains(node)),

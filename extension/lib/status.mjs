@@ -45,9 +45,12 @@ export function highlightLine(state) {
   return state.matches === 1 ? "1 of your words is marked on this page." : `${state.matches} of your words are marked on this page.`;
 }
 
-export function checksLine(checks) {
+// Model-backed editors need a dedicated adapter before gloss can edit them.
+/** @param {string | null} [editor] */
+export function checksLine(checks, editor = null) {
   if (!checks) return "";
   if (checks.isApp) return "The gloss editor checks your writing itself.";
+  if (["Ace", "Monaco", "CodeMirror"].includes(editor)) return "This kind of editor is not supported yet";
   if (checks.globalOff) return "Writing checks are off on all sites. Turn them on in Settings.";
   if (checks.offHere) return "gloss does not check text fields on this site.";
   return "Text fields are checked after you pause typing.";

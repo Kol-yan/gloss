@@ -7,6 +7,7 @@ const $ = (id) => document.getElementById(id);
 
 let tab = null;
 let page = null;
+let needsWorkspace = false;
 
 async function send(message) {
   try {
@@ -33,11 +34,12 @@ function showHighlight(state) {
 }
 
 function showChecks(checks) {
-  $("site").textContent = page?.host ?? "";
-  // The switch shows whether checks run on this site, so on means not off.
-  $("site-off").checked = Boolean(page?.host) && !checks?.offHere;
-  $("site-off").disabled = !page?.host || Boolean(checks?.isApp);
-  $("checks-status").replaceChildren(brandFragment(checksLine(checks)));
+  $("controls-section").hidden = needsWorkspace && !page?.editor;
+  const host = page?.host ?? null;
+  $("site").textContent = host ?? "";
+  $("site-off").checked = Boolean(host && checks && !checks.offHere);
+  $("site-off").disabled = !checks || !host || Boolean(checks.isApp);
+  $("checks-status").replaceChildren(brandFragment(checksLine(checks, page?.editor ?? null)));
 }
 
 // There is no sign-in screen anywhere: a browser without a gloss session gets
@@ -51,13 +53,15 @@ async function loadAccount() {
   $("open-app-row").hidden = !lines.openApp;
   // Without a workspace neither switch can do anything, so the popup stays
   // down to the status line and one button.
-  $("controls-section").hidden = lines.openApp;
+  needsWorkspace = lines.openApp;
+  $("controls-section").hidden = needsWorkspace && !page?.editor;
 }
 
 async function init() {
   void loadAccount();
   try {
     [tab] = await ext.tabs.query({ active: true, currentWindow: true });
+    tab ??= null;
   } catch {
     tab = null;
   }
@@ -84,11 +88,13 @@ $("highlight").addEventListener("change", async () => {
 
 $("site-off").addEventListener("change", async () => {
   const off = !$("site-off").checked;
+  const host = page?.host;
+  if (!host) return;
   try {
     const settings = readSettings(await ext.storage.local.get({ ...DEFAULT_SETTINGS, checksOffSites: [] }));
-    await ext.storage.local.set({ checksOffSites: withSiteChecks(settings, page.host, off) });
-    page.checks = { ...page.checks, offHere: off, on: !off && !page.checks.globalOff && !page.checks.isApp };
-    showChecks(page.checks);
+    await ext.storage.local.set({ checksOffSites: withSiteChecks(settings, host, off) });
+    if (page) page.checks = { ...page.checks, offHere: off, on: !off && !page.checks.globalOff && !page.checks.isApp };
+    showChecks(page?.checks ?? null);
   } catch {
     $("site-off").checked = !off;
     $("checks-status").textContent = "The setting could not be saved. Please try again.";

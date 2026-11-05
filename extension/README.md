@@ -9,6 +9,8 @@ the fields you write in:
 - **Highlight my words**: a switch in the toolbar popup marks the words from
   My words on the current page (whole words, any case). Hover a marked word to
   see its meaning.
+- **Access**: HTTP and HTTPS sites are enabled at installation. No extra
+  permission prompt is needed per site. Turn checks off for a site in the popup.
 - **Writing checks**: in text fields on every site, gloss underlines mistakes
   after you pause typing. Hover or click an underline for a card with
   **Apply** and **Dismiss**. Turn checks off for one site in the popup, or for
@@ -16,13 +18,12 @@ the fields you write in:
 - **Check with gloss** (kept from the first draft): opens the selected text in
   the gloss editor.
 
-The extension talks only to your own gloss server. It has no server address
-built in other than a local development default.
+The extension talks only to your own gloss server. The default is
+`https://gloss.li`, including unpacked installations.
 
 ## Install
 
-Start the gloss server first (for example `npm run dev` in the repository
-root, which serves `http://localhost:3000`), then load the extension.
+Load the extension, then visit `https://gloss.li` to start your workspace.
 
 **Chrome, Edge and other Chromium browsers**
 
@@ -50,10 +51,9 @@ Firefox support is a follow-up: this manifest carries Chrome's
    "Open gloss" whenever this browser has no gloss session yet.
 2. **Server address** (only for a self-hosted server): open the extension's
    settings (popup → **Settings**) → **Advanced**. The default is
-   `https://gloss.li`; an unpacked development build defaults to
-   `http://localhost:3000`. Enter the origin (HTTPS, or HTTP on
-   `localhost`/`127.0.0.1`) and choose **Save address**. The browser then asks
-   to let gloss reach that address.
+   `https://gloss.li` for every installation. To use a local server, explicitly
+   enter its origin (HTTPS, or HTTP on `localhost`/`127.0.0.1`) and choose
+   **Save address**. Web access is already granted at installation.
 3. Choose **Check connection** under the same panel. It should say
    "Signed in as …" with the number of checks left today.
 
@@ -85,9 +85,11 @@ and you are told once.
 Checks work in textareas, single-line text inputs and rich text editors
 (contenteditable). They are never run in password fields, fields with an
 autocomplete hint (names, emails, card numbers, one-time codes and so on),
-fields marked `spellcheck="false"`, read-only fields, fields that opt out with
+read-only fields, fields that opt out with
 `data-gloss="off"`, `data-gramm="false"` or `data-enable-grammarly="false"`,
-or on your gloss server's own pages, which have their own checks.
+or on your gloss server's own pages, which have their own checks. Browser
+`spellcheck="false"` does not turn off gloss. Ace, Monaco and CodeMirror are
+not supported yet; the popup says so.
 
 Corrections are underlined in red, style notes in blue. **Apply** changes the
 text through the browser's own editing command, so the site sees a normal edit
@@ -100,12 +102,12 @@ decisions are recorded on the server like decisions in the editor.
 |---|---|
 | `contextMenus` | The **Add to gloss** and **Check with gloss** items. |
 | `storage` | Your settings, on this device only. |
-| Host access to `http://localhost/*` | Calls to the default local server with your session cookie. |
-| Optional host access (`https://*/*`, `http://127.0.0.1/*`) | Asked for only for the one server address you save; access to a previous custom address is given back when you change it. |
+| Host access to HTTP and HTTPS sites | Automatic checks on web pages and requests to your configured gloss server, including gloss.li and optional localhost. |
 | Content scripts on `http://*/*` and `https://*/*` | Writing checks run on every site by default, and highlighting needs to read the page. Top frames only. |
 
 There is no `tabs`, `history`, `cookies`, `scripting` or `webRequest`
-permission, and no file is exposed to web pages.
+permission: the popup learns the site from its content script. No file is
+exposed to web pages.
 
 ## Privacy
 
@@ -184,9 +186,16 @@ Verified: the unpacked extension in Chromium 153 against a local gloss server,
 after signing in with an invite: saving words through the background, the
 toast and **Add a meaning**, highlighting with hover meanings, underlines,
 Apply (with undo) and Dismiss in a textarea, a text input and a
-contenteditable editor, the popup switches, and that password and
-`spellcheck="false"` fields are never sent. The model reply in that run was a
+contenteditable editor, the popup switches, and that password fields are never sent. The model reply in that run was a
 stand-in, not a real provider. Firefox passes `web-ext lint` with no errors.
+
+Also verified with an unpacked Chromium persistent context: Google Translate's
+`spellcheck="false"` textarea, a wrapping plain textarea, and ilovenote.net with
+Formatting enabled show solid underlines, hover cards and working Apply.
+The plain textarea receives an `insertText` event. The popup reports
+OneCompiler's Monaco editor as unsupported. These runs used deterministic
+proofreading replies, not a live model. The unpacked default is `https://gloss.li`;
+local verification explicitly selected localhost in Advanced.
 
 Not yet verified:
 
@@ -196,7 +205,7 @@ Not yet verified:
 - The real right-click menu (automated browsers cannot open it); its handler
   is unit tested and shares the save and toast path checked above.
 - Popular sites and editors (webmail, chat apps, ProseMirror, Lexical,
-  Draft.js), HTTPS servers with the optional permission prompt, and
+  Draft.js), custom HTTPS servers, and
   visitor-funded (BYOK) workspaces.
 
 ## To do
