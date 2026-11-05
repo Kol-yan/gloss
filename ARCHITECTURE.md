@@ -83,9 +83,11 @@ the daily cap and a guest-enrollment burst alert; the token is never logged.
 Notification errors do not change request results. `npm run spend:report` prints charged daily and period
 spend by role plus guest counts.
 
-BYOK reservations retain daily learner quotas and the global kill switch, but do
-not count toward the operator's dollar ceiling. They are additionally limited to
-six reservations per minute and two pending calls per learner. Each ledger row
+BYOK reservations have no gloss daily usage quotas and do not count toward the
+operator's dollar ceiling. The global kill switch and request-size limits still apply. They are additionally limited to
+six reservations per minute and two pending calls per learner. Quota responses
+mark BYOK as `unlimited`; the web UI hides usage counters. Numeric quota fields
+remain parseable by older clients and do not impose a server-side BYOK limit. Each ledger row
 records its immutable funding source, so hosted and visitor costs stay separate.
 
 The visitor's OpenRouter key is stored in their browser and sent transiently in

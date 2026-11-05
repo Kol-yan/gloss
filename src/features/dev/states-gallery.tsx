@@ -29,7 +29,7 @@ const TABS = [
   { id: "try", label: "Try it yourself" },
   { id: "written", label: "Written feedback" },
   { id: "speech", label: "Speech states" },
-  { id: "history", label: "My expressions" },
+  { id: "history", label: "My words" },
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
 

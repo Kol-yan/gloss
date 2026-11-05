@@ -27,15 +27,15 @@ export function ExpressionsScreen({ items }: { items: ExpressionHistory[] }) {
   if (items.length === 0) {
     return (
       <EmptyState
-        eyebrow="My expressions"
-        title="No expressions yet"
+        eyebrow="My words"
+        title="No words yet"
         action={
           <Link href="/editor" className={buttonClasses("primary")}>
             Open the editor
           </Link>
         }
       >
-        Expressions you accept in the editor appear here, with what you did with each one.
+        Words and phrases you accept in the editor appear here, with what you did with each one.
       </EmptyState>
     );
   }
@@ -43,7 +43,7 @@ export function ExpressionsScreen({ items }: { items: ExpressionHistory[] }) {
   return (
     <div className="mx-auto w-full max-w-2xl px-4 py-4">
       <p className="eyebrow">History</p>
-      <h1 className="mt-1 text-3xl font-semibold leading-tight tracking-tight">My expressions</h1>
+      <h1 className="mt-1 text-3xl font-semibold leading-tight tracking-tight">My words</h1>
       <ul className="mt-4 flex flex-col gap-3">
         {items.map((item) => {
           const { expression } = item;

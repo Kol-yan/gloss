@@ -41,6 +41,7 @@ export type EditorScreenProps = {
   initialSuggestions?: Suggestion[];
   // Checks left today; null when unknown. A number reported by a check wins over this.
   checksLeft?: number | null;
+  unlimitedChecks?: boolean;
   // False when the server says cloud checking is off today. Local checks still work.
   aiAvailable?: boolean;
   initialCheckStatus?: CheckStatus;
@@ -71,6 +72,7 @@ export function EditorScreen({
   initialText = "",
   initialSuggestions = [],
   checksLeft: checksLeftProp = null,
+  unlimitedChecks = false,
   aiAvailable = true,
   initialCheckStatus = "idle",
   checkWithAi,
@@ -93,7 +95,7 @@ export function EditorScreen({
   const [status, setStatus] = useState<CheckStatus>(initialCheckStatus);
   // Set by a finished check; until then the number from the page is used.
   const [reportedChecksLeft, setReportedChecksLeft] = useState<number | null>(null);
-  const checksLeft = reportedChecksLeft ?? checksLeftProp;
+  const checksLeft = unlimitedChecks ? null : reportedChecksLeft ?? checksLeftProp;
   const [checkedClean, setCheckedClean] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [notice, setNotice] = useState<RailNotice | null>(null);
@@ -157,7 +159,10 @@ export function EditorScreen({
   });
 
   // Stage 1: the detector looks at changed sentences after a typing pause.
-  const [detector] = useState(() => new SentenceDetector({ pauseMs: detectPauseMs }));
+  // Funding changes clear a previous hosted quota stop without discarding the draft.
+  const { detector } = useMemo(() => ({
+    unlimitedChecks, detector: new SentenceDetector({ pauseMs: detectPauseMs }),
+  }), [detectPauseMs, unlimitedChecks]);
   useEffect(() => {
     detector.setDetect(detectSentences);
   }, [detector, detectSentences]);
@@ -607,7 +612,7 @@ export function EditorScreen({
   };
 
   // Without a cloud checker wired in, the button explains instead of pretending.
-  let effectiveStatus: CheckStatus = checkWithAi && aiAvailable ? status : "unavailable";
+  let effectiveStatus: CheckStatus = checkWithAi && aiAvailable ? (unlimitedChecks && status === "quota" ? "idle" : status) : "unavailable";
   if (effectiveStatus === "idle" && checksLeft !== null && checksLeft <= 0) effectiveStatus = "quota";
 
   const textIsEmpty = doc.text.trim() === "";

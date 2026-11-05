@@ -1,7 +1,7 @@
 import { expect, saveExpression, test } from "./fixtures";
 
 test("saves an expression from a suggestion and lists it", async ({ editor, page }) => {
-  await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "My expressions" }).click();
+  await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "My words" }).click();
   await expect(page.getByRole("heading", { name: "No expressions yet" })).toBeVisible();
   await page.getByRole("link", { name: "Open the editor" }).click();
 
@@ -11,7 +11,7 @@ test("saves an expression from a suggestion and lists it", async ({ editor, page
 
   // The practice session has no site navigation, so go back to the list directly.
   await page.goto("/expressions");
-  await expect(page.getByRole("heading", { name: "My expressions", level: 1 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "My words", level: 1 })).toBeVisible();
   const item = page.getByRole("region", { name: "resolve" });
   await expect(item).toHaveCount(1);
   await expect(item).toContainText("to find a solution to a problem");

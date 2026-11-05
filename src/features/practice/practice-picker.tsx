@@ -51,7 +51,7 @@ export function PracticePicker() {
         title="Nothing is due right now"
         action={
           <Link href="/expressions" className={buttonClasses("primary")}>
-            See my expressions
+            See my words
           </Link>
         }
       >
