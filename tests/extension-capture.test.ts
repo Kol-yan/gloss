@@ -80,7 +80,7 @@ describe("extension capture boundaries", () => {
   });
 });
 
-describe("words for Add to gloss", () => {
+describe("words for Add to My words", () => {
   it("keeps one line without the punctuation a selection picks up", () => {
     expect(prepareWord("  serendipity, ")).toEqual({ ok: true, text: "serendipity" });
     expect(prepareWord("“get the ball\n rolling.”")).toEqual({ ok: true, text: "get the ball rolling" });
@@ -187,10 +187,10 @@ describe("extension background wiring", () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
-  it("registers Add to gloss and Check with gloss for selections only", async () => {
+  it("registers Add to My words and Check with gloss for selections only", async () => {
     await installed();
     expect(createMenu.mock.calls.map(([item]) => item)).toEqual([
-      { id: ADD_MENU_ID, title: "Add to gloss", contexts: ["selection"] },
+      { id: ADD_MENU_ID, title: "Add to My words", contexts: ["selection"] },
       { id: MENU_ID, title: "Check with gloss", contexts: ["selection"] },
     ]);
   });
@@ -225,7 +225,7 @@ describe("extension background wiring", () => {
     await vi.waitFor(() => expect(sendToTab).toHaveBeenCalledOnce());
     expect(sendToTab.mock.calls[0][1].toast).toEqual({
       tone: "error",
-      text: "Sign in to gloss in this browser, then try again.",
+      text: "Open gloss in this browser to start.",
       action: "app",
     });
   });

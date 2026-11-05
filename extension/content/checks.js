@@ -326,7 +326,7 @@
       mirror.style.lineHeight = `${Math.max(inner, 0)}px`;
     } else {
       // Long lines break in the field; the mirror must break them the same way.
-      mirror.style.whiteSpace = "pre-wrap";
+      mirror.style.whiteSpace = element.wrap === "off" || style.whiteSpace === "pre" ? "pre" : "pre-wrap";
       mirror.style.overflowWrap = style.overflowWrap === "normal" ? "break-word" : style.overflowWrap;
       mirror.style.wordBreak = style.wordBreak === "normal" ? "break-word" : style.wordBreak;
     }
@@ -344,14 +344,16 @@
     }
     mirror.append(state.text.slice(at));
 
+    // Client rects already include any scroll in the reused mirror. Convert
+    // back to text coordinates before applying the field's own scroll.
     const origin = mirror.getBoundingClientRect();
     const marks = [];
     for (const { suggestion, span } of spans) {
       const rects = [];
       for (const r of span.getClientRects()) {
         const rect = clip({
-          left: area.left + r.left - origin.left - element.scrollLeft,
-          top: area.top + r.top - origin.top - element.scrollTop,
+          left: area.left + r.left - origin.left + mirror.scrollLeft - element.scrollLeft,
+          top: area.top + r.top - origin.top + mirror.scrollTop - element.scrollTop,
           width: r.width,
           height: r.height,
         }, area);

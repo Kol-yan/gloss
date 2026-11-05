@@ -80,7 +80,7 @@ async function init() {
 $("highlight").addEventListener("change", async () => {
   const on = $("highlight").checked;
   $("highlight").disabled = true;
-  $("highlight-status").textContent = on ? "Looking for your words…" : "";
+  $("highlight-status").textContent = on ? "Looking for My words…" : "";
   const answer = await tabMessage({ type: "highlight", on });
   showHighlight(answer?.ok ? answer.highlight : { on: false, error: "unavailable" });
   $("highlight").disabled = false;

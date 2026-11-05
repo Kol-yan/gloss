@@ -173,7 +173,7 @@ describe("extension message router", () => {
     expect((await router.handle({ type: "check", text: "Second text here." }, me)).ok).toBe(true);
 
     api.check.mockResolvedValueOnce({ ok: false, error: "signed_out" } as never);
-    expect((await router.handle({ type: "check", text: "Third text here." }, me)).notice).toContain("Sign in");
+    expect((await router.handle({ type: "check", text: "Third text here." }, me)).notice).toBe("Open gloss in this browser to start.");
     advance(61_000);
     api.check.mockResolvedValueOnce({ ok: false, error: "signed_out" } as never);
     // Once the pause is over the check is tried again, but the same problem is not announced twice.
@@ -235,7 +235,7 @@ describe("extension toasts and status lines", () => {
 
   it("describes the account, highlighting and checks", () => {
     expect(accountLines({ ok: true, name: "Ana", aiEnabled: true, byok: false, checks: { used: 25, limit: 20 } }).text)
-      .toBe("Signed in as Ana · 0 of 20 checks left today");
+      .toBe("Connected to gloss · 0 of 20 checks left today");
     expect(accountLines({ ok: true, name: "", aiEnabled: true, byok: true, checks: null }).note).toContain("own key");
     // Signed out is never a dead end: one button opens the site, which starts
     // a workspace, and no line ever asks for an invite.
@@ -243,8 +243,8 @@ describe("extension toasts and status lines", () => {
     expect(signedOut).toMatchObject({ openApp: true });
     expect(signedOut.text).not.toMatch(/invite|not signed in/i);
     expect(accountLines({ ok: false, error: "strange" }).text).toContain("not available");
-    expect(highlightLine({ on: true, matches: 1, words: 3 })).toBe("1 of your words is marked on this page.");
-    expect(highlightLine({ on: true, matches: 4, words: 3 })).toBe("4 of your words are marked on this page.");
+    expect(highlightLine({ on: true, matches: 1, words: 3 })).toBe("1 word from My words is marked on this page.");
+    expect(highlightLine({ on: true, matches: 4, words: 3 })).toBe("4 words from My words are marked on this page.");
     expect(highlightLine({ on: true, matches: 0, words: 0 })).toContain("My words is empty");
     expect(highlightLine({ on: false, error: "unsupported" })).toContain("cannot highlight");
     expect(checksLine({ on: false, offHere: false, globalOff: true, isApp: false })).toContain("off on all sites");

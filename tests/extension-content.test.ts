@@ -179,3 +179,45 @@ describe("suggestions in a text field", () => {
     expect(edits.fieldKind(null)).toBeNull();
   });
 });
+
+describe("scrolled field underlines", () => {
+  it.each(["input", "textarea"])("keeps the underline on goed in a horizontally scrolled %s", (kind) => {
+    const text = "I went home and goed to sleep.";
+    const start = text.indexOf("goed");
+    const suggestion = { id: "goed", start, end: start + 4 };
+    const mirror = {
+      style: {} as Record<string, string>, scrollLeft: 40, scrollTop: 12,
+      append: () => undefined, replaceChildren: () => undefined,
+      getBoundingClientRect: () => ({ left: 10, top: 20 }),
+    };
+    const context: Record<string, unknown> = {
+      glossUi: { mirrorElement: () => mirror },
+      document: {
+        createElement: () => ({
+          textContent: "",
+          // Monospace glyphs at their scrolled mirror position.
+          getClientRects: () => [{ left: 10 + start * 10 - mirror.scrollLeft, top: 20 + 4 - mirror.scrollTop, width: 40, height: 18 }],
+        }),
+      },
+      window: {},
+    };
+    // Expose the private measurement function only in this isolated test realm.
+    const source = readFileSync("extension/content/checks.js", "utf8")
+      .replace("globalThis.glossChecks = Object.freeze({", "globalThis.measureField = measureField; globalThis.glossChecks = Object.freeze({");
+    runInNewContext(source, context);
+    const measure = context.measureField as (state: unknown, area: unknown) => { rects: { left: number; top: number }[] }[];
+    const element = { value: text, clientWidth: 200, clientHeight: 30, scrollLeft: 100, scrollTop: 2, wrap: "off" };
+    const area = {
+      left: 100, top: 50, right: 300, bottom: 80,
+      style: { paddingLeft: "0", paddingRight: "0", paddingTop: "0", paddingBottom: "0", whiteSpace: "pre", overflowWrap: "normal", wordBreak: "normal" },
+    };
+    const marks = measure({ element, text, kind, suggestions: [suggestion] }, area);
+    expect(marks[0].rects[0].left).toBe(100 + start * 10 - element.scrollLeft);
+    expect(marks[0].rects[0].top).toBe(52);
+    expect(mirror.style.whiteSpace).toBe("pre");
+    // Scroll again without a new check: the same word must move with its field.
+    element.scrollLeft = 130;
+    expect(measure({ element, text, kind, suggestions: [suggestion] }, area)[0].rects[0].left)
+      .toBe(100 + start * 10 - element.scrollLeft);
+  });
+});

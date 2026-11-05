@@ -44,7 +44,7 @@ async function createMenus() {
   }
   // Reading lastError consumes a platform error without logging selection data.
   const done = () => { void ext.runtime.lastError; };
-  ext.contextMenus.create({ id: ADD_MENU_ID, title: "Add to gloss", contexts: ["selection"] }, done);
+  ext.contextMenus.create({ id: ADD_MENU_ID, title: "Add to My words", contexts: ["selection"] }, done);
   ext.contextMenus.create({ id: MENU_ID, title: "Check with gloss", contexts: ["selection"] }, done);
 }
 

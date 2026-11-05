@@ -36,11 +36,11 @@ const SAVE_ERRORS = {
   settings: { text: "Set your gloss server address in the extension settings.", action: "options" },
   not_allowed: { text: "Allow gloss to reach your server in the extension settings.", action: "options" },
   unreachable: { text: "Could not reach your gloss server. Check that it is running." },
-  signed_out: { text: "Sign in to gloss in this browser, then try again.", action: "app" },
+  signed_out: { text: "Open gloss in this browser to start.", action: "app" },
   invalid: { text: "Select a word or a short phrase to add." },
 };
 
-// What the page shows after "Add to gloss". Learner-facing, short, and never
+// What the page shows after "Add to My words". Learner-facing, short, and never
 // a raw server message.
 export function saveToast(result, word) {
   if (result.ok) {
@@ -62,7 +62,7 @@ export function selectionToast(reason) {
 }
 
 const CHECK_NOTICES = {
-  signed_out: "Sign in to gloss in this browser to check your writing.",
+  signed_out: "Open gloss in this browser to start.",
   quota: "Today's writing checks are used up. They start again at midnight UTC.",
   paused: "Cloud writing checks are paused right now.",
   not_allowed: "Allow gloss to reach your server in the extension settings.",

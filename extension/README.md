@@ -3,10 +3,10 @@
 A Manifest V3 extension for Chrome that brings gloss to the pages you read and
 the fields you write in:
 
-- **Add to gloss**: select a word or a short phrase on any site, right-click,
-  and choose **Add to gloss**. It is saved to My words, and a small toast
+- **Add to My words**: select a word or a short phrase on any site, right-click,
+  and choose **Add to My words**. It is saved to My words, and a small toast
   confirms it and lets you add a meaning in your own words.
-- **Highlight my words**: a switch in the toolbar popup marks the words from
+- **Highlight My words**: a switch in the toolbar popup marks the words from
   My words on the current page (whole words, any case). Hover a marked word to
   see its meaning.
 - **Access**: HTTP and HTTPS sites are enabled at installation. No extra
@@ -15,11 +15,11 @@ the fields you write in:
   after you pause typing. Hover or click an underline for a card with
   **Apply** and **Dismiss**. Turn checks off for one site in the popup, or for
   all sites in the settings.
-- **Check with gloss** (kept from the first draft): opens the selected text in
+- **Check with gloss**: opens the selected text in
   the gloss editor.
 
-The extension talks only to your own gloss server. The default is
-`https://gloss.li`, including unpacked installations.
+The extension talks only to the configured gloss server. Its built-in default
+is `https://gloss.li`, including unpacked installations.
 
 ## Install
 
@@ -30,18 +30,8 @@ Load the extension, then visit `https://gloss.li` to start your workspace.
 1. Open `chrome://extensions` and turn on **Developer mode**.
 2. Choose **Load unpacked** and select this `extension` folder.
 
-**Firefox** (128 or later)
-
-1. Open `about:debugging#/runtime/this-firefox`.
-2. Choose **Load Temporary Add-on…** and select `extension/manifest.json`.
-3. In `about:addons` → gloss → **Permissions**, allow access to websites if
-   Firefox has not granted it. Highlighting and checks need it.
-
-A temporary Firefox add-on is removed when Firefox quits.
-
-Firefox support is a follow-up: this manifest carries Chrome's
-`background.service_worker` only. A Firefox build needs its own manifest with a
-`background.scripts` entry.
+**Firefox is not supported yet.** This manifest uses Chrome's service worker;
+a Firefox build needs a separate background-script manifest and verification.
 
 ## Set up
 
@@ -55,21 +45,21 @@ Firefox support is a follow-up: this manifest carries Chrome's
    enter its origin (HTTPS, or HTTP on `localhost`/`127.0.0.1`) and choose
    **Save address**. Web access is already granted at installation.
 3. Choose **Check connection** under the same panel. It should say
-   "Signed in as …" with the number of checks left today.
+   "Connected to gloss" with the number of checks left today.
 
 Pages that were open before the extension was installed or updated need a
 reload before highlighting and checks work there.
 
 ## Using it
 
-**Add to gloss.** The selection is trimmed to one line without surrounding
+**Add to My words.** The selection is trimmed to one line without surrounding
 punctuation ("serendipity," becomes "serendipity") and may be up to 80
 characters. Saving the same word again, in any case, does not create a
 duplicate. A word saved from a page starts without a meaning; choose
-**Add a meaning** in the toast to give it one. Chrome and Firefox show the two
+**Add a meaning** in the toast to give it one. Chromium browsers show the two
 gloss menu items under a "gloss" submenu.
 
-**Highlight my words.** The switch applies to the current page until it is
+**Highlight My words.** The switch applies to the current page until it is
 switched off or the page is reloaded. Text in inputs, editable areas, scripts,
 styles, code blocks and similar elements is never marked. A word added while
 highlighting is on appears right away.
@@ -79,7 +69,7 @@ field you are in (up to 6,000 characters) is checked on your server. Each
 check counts toward your daily allowance, so the extension waits at least
 eight seconds between checks of one field, sends at most six checks a minute
 in total, and reuses the answer for text it checked recently. When the allowance is used up,
-when you are signed out, or when cloud checks are paused, checks stop quietly
+when this browser has no gloss session, or when cloud checks are paused, checks stop quietly
 and you are told once.
 
 Checks work in textareas, single-line text inputs and rich text editors
@@ -100,9 +90,9 @@ decisions are recorded on the server like decisions in the editor.
 
 | Permission | Why |
 |---|---|
-| `contextMenus` | The **Add to gloss** and **Check with gloss** items. |
+| `contextMenus` | The **Add to My words** and **Check with gloss** items. |
 | `storage` | Your settings, on this device only. |
-| Host access to HTTP and HTTPS sites | Automatic checks on web pages and requests to your configured gloss server, including gloss.li and optional localhost. |
+| `http://*/*`, `https://*/*` host permissions | Automatic checks on web pages and requests to your configured gloss server, including gloss.li and optional localhost. |
 | Content scripts on `http://*/*` and `https://*/*` | Writing checks run on every site by default, and highlighting needs to read the page. Top frames only. |
 
 There is no `tabs`, `history`, `cookies`, `scripting` or `webRequest`
@@ -125,12 +115,12 @@ exposed to web pages.
   scripts can still tell which of its words are highlighted. That is why
   highlighting is off until you switch it on for a page.
 - **Check with gloss** puts the selection in the editor's URL fragment, which
-  the browser may keep in history. Use **Add to gloss** or the in-field checks
+  the browser may keep in history. Use **Add to My words** or the in-field checks
   to avoid that.
 
-Firefox lists the extension as transmitting website content and personal
-communications (`data_collection_permissions`), because typed text goes to your
-gloss server for checking.
+The manifest also declares Firefox data-collection metadata for website content
+and personal communications, because typed text goes to the configured gloss
+server for checking. This metadata does not make Firefox supported.
 
 ## How it works
 
@@ -142,9 +132,9 @@ check results by text, and pauses after errors whose answer would not change.
 
 | Server route | Used for |
 |---|---|
-| `GET /api/me` | Popup and settings: who is signed in, checks left today. |
+| `GET /api/me` | Popup and settings: connection status and checks left today. |
 | `GET /api/expressions` | The word list for highlighting. |
-| `POST /api/expressions/capture` | **Add to gloss** and **Add a meaning**. |
+| `POST /api/expressions/capture` | **Add to My words** and **Add a meaning**. |
 | `POST /api/proofread` | Writing checks. |
 | `POST /api/suggestions/{id}` | Apply (`accepted`) and Dismiss (`rejected`). |
 
@@ -152,9 +142,9 @@ Files:
 
 | File | Role |
 |---|---|
-| `manifest.json` | Chrome service worker and Firefox background script, both `background.js`. |
+| `manifest.json` | Chrome service worker, `background.js`, and content-script registration. |
 | `background.js` | Context menus, toasts, message routing. |
-| `capture.mjs` | Server address rules, words for **Add to gloss**, the editor capture URL. |
+| `capture.mjs` | Server address rules, words for **Add to My words**, the editor capture URL. |
 | `lib/api.mjs` | Requests to the server and reading their answers. |
 | `lib/router.mjs` | Background message handling, caches, pauses, toast wording. |
 | `lib/settings.mjs` | Stored settings and per-site checks. |
@@ -183,11 +173,11 @@ context the way the browser does. The capture route has its own tests in
 ## Status
 
 Verified: the unpacked extension in Chromium 153 against a local gloss server,
-after signing in with an invite: saving words through the background, the
+with an established workspace: saving words through the background, the
 toast and **Add a meaning**, highlighting with hover meanings, underlines,
 Apply (with undo) and Dismiss in a textarea, a text input and a
 contenteditable editor, the popup switches, and that password fields are never sent. The model reply in that run was a
-stand-in, not a real provider. Firefox passes `web-ext lint` with no errors.
+stand-in, not a real provider.
 
 Also verified with an unpacked Chromium persistent context: Google Translate's
 `spellcheck="false"` textarea, a wrapping plain textarea, and ilovenote.net with
@@ -199,9 +189,7 @@ local verification explicitly selected localhost in Advanced.
 
 Not yet verified:
 
-- A real Chrome or Edge install, and any run in Firefox. In Firefox, whether
-  the session cookie is sent with the extension's requests (the extension
-  relies on it) still needs to be confirmed.
+- A real Chrome or Edge install. Firefox is not supported yet.
 - The real right-click menu (automated browsers cannot open it); its handler
   is unit tested and shares the save and toast path checked above.
 - Popular sites and editors (webmail, chat apps, ProseMirror, Lexical,
@@ -239,6 +227,6 @@ Not yet verified:
     across elements are not matched; offer "always highlight on this site".
 12. **Visitor (BYOK) workspaces**: checks need the visitor's own key, which
     stays in the editor tab; this needs a design.
-13. **Sign-in**: a pairing token for the extension would not depend on how
+13. **Connection**: a pairing token for the extension would not depend on how
     each browser treats cookies on extension requests.
 14. **Packaging**: icons, a zip for store review, store listings.

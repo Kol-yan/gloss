@@ -15,7 +15,7 @@ export function accountLines(status) {
       openApp: status?.error === "signed_out",
     };
   }
-  const who = status.name ? `Signed in as ${status.name}` : "Signed in";
+  const who = "Connected to gloss";
   const left = status.checks ? Math.max(0, status.checks.limit - status.checks.used) : null;
   const text = left === null ? who : `${who} · ${left} of ${status.checks.limit} checks left today`;
   let note = "";
@@ -28,7 +28,7 @@ export function accountLines(status) {
 
 const HIGHLIGHT_ERRORS = {
   unsupported: "This browser cannot highlight words yet.",
-  signed_out: "Sign in to gloss to see your words here.",
+  signed_out: "Open gloss in this browser to see My words here.",
   settings: "Set your gloss server address in Settings.",
   not_allowed: "Allow gloss to reach your server in Settings.",
   unreachable: "Your gloss server is not answering.",
@@ -37,12 +37,12 @@ const HIGHLIGHT_ERRORS = {
 export function highlightLine(state) {
   if (!state?.on) {
     return state?.error
-      ? HIGHLIGHT_ERRORS[state.error] ?? "Your words could not be loaded. Please try again."
+      ? HIGHLIGHT_ERRORS[state.error] ?? "My words could not be loaded. Please try again."
       : "On this page only. Nothing about the page is saved.";
   }
-  if (state.words === 0) return "My words is empty. Select a word on a page and choose Add to gloss.";
-  if (state.matches === 0) return "None of your words are on this page.";
-  return state.matches === 1 ? "1 of your words is marked on this page." : `${state.matches} of your words are marked on this page.`;
+  if (state.words === 0) return "My words is empty. Select a word on a page and choose Add to My words.";
+  if (state.matches === 0) return "No words from My words are on this page.";
+  return state.matches === 1 ? "1 word from My words is marked on this page." : `${state.matches} words from My words are marked on this page.`;
 }
 
 // Model-backed editors need a dedicated adapter before gloss can edit them.
