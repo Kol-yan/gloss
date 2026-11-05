@@ -1,4 +1,7 @@
-@import "tailwindcss";
+@import "tailwindcss" source(none);
+/* Scan only the web app for class names. Without this, Tailwind walks the
+   whole repository, including the desktop build output (gigabytes). */
+@source "../";
 
 @font-face {
   font-family: "Brygada 1918";
