@@ -170,6 +170,20 @@ positions, message routing, settings, status wording) is covered by
 context the way the browser does. The capture route has its own tests in
 `tests/server/expressions-capture.test.ts`.
 
+## Store package
+
+```bash
+npm run extension:zip
+```
+
+writes `dist/gloss-extension-<version>.zip` for the Chrome Web Store. It
+copies this folder without `README.md`, `CHANGELOG`, `store/` and tests,
+checks that every file the manifest names is included and that the default
+server is `https://gloss.li`, and writes a store manifest without the
+Firefox-only `browser_specific_settings` block. Permissions are unchanged.
+The listing text, permission justifications, data disclosure and shot list
+are in `store/`.
+
 ## Status
 
 Verified: the unpacked extension in Chromium 153 against a local gloss server,
@@ -229,4 +243,4 @@ Not yet verified:
     stays in the editor tab; this needs a design.
 13. **Connection**: a pairing token for the extension would not depend on how
     each browser treats cookies on extension requests.
-14. **Packaging**: icons, a zip for store review, store listings.
+14. **Store**: a 440×280 promo tile and the screenshots in `store/screenshots.md`.

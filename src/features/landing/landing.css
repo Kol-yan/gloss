@@ -185,6 +185,11 @@
   font-size: 14px;
 }
 
+.landing-footer-links {
+  display: inline-flex;
+  gap: 20px;
+}
+
 .landing-footer a {
   color: var(--color-accent-strong);
   font-weight: 600;
