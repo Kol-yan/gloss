@@ -198,6 +198,15 @@ describe("guest access", () => {
     });
   });
 
+  it("groups IPv6 privacy addresses by /64 without changing IPv4 buckets", () => {
+    const config = { ...getConfig(), byokTrustProxyHeaders: true };
+    const hash = (ip: string) => guestClientIpHash(request({}, 3000, ip), config);
+    expect(hash("2001:db8:abcd:1234::1")).toBe(hash("2001:0db8:abcd:1234:ffff::99"));
+    expect(hash("2001:db8:abcd:1234::1")).not.toBe(hash("2001:db8:abcd:1235::1"));
+    expect(hash("::ffff:192.0.2.1")).toBe(hash("::ffff:192.0.2.2"));
+    expect(hash("192.0.2.1")).not.toBe(hash("192.0.2.2"));
+  });
+
   it("uses one fail-closed bucket when the proxy IP header is not trusted", () => {
     const config = getConfig();
     const first = guestClientIpHash(request({}, 3000, "192.0.2.1"), config);
@@ -241,6 +250,24 @@ describe("desktop guest access", () => {
     expect(body).toMatchObject({ accessMode: "hosted", learner: { displayName: "Guest" } });
     expect(response.cookies.get(getSessionCookieName(desktopRequest()))).toMatchObject({ name: "glossy_session_3000", httpOnly: true });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("caps desktop enrollment globally across IPs and returns Retry-After", async () => {
+    await withEnv({ BYOK_TRUST_PROXY_HEADERS: "true", DESKTOP_GUEST_HOURLY_LIMIT: "2" }, async () => {
+      const responses = await Promise.all(["192.0.2.1", "192.0.2.2", "192.0.2.3"].map(ip => desktopGuestRoute(desktopRequest(ip))));
+      expect(responses.map(r => r.status)).toEqual([200, 200, 429]);
+      expect(Number(responses[2].headers.get("retry-after"))).toBeGreaterThan(0);
+      expect(Number(getDb().prepare("SELECT COUNT(*) AS n FROM guest_enrollments").get()?.n)).toBe(2);
+    });
+  });
+
+  it("shares the IPv6 daily bucket with web enrollment", async () => {
+    await withEnv({ BYOK_TRUST_PROXY_HEADERS: "true", GUEST_DAILY_IP_LIMIT: "1" }, async () => {
+      expect((await guestRoute(request({}, 3000, "2001:db8:1:2::1"))).status).toBe(200);
+      const blocked = await desktopGuestRoute(desktopRequest("2001:db8:1:2::2"));
+      expect(blocked.status).toBe(429);
+      expect(Number(blocked.headers.get("retry-after"))).toBeGreaterThan(0);
+    });
   });
 
   it("still refuses a crossed origin and a non-empty body", async () => {

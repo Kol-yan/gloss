@@ -1,3 +1,4 @@
+import { PROVIDER_KEY_MESSAGE } from "@/shared/provider-key";
 // Typed browser requests. Credentials are attached only to explicit cloud calls;
 // shared response schemas keep malformed results out of the interface.
 import { z } from "zod";
@@ -42,7 +43,7 @@ const GuestAccessResponse = z.object({
 export type GuestBootstrapResult =
   | { kind: "ready" }
   | { kind: "turnstile"; siteKey: string; action?: string }
-  | { kind: "unavailable" };
+  | { kind: "unavailable"; message?: string };
 let sessionEpoch = 0;
 let meRequest: Promise<ApiResult<MeResponse>> | null = null;
 let guestBootstrapRequest: Promise<GuestBootstrapResult> | null = null;
@@ -142,7 +143,7 @@ export function bootstrapGuestAccess(): Promise<GuestBootstrapResult> {
     };
 
     const created = await createGuestSession();
-    return created.ok ? { kind: "ready" } : { kind: "unavailable" };
+    return created.ok ? { kind: "ready" } : { kind: "unavailable", message: created.message };
   })();
   guestBootstrapRequest = request;
   void request.then(() => {
@@ -193,7 +194,7 @@ async function paidCall<S extends z.ZodType>(path: string, init: RequestInit, sc
 export async function enrollByok(value: string): Promise<ApiResult<MeResponse>> {
   const key = value.trim();
   if (!isProviderKey(key)) {
-    return { ok: false, code: "invalid_request", message: "Enter your OpenRouter key without spaces." };
+    return { ok: false, code: "invalid_request", message: PROVIDER_KEY_MESSAGE };
   }
   // Mark the intent before waiting for an in-flight session read or guest
   // creation. Stale reads and guest bootstrap results must not win this race.

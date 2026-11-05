@@ -38,8 +38,11 @@ export function AccessBootstrap() {
     siteKey: string;
     action?: string;
   } | null>(null);
-  const onToken = useCallback((token: string) => {
-    void createGuestSession(token);
+  const [message, setMessage] = useState<string | null>(null);
+  const onToken = useCallback(async (token: string) => {
+    const result = await createGuestSession(token);
+    setMessage(result.ok ? null : result.message);
+    return result.ok;
   }, []);
 
   useEffect(() => {
@@ -47,6 +50,8 @@ export function AccessBootstrap() {
     if (pathname === "/join" || pathname.startsWith("/join/")) return () => { active = false; };
 
     void bootstrapGuestAccess().then((result) => {
+      if (active && result.kind === "ready") setMessage(null);
+      if (active && result.kind === "unavailable") setMessage(result.message ?? "Free guest access is unavailable. Open Settings to use your own OpenRouter key.");
       if (active && result.kind === "turnstile") {
         setRequestedTurnstile({
           pathname,
@@ -62,13 +67,15 @@ export function AccessBootstrap() {
   const turnstile = requestedTurnstile?.pathname === pathname && requestedTurnstile.sessionRevision === sessionRevision
     ? requestedTurnstile
     : null;
-  if (!turnstile || pathname === "/join" || pathname.startsWith("/join/")) return null;
-  return <TurnstileWidget siteKey={turnstile.siteKey} action={turnstile.action} onToken={onToken} />;
+  if (pathname === "/join" || pathname.startsWith("/join/")) return null;
+  return <>{turnstile ? <TurnstileWidget siteKey={turnstile.siteKey} action={turnstile.action} onToken={onToken} /> : null}{message ? <div role="alert" className="fixed bottom-20 right-2 z-[60] max-w-sm rounded-card bg-card p-4 shadow-card">{message} <Link href="/settings" className="underline">Open Settings</Link></div> : null}</>;
 }
 
-function TurnstileWidget({ siteKey, action, onToken }: { siteKey: string; action?: string; onToken: (token: string) => void }) {
+function TurnstileWidget({ siteKey, action, onToken }: { siteKey: string; action?: string; onToken: (token: string) => Promise<boolean> }) {
   const container = useRef<HTMLDivElement>(null);
   const onTokenRef = useRef(onToken);
+  const [error, setError] = useState<string | null>(null);
+  const resetWidget = useRef<() => void>(() => undefined);
 
   useEffect(() => {
     onTokenRef.current = onToken;
@@ -79,16 +86,22 @@ function TurnstileWidget({ siteKey, action, onToken }: { siteKey: string; action
     let widgetId: string | null = null;
     let script: HTMLScriptElement | null = null;
 
+    const failed = () => { if (active) setError("Verification could not load. Check your connection and reload the page."); };
     const render = () => {
       const api = window.turnstile;
       if (!active || !api || !container.current || widgetId) return;
+      resetWidget.current = () => { if (active && widgetId) { setError(null); api.reset(widgetId); } };
       widgetId = api.render(container.current, {
         sitekey: siteKey,
         ...(action ? { action } : {}),
         // Managed mode stays quiet unless Turnstile needs the visitor to act.
         appearance: "interaction-only",
-        callback: (token) => onTokenRef.current(token),
-        "error-callback": () => undefined,
+        callback: (token) => {
+          void onTokenRef.current(token).then(ok => {
+            if (active && !ok) setError("Guest access could not start. Try verification again or open Settings.");
+          });
+        },
+        "error-callback": () => { if (active) setError("Verification failed. Please try again."); },
         "expired-callback": () => {
           if (widgetId && window.turnstile) window.turnstile.reset(widgetId);
         },
@@ -107,16 +120,18 @@ function TurnstileWidget({ siteKey, action, onToken }: { siteKey: string; action
         document.head.append(script);
       }
       script.addEventListener("load", render);
+      script.addEventListener("error", failed);
     }
 
     return () => {
       active = false;
       script?.removeEventListener("load", render);
+      script?.removeEventListener("error", failed);
       if (widgetId && window.turnstile) window.turnstile.remove(widgetId);
     };
   }, [action, siteKey]);
 
-  return <div ref={container} className="fixed bottom-2 right-2 z-[60]" />;
+  return <div className="fixed bottom-2 right-2 z-[60] max-w-sm rounded-card bg-card p-2"><div ref={container} />{error ? <p role="alert">{error} <button type="button" onClick={() => resetWidget.current()} className="underline">Retry verification</button></p> : null}</div>;
 }
 
 export function AccessUnavailable() {

@@ -31,7 +31,9 @@ Every cloud action requires an authenticated learner; there is no default learne
 The app opens immediately and automatically requests a guest session through
 `POST /api/access/guest`. When configured, Turnstile is verified on the server
 before enrollment. Production enrollment refuses missing verification keys.
-At most three guests per IP can be created per UTC day, recorded atomically in
+The configurable daily guest cap (default three, maximum fifty) uses IPv4 addresses
+and IPv6 /64 networks. Desktop enrollment also has a global rolling hourly cap
+(default twenty, counting all guest enrollments). Limits are recorded atomically in
 SQLite; only an explicitly trusted proxy can supply `CF-Connecting-IP`.
 
 Settings accepts a browser-held OpenRouter key through `POST /api/access/byok`.
@@ -57,7 +59,7 @@ Three independent limits protect the operator's API credits:
 
 Guests have 30 checks, a separate 30-operation detector allowance, three practice
 sessions and 300 audio seconds per UTC day. Owner funding expires at
-`OWNER_FUNDED_UNTIL` (default `2026-11-09T08:00:00Z`). After a quota, ceiling or
+`OWNER_FUNDED_UNTIL` when explicitly configured; there is no default expiry. After a quota, ceiling or
 expiry, the action points to Settings so a visitor can use their own key.
 
 Before a model call, `reserve()` runs in one `BEGIN IMMEDIATE` transaction: it checks the kill switch, the learner quota and `reserved + actual + maxCost <= ceiling`, then inserts a reservation. `maxCost` is an upper bound from the bounded input size, the role's explicit

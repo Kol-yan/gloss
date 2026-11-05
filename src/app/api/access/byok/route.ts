@@ -1,3 +1,4 @@
+import { isProviderKey, PROVIDER_KEY_MESSAGE } from "@/shared/provider-key";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { requireEmptyAccessBody } from "@/server/auth/access-body";
@@ -8,7 +9,7 @@ import { getSessionCookieName, SESSION_TTL_SECONDS } from "@/server/auth/session
 import { learnerStatus } from "@/server/auth/status";
 import { getConfig } from "@/server/config";
 import { errorResponse, jsonError } from "@/server/http";
-import { PROVIDER_KEY_HEADER, providerKey } from "@/server/models/access";
+import { PROVIDER_KEY_HEADER } from "@/server/models/access";
 
 const limitEnrollments = createEnrollmentLimiter();
 
@@ -16,7 +17,9 @@ export async function POST(request: Request) {
   try {
     if (!isSameOriginPost(request)) return jsonError("invalid_request", 403);
     await requireEmptyAccessBody(request);
-    providerKey(request.headers.get(PROVIDER_KEY_HEADER));
+    if (!isProviderKey(request.headers.get(PROVIDER_KEY_HEADER) ?? "")) {
+      return jsonError("invalid_request", 400, PROVIDER_KEY_MESSAGE);
+    }
     const store = await cookies();
     const cookieName = getSessionCookieName(request);
     const currentToken = store.get(cookieName)?.value;

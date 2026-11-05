@@ -54,6 +54,13 @@ function insertByokLearner(db: TempDb["db"]): string {
 const flush = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe("period cap and expiry", () => {
+  it("has no implicit funding expiry when the optional setting is absent", () => {
+    const learner = insertLearner(temp.db);
+    const config = cfg({ ownerFundedUntil: undefined });
+    const now = new Date("2100-01-01T00:00:00.000Z");
+    expect(getBudgetStatus({ db: temp.db, now, config }).expired).toBe(false);
+    expect(() => reserve(input(learner, "no-expiry"), { db: temp.db, now, config })).not.toThrow();
+  });
   it("reports period totals and expiry in status", () => {
     const learner = insertLearner(temp.db);
     const config = cfg();

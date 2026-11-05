@@ -82,12 +82,12 @@ describe("public BYOK access", () => {
 
   it("requires a valid key and switches a hosted learner to BYOK in place", async () => {
     const absent = await enrollRoute(request("/api/access/byok", {}, null));
-    expect(ApiError.parse(await absent.json()).error.code).toBe("ai_disabled");
+    expect(ApiError.parse(await absent.json()).error).toMatchObject({ code: "invalid_request", message: expect.stringContaining("sk-or-v1-") });
     const hosted = login();
     seedExpression(hosted.learner.id);
     session.cookie = hosted.sessionToken;
     const missingKey = await enrollRoute(request("/api/access/byok", {}, null));
-    expect(ApiError.parse(await missingKey.json()).error.code).toBe("ai_disabled");
+    expect(ApiError.parse(await missingKey.json()).error.code).toBe("invalid_request");
     expect(db().prepare("SELECT funding_source FROM learners WHERE id = ?").get(hosted.learner.id))
       .toEqual({ funding_source: "hosted" });
 

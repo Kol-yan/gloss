@@ -14,8 +14,8 @@ import { errorResponse, jsonError } from "@/server/http";
 // The desktop app creates the same guest learner as a first visit to the
 // website, without Turnstile: it cannot show the widget. The same per-IP daily
 // limit and the same owner spend caps still apply, and a reachable cap still
-// refuses the new guest. The app sends an empty JSON body. Each app launch
-// creates a fresh guest workspace; the app keeps the session it received.
+// refuses the new guest. The app sends an empty JSON body and persists the
+// returned session across launches; enrollment is only needed without a session.
 
 const UNAVAILABLE_MESSAGE = "Free guest access is unavailable right now. Add your own OpenRouter key in Settings to keep going.";
 
@@ -33,10 +33,12 @@ export async function POST(request: Request) {
     const ipHash = guestClientIpHash(request, config);
     let redemption;
     try {
-      redemption = createGuestSession(ipHash, { config, now });
+      redemption = createGuestSession(ipHash, { config, now, desktop: true });
     } catch (error) {
       if (error instanceof RateLimitedError) {
-        return jsonError("rate_limited", 429, "Free guest access is limited for today. Add your own OpenRouter key in Settings to keep going.");
+        const response = jsonError("rate_limited", 429, "Free guest access is busy or limited today. Please try later, or add your own OpenRouter key in Settings.");
+        response.headers.set("Retry-After", String(Math.ceil(error.retryAfterMs / 1000)));
+        return response;
       }
       throw error;
     }

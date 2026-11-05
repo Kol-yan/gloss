@@ -1,3 +1,5 @@
+import { isProviderKey } from "@/shared/provider-key";
+export { isProviderKey } from "@/shared/provider-key";
 import type { MeResponse } from "@/shared/contracts";
 
 const STORAGE_KEY = "gloss.openrouter-key";
@@ -77,11 +79,6 @@ export function setCurrentSession(session: MeResponse | null) {
     sessionRevision: snapshot.sessionRevision + (identityChanged ? 1 : 0),
     learnerRevision: snapshot.learnerRevision + (learnerChanged ? 1 : 0),
   });
-}
-
-export function isProviderKey(value: string) {
-  const key = value.trim();
-  return key.length >= 16 && key.length <= 512 && /^[\x21-\x7e]+$/.test(key);
 }
 
 export function saveProviderKey(value: string) {

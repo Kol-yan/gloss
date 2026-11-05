@@ -1,3 +1,4 @@
+import { isProviderKey } from "@/shared/provider-key";
 import type { DatabaseSync } from "node:sqlite";
 import type { Learner } from "../auth/sessions";
 import type { AppConfig } from "../config";
@@ -25,7 +26,7 @@ export function fundingSource(learnerId: string, db: DatabaseSync = getDb()): Fu
 
 export function providerKey(value: string | null | undefined): string {
   const key = value?.trim() ?? "";
-  if (!/^sk-or-v1-[A-Za-z0-9_-]{16,512}$/.test(key)) throw new AiDisabledError();
+  if (!isProviderKey(key)) throw new AiDisabledError();
   return key;
 }
 

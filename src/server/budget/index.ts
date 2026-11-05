@@ -29,7 +29,6 @@ import type { FundingSource } from "../models/access";
 import { queueSpendAlertCheck } from "./alerts";
 
 export const DEFAULT_PERIOD_BUDGET_MICROS = 25_000_000;
-export const DEFAULT_OWNER_FUNDED_UNTIL = "2026-11-09T08:00:00Z";
 
 export interface BudgetDeps extends ServerDeps {
   config?: AppConfig;
@@ -485,7 +484,8 @@ export function readPeriodCeiling(config: AppConfig): number {
 
 export function readFundedUntilMs(config: AppConfig): number {
   const raw = config.ownerFundedUntil;
-  const text = raw ?? DEFAULT_OWNER_FUNDED_UNTIL;
+  if (raw === undefined) return Number.POSITIVE_INFINITY;
+  const text = raw;
   const ms = Date.parse(text);
   if (!Number.isFinite(ms)) throw new RangeError("ownerFundedUntil must be a valid ISO date string");
   return ms;

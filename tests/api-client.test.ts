@@ -9,7 +9,7 @@ const ME: MeResponse = {
   aiEnabled: true,
   quotas: { proofread: { used: 1, limit: 20 }, detect: { used: 0, limit: 20 }, evaluate: { used: 0, limit: 30 }, asrSeconds: { used: 0, limit: 600 } },
 };
-const VISITOR_KEY = "example-openrouter-visitor-key";
+const VISITOR_KEY = "sk-or-v1-" + "visitor".repeat(8);
 let stored: Map<string, string>;
 let browser: EventTarget & { localStorage: { getItem: ReturnType<typeof vi.fn>; setItem: ReturnType<typeof vi.fn>; removeItem: ReturnType<typeof vi.fn> } };
 
